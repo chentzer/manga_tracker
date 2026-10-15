@@ -424,17 +424,26 @@ so nothing renders blank.
   (it only actually applies insets on iOS), which is why the header
   used to collide with the status bar/notch on Android phones. A gear
   icon in the bottom-right corner of the Library tab opens a small
-  Settings sheet with a single toggle so far — **Show debug tools** —
-  which controls whether each browsing tab shows its debug log bar and
-  "Capture HTML" button (see `MediaWebView.js`); off by default so the
-  normal UI stays clean, persisted via `getSetting()`/`setSetting()` in
-  `db.js` so it survives app restarts. Also coordinates the **View in
+  Settings sheet with two toggles: **App lock** (see `AppLock.js` below)
+  and **Show debug tools**, which controls whether each browsing tab
+  shows its debug log bar and "Capture HTML" button (see
+  `MediaWebView.js`; off by default so the normal UI stays clean). Both
+  are persisted via `getSetting()`/`setSetting()` in `db.js` so they
+  survive app restarts. Also coordinates the **View in
   Library** button (see `MediaWebView.js`): `handleViewInLibrary()`
   takes the `${mediaType}:${sourceId}` key that button passes up, stores
   it as `libraryFocusKey`, and switches to the Library tab — `EntryList`
   picks that key up via its `focusKey` prop and opens the matching
   entry's detail sheet directly.
-- `src/AppLock.js` — requires biometric/device-passcode authentication
+- `src/AppLock.js` — the optional app lock, switched by **Settings →
+  App lock** (the `appLockEnabled` setting). Turning it on or off asks
+  for the fingerprint/PIN first and takes effect immediately. It's off
+  on a fresh install; `initDb()` turns it on for an update from a build
+  that always locked (detected by the `entries` table already
+  existing), and never changes it after that. AppLock calls `initDb()`
+  itself during its first render, since it needs the setting before
+  anything else runs. When on, it requires biometric/device-passcode
+  authentication
   before showing any app content, and re-locks whenever the app returns
   from the background (so a screenshot in the recent-apps switcher, or
   someone picking up an already-open phone, isn't enough to see what's

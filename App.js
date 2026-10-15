@@ -7,7 +7,7 @@ import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
 import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup } from './src/backup';
 import { MEDIA_TYPE_LIST } from './src/mediaTypes';
-import AppLock from './src/AppLock';
+import AppLock, { useAppLockSetting } from './src/AppLock';
 
 // Tabs = one per media type (from config, so this never needs manual
 // updates when a type is added) + a unified library at the end.
@@ -31,6 +31,8 @@ function AppContent() {
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  // Settings → App lock; the setting lives in AppLock (src/AppLock.js).
+  const { lockEnabled, changeLockEnabled } = useAppLockSetting();
   // Set when a "View in Library" button is tapped from a browsing tab —
   // switches to the Library tab and tells it which entry to open.
   // Cleared once EntryList has consumed it, so it doesn't re-trigger on
@@ -226,6 +228,16 @@ function AppContent() {
         <View style={styles.settingsOverlay}>
           <View style={styles.settingsCard}>
             <Text style={styles.settingsTitle}>Settings</Text>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>App lock</Text>
+                <Text style={styles.settingsHint}>
+                  Asks for your fingerprint or phone PIN when the app opens and whenever you come
+                  back to it. Turning this on or off asks for it too.
+                </Text>
+              </View>
+              <Switch value={lockEnabled} onValueChange={changeLockEnabled} />
+            </View>
             <View style={styles.settingsRow}>
               <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>Show debug tools</Text>
@@ -311,6 +323,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  settingsRowGap: { marginBottom: 16 },
   settingsRowText: { flex: 1 },
   settingsLabel: { fontSize: 15, fontWeight: '600', color: '#222' },
   settingsHint: { fontSize: 12, color: '#888', marginTop: 4 },

@@ -1,17 +1,33 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Text, TouchableOpacity, StyleSheet, AppState } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback, useContext, useMemo, createContext } from 'react';
+import { Text, TouchableOpacity, StyleSheet, AppState, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { isRelockSuppressed } from './relockGuard';
+import { isRelockSuppressed, suppressNextRelock } from './relockGuard';
+import { initDb, getSetting, setSetting } from './db';
 
-// Wraps the whole app: requires biometric/device-passcode auth before
-// showing anything, and re-locks whenever the app goes to the
-// background and comes back — a screenshot in the recent-apps switcher
-// or someone picking up an unlocked phone shouldn't be enough to see
-// what's tracked here.
+// { lockEnabled, changeLockEnabled } for the Settings → App lock switch.
+const AppLockSettingContext = createContext(null);
+
+export function useAppLockSetting() {
+  return useContext(AppLockSettingContext);
+}
+
+// Wraps the whole app. With App lock on (Settings; the appLockEnabled
+// setting) it requires biometric/device-passcode auth before showing
+// anything, and re-locks whenever the app goes to the background and
+// comes back — a screenshot in the recent-apps switcher or someone
+// picking up an unlocked phone shouldn't be enough to see what's tracked
+// here. With App lock off it just shows the app.
 export default function AppLock({ children }) {
-  const [locked, setLocked] = useState(true);
-  const [checking, setChecking] = useState(true);
+  // Read before the first render decides what to show. initDb (idempotent)
+  // has to run first, since it sets the default.
+  const [lockEnabled, setLockEnabled] = useState(() => {
+    initDb();
+    return getSetting('appLockEnabled', '0') === '1';
+  });
+  const lockEnabledRef = useRef(lockEnabled);
+  const [locked, setLocked] = useState(lockEnabled);
+  const [checking, setChecking] = useState(lockEnabled);
   const [canUseAuth, setCanUseAuth] = useState(true);
   const [statusMessage, setStatusMessage] = useState(null);
   const [failedOnce, setFailedOnce] = useState(false);
@@ -71,8 +87,48 @@ export default function AppLock({ children }) {
   }, []);
 
   useEffect(() => {
-    attemptUnlock();
+    if (lockEnabledRef.current) attemptUnlock();
   }, [attemptUnlock]);
+
+  // Settings → App lock. Turning it on or off both need the fingerprint/
+  // PIN first, so someone handed the unlocked phone can't switch it off.
+  // Takes effect straight away; the app stays unlocked either way.
+  const changeLockEnabled = useCallback(async (value) => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
+      if (!isEnrolled) {
+        Alert.alert(
+          'No screen lock',
+          "App lock uses your phone's fingerprint, face, PIN, pattern or password. Set one up in your phone's Settings (Security / Lock screen) first."
+        );
+        return;
+      }
+      // The prompt briefly counts as leaving the app.
+      suppressNextRelock();
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: value ? 'Turn on app lock' : 'Turn off app lock',
+        disableDeviceFallback: false,
+        cancelLabel: 'Cancel',
+      });
+      // Covers the return from the prompt, however long it was up.
+      suppressNextRelock(1500);
+      if (!result.success) {
+        if (!['user_cancel', 'system_cancel', 'app_cancel'].includes(result.error)) {
+          Alert.alert("Couldn't confirm it's you", `App lock wasn't changed (${result.error || 'failed'}).`);
+        }
+        return;
+      }
+      setSetting('appLockEnabled', value ? '1' : '0');
+      lockEnabledRef.current = value;
+      setCanUseAuth(true);
+      setLockEnabled(value);
+    } catch (err) {
+      Alert.alert("Couldn't confirm it's you", `App lock wasn't changed (${err.message}).`);
+    }
+  }, []);
+
+  const settingValue = useMemo(() => ({ lockEnabled, changeLockEnabled }), [lockEnabled, changeLockEnabled]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -86,7 +142,7 @@ export default function AppLock({ children }) {
       // benign via suppressNextRelock() — that dialog briefly registers
       // as "inactive" in AppState even though nothing actually left the
       // app.
-      if (wasBackgrounded && canUseAuth && !isRelockSuppressed()) {
+      if (wasBackgrounded && lockEnabledRef.current && canUseAuth && !isRelockSuppressed()) {
         setLocked(true);
         setFailedOnce(false);
         setStatusMessage(null);
@@ -125,7 +181,7 @@ export default function AppLock({ children }) {
     );
   }
 
-  return children;
+  return <AppLockSettingContext.Provider value={settingValue}>{children}</AppLockSettingContext.Provider>;
 }
 
 const styles = StyleSheet.create({

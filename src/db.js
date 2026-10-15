@@ -8,6 +8,13 @@ const db = SQLite.openDatabaseSync('manga.db');
 // missing, slow to load, or coincidentally shared between two different
 // items, so they're not safe to dedup on.
 export function initDb() {
+  // Checked before anything is created: an existing `entries` table means
+  // this is an update of an install, not a fresh one (see appLockEnabled
+  // below).
+  const existingInstall = !!db.getFirstSync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'entries'"
+  );
+
   db.execSync(`
     CREATE TABLE IF NOT EXISTS entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +73,12 @@ export function initDb() {
       value TEXT
     );
   `);
+  // App lock (AppLock.js): off on a fresh install. Builds before this
+  // setting existed always locked, so an update from one of those keeps
+  // the lock on. Once set, it's only ever changed from Settings.
+  if (getSetting('appLockEnabled') === null) {
+    setSetting('appLockEnabled', existingInstall ? '1' : '0');
+  }
 }
 
 // Values are always stored/read as strings — callers compare/convert as
