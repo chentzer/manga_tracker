@@ -259,7 +259,7 @@ function getHostname(url) {
   return match ? match[1].toLowerCase().replace(/^www\./, '') : null;
 }
 
-// A media type is either single-source (manga, video — url pattern,
+// A media type is either single-source (manga, anime — url pattern,
 // extraction, etc live directly on the config) or multi-source (e.g. otherCategory —
 // a `sources` array, one entry per site, since different sites carry
 // overlapping-but-not-identical catalogs and need their own extraction
@@ -657,6 +657,18 @@ export default function MediaWebView({ config, isSignedInToGoogle, showDebugTool
       // Re-check right before writing, closing the gap between the
       // nav-state check and this async step.
       if (entryExists(sourceId, config.key)) {
+        pendingSourceId.current = null;
+        pendingPageUrl.current = null;
+        inFlightSourceIds.current.delete(sourceId);
+        return;
+      }
+
+      // extractMetadataJs can decline a page that matches urlRegex but
+      // doesn't carry the details (e.g. a manga reader page with no
+      // cover) by posting { skip: '<reason>' }; the entry gets recorded
+      // from a page that does.
+      if (payload.skip) {
+        logDebug(`Matched ${sourceId} — ${payload.skip}, not recording from this page.`);
         pendingSourceId.current = null;
         pendingPageUrl.current = null;
         inFlightSourceIds.current.delete(sourceId);

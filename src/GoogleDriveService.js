@@ -9,7 +9,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
 let signedIn = false;
 let cachedRootFolderId = null;
-const cachedTypeFolderIds = {}; // e.g. { manga: 'abc123', video: 'def456' }
+const cachedTypeFolderIds = {}; // e.g. { manga: 'abc123', anime: 'def456' }
 let configured = false;
 
 // expo-auth-session's generic browser-redirect flow is no longer a
@@ -128,7 +128,7 @@ async function findOrCreateFolder(name, parentId = null) {
 }
 
 // Root "MangaTracker" folder, with one subfolder per media type
-// (e.g. MangaTracker/manga, MangaTracker/video) so covers stay organized.
+// (e.g. MangaTracker/manga, MangaTracker/anime) so covers stay organized.
 async function getOrCreateTypeFolder(mediaType) {
   if (cachedTypeFolderIds[mediaType]) return cachedTypeFolderIds[mediaType];
 
@@ -155,7 +155,7 @@ async function findFile(name, parentId) {
 // Creates or overwrites a CSV file at the root of the MangaTracker Drive
 // folder — one file per fileName, always up to date, rather than a
 // growing pile of dated backups. Called once per media type (e.g.
-// "manga-backup.csv", "video-backup.csv") so each type's data lives in
+// "manga-backup.csv", "anime-backup.csv") so each type's data lives in
 // its own file rather than one combined one. Returns the file id.
 export async function backupCsvToDrive(csvContent, fileName = 'library-backup.csv') {
   const token = await getToken();

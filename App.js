@@ -188,7 +188,7 @@ function AppContent() {
         {/* All tabs stay mounted at all times — switching tabs only
             toggles `display`, never unmounts anything. Previously each
             MediaWebView was conditionally rendered (and given a `key`
-            that changed between manga/video), which destroyed and
+            that changed between manga/anime), which destroyed and
             recreated the webview's native view — losing scroll
             position and navigation history — every single time you
             switched away and back, including via the Library tab. */}

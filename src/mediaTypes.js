@@ -15,33 +15,40 @@
 // one (e.g. an English title alongside an original Japanese title).
 // Leave it out (or send null) if a type doesn't have a second title.
 
+import Constants from 'expo-constants';
+
+// Each tab's site comes from .env (MANGA_SITE_URL / ANIME_SITE_URL) via
+// app.config.js, so the real sites never have to be committed. Falls
+// back to the placeholder domains when .env doesn't set them.
+const extra = Constants.expoConfig?.extra || {};
+const MANGA_SITE_URL = extra.mangaSiteUrl || 'https://your-manga-site.example.com';
+const ANIME_SITE_URL = extra.animeSiteUrl || 'https://your-anime-site.example.com';
+
 export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
     label: 'Manga',
     // Labels shown for the read-status toggle/badge on this type's
-    // entries — "Read" makes sense for manga; video uses "Watched"
+    // entries — "Read" makes sense for manga; anime uses "Watched"
     // instead further down. The underlying stored value is always
     // 'read' or 'want_to_read' regardless of type; only the display
     // wording changes.
     readStatusLabels: { read: 'Read', want: 'Want to Read' },
-    // Set this to the actual site you browse.
-    startUrl: 'https://your-manga-site.example.com',
-    // Example pattern: matches https://your-manga-site.example.com/title/12345/
-    // (gallery page) and .../title/12345/1/ (reader page) alike -> capture
-    // group 1 = "12345", capture group 2 = the page number when present
-    // (e.g. "3" in .../title/12345/3/). Adjust the path segment ("title") and
-    // structure to match your actual site's URLs.
-    urlRegex: /^https?:\/\/[^/]+\/title\/(\d+)\/?(\d+)?/,
+    // Set MANGA_SITE_URL in .env to the site you browse.
+    startUrl: MANGA_SITE_URL,
+    // Example pattern: matches .../title/<id>-<slug> (series page) and
+    // .../title/<id>-<slug>/<chapterId>-chapter-<n> (reader page) alike,
+    // with or without the slug -> capture group 1 = the series id,
+    // capture group 2 = the chapter number on reader pages. Adjust the
+    // path segments to match your actual site's URLs.
+    urlRegex: /^https?:\/\/[^/]+\/title\/([a-z0-9]+)(?:-[^/?#]*)?(?:\/\d+-chapter-([\d.]+))?/i,
     // Reverse of urlRegex/extractId — turns a manga id typed in manually
-    // into a real URL the webview can navigate to. Update the domain to
-    // match startUrl above.
-    buildUrlFromId: (id) => `https://your-manga-site.example.com/title/${id}/`,
+    // into a real URL the webview can navigate to.
+    buildUrlFromId: (id) => `${MANGA_SITE_URL}/title/${id}`,
     // Used by the "Save Page Image" feature to name the saved file as
-    // "code -- page" (e.g. "12345 -- 3"). Returns null when the URL
-    // didn't include a page number (e.g. the gallery page), in which
-    // case the caller falls back to just the code.
-    extractPageNumber: (match) => match[2] || null,
+    // "code -- chN" (e.g. "abc12 -- ch60"). Returns null on the series
+    // page, in which case the caller falls back to just the code.
+    extractPageNumber: (match) => (match[2] ? `ch${match[2]}` : null),
     extractId: (match) => match[1],
     // If your site shows popup/redirect ads, uncomment this to block
     // any navigation attempt to a domain other than the one above —
@@ -69,75 +76,73 @@ export const MEDIA_TYPES = {
     // Chrome UA usually fixes this — uncomment and adjust the Chrome
     // version if needed:
     // userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-    // Title/thumbnail come from Open Graph meta tags (og:title, og:image)
-    // where available — most sites set these for link-preview purposes,
-    // and they're far more reliable than guessing at DOM elements (which
-    // can easily grab a site logo instead of the actual cover). Falls
-    // back to a titled <img> or <h1> if those meta tags are missing.
+    // Reader (chapter) pages don't show the cover or author, so this
+    // only records from the series page: deeper paths post `skip`, which
+    // tells MediaWebView not to save anything from this page. Many manga
+    // sites are single-page apps that render after the URL changes, so
+    // it waits until the <h1> and the cover image are there (and agree on
+    // the title) before reading anything.
     //
-    // Author/artist extraction below is written for a specific example
-    // site structure (metadata fields as
-    // <div class="info-row">Artists: <a><span class="name">X</span></a></div>)
-    // — this WILL need adjusting to match your actual site's DOM. Inspect
-    // the page (right-click the author's name → Inspect) and update the
-    // getFieldValue selectors, or replace this section with a simple
-    // querySelector for your site's author element.
+    // Selectors are generic guesses that suit many sites — adjust them to
+    // your site's DOM (right-click the element → Inspect):
+    // - title: the page's <h1>, then og:title
+    // - cover: an <img> inside an element whose class mentions "poster",
+    //   then og:image
+    // - altTitle: the first <li> inside an element whose class mentions
+    //   "alts" (alternative titles)
+    // - author: links into the site's author/artist search
     extractMetadataJs: `
       (function() {
-        var ogTitle = document.querySelector('meta[property="og:title"]');
-        var ogImage = document.querySelector('meta[property="og:image"]');
-
-        function findTitledImage() {
-          var imgs = document.querySelectorAll('img');
-          for (var i = 0; i < imgs.length; i++) {
-            if (imgs[i].alt && imgs[i].alt.trim().length > 0) return imgs[i];
-          }
-          return imgs[0] || null;
+        if (location.pathname.split('/').filter(Boolean).length > 2) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
+          return;
         }
+        var attempts = 0;
+        function trySend() {
+          var h1 = document.querySelector('h1');
+          var poster = document.querySelector('[class*="poster"] img');
+          var h1Text = h1 ? h1.textContent.trim() : '';
+          var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
 
-        function getFieldValue(label) {
-          var containers = document.querySelectorAll('.info-row');
-          for (var i = 0; i < containers.length; i++) {
-            if (containers[i].textContent.trim().indexOf(label) === 0) {
-              var names = containers[i].querySelectorAll('.name');
-              return Array.prototype.map
-                .call(names, function (n) { return n.textContent.trim(); })
-                .join(', ') || null;
-            }
+          attempts++;
+          if (!ready && attempts < 20) {
+            setTimeout(trySend, 300);
+            return;
           }
-          return null;
+
+          var ogTitle = document.querySelector('meta[property="og:title"]');
+          var ogImage = document.querySelector('meta[property="og:image"]');
+          var title = h1Text || (ogTitle && ogTitle.content) || null;
+          var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
+            (ogImage && ogImage.content) || null;
+
+          var altEl = document.querySelector('[class*="alts"] li');
+          var altTitle = altEl ? altEl.textContent.trim() : null;
+          if (altTitle === title) altTitle = null;
+
+          var names = [];
+          var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
+          for (var i = 0; i < links.length; i++) {
+            var name = links[i].textContent.trim();
+            if (name && names.indexOf(name) === -1) names.push(name);
+          }
+
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            imageUrl: imageUrl,
+            title: title,
+            altTitle: altTitle,
+            author: names.join(', ') || null,
+          }));
         }
-
-        var author = getFieldValue('Artists') || getFieldValue('Groups');
-
-        var title = (ogTitle && ogTitle.content) || null;
-        var imageUrl = (ogImage && ogImage.content) || null;
-
-        if (!title || !imageUrl) {
-          var fallbackImg = findTitledImage();
-          var h1 = document.querySelector('h1') || document.querySelector('.manga-title');
-          if (!title) {
-            title = (fallbackImg && fallbackImg.alt && fallbackImg.alt.trim())
-              || (h1 ? h1.textContent.trim() : null);
-          }
-          if (!imageUrl && fallbackImg) {
-            imageUrl = fallbackImg.src || null;
-          }
-        }
-
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          imageUrl: imageUrl,
-          title: title,
-          author: author,
-        }));
+        trySend();
       })();
       true;
     `,
   },
 
-  video: {
-    key: 'video',
-    label: 'Videos',
+  anime: {
+    key: 'anime',
+    label: 'Anime',
     // "Watched" instead of manga's "Read" — same underlying stored
     // value ('read'/'want_to_read'), just different wording per type.
     readStatusLabels: { read: 'Watched', want: 'Want to Watch' },
@@ -149,72 +154,69 @@ export const MEDIA_TYPES = {
     // for fullscreen) which can fire alongside this — see
     // buildDoubleTapSeekJs in MediaWebView.js for details.
     doubleTapSeekSeconds: 5,
-    // Set this to the actual site you browse.
-    startUrl: 'https://your-video-site.example.com',
-    // Example pattern: matches your-video-site.example.com/watch?v=SOMETHING
-    // (and any other query params before/after it) -> capture group 1 =
-    // "SOMETHING". Adjust the param name ("v") to match your site.
-    urlRegex: /[?&]v=([^&]+)/,
-    extractId: (match) => decodeURIComponent(match[1]),
+    // Set ANIME_SITE_URL in .env to the site you browse.
+    startUrl: ANIME_SITE_URL,
+    // Example pattern: matches .../watch/<id>/<slug>?ep=3 (episode page)
+    // and .../info/<id>/<slug> (series page) alike -> capture group 1 =
+    // the series id, so every episode of a series is one entry. Adjust
+    // the path segments to match your site's URLs.
+    urlRegex: /^https?:\/\/[^/]+\/(?:watch|info)\/([A-Za-z0-9_-]+)/,
+    extractId: (match) => match[1],
+    // Reverse of urlRegex/extractId, for a series id typed in manually.
+    buildUrlFromId: (id) => `${ANIME_SITE_URL}/watch/${id}`,
     // If your site sometimes shows a "Continue"/age-gate/ad interstitial
-    // before the real page loads (a different URL than the final video,
-    // so URL-pattern matching correctly ignores it — but extraction then
-    // can't start until it's dismissed), uncomment this and set it to
-    // the button's exact visible text. It gets auto-clicked the moment
-    // it appears, rather than waiting on manual timing.
+    // before the real page loads, uncomment this and set it to the
+    // button's exact visible text — it gets auto-clicked the moment it
+    // appears.
     // autoConfirmButtonText: 'Continue',
-    // If the interstitial instead shows as a SAME-PAGE overlay on the
-    // real video's own URL (rather than a separate pre-page), URL-
-    // pattern matching alone can't tell "gate showing" apart from "gate
-    // dismissed" — extraction would fire immediately and save
-    // wrong/incomplete data regardless of the overlay. If auto-clicking
-    // above isn't reliable for your site (e.g. you can't inspect the
-    // exact button), this is the more robust fallback: list any
-    // distinctive substring found in the URL while the gate is showing
-    // (check the debug log's "Checking URL: ..." lines to find one) and
-    // extraction will skip entirely rather than save bad data, waiting
-    // for the next URL change once you're actually past it.
+    // If the interstitial instead shows as an overlay on the real page's
+    // own URL, list a substring found in the URL while it's showing
+    // (check the debug log's "Checking URL: ..." lines) and extraction
+    // will skip until you're past it.
     // interstitialKeywords: ['some-marker-found-in-the-url'],
-    // Title/thumbnail come primarily from Open Graph meta tags, since many
-    // video sites don't populate <video poster> until playback actually
-    // starts (video loads on demand) — og:image/og:title are set for link
-    // previews and are available immediately on page load. The author
-    // selector below is a generic guess and will likely need adjusting
-    // to your site's actual DOM (inspect the uploader/channel name
-    // element and swap in the right selector). It's also worth checking
-    // whether the author element is present immediately on page load at
-    // all — on some sites it loads in via a secondary request slightly
-    // after the initial render, and can take even longer if the video
-    // was reached via an autoplay/"up next" transition rather than a
-    // fresh page load (some sites swap the video client-side without a
-    // full navigation, in which case even the meta tags can lag).
-    // Everything is re-read fresh on every retry — not just the author
-    // — so a late-arriving page update is reflected in the
-    // title/thumbnail too, not just whether the author was eventually
-    // found.
+    // Title comes from the page's <h1> (usually the English title) and
+    // the thumbnail from og:image. og:title often holds the original/
+    // romanized title instead, so it's saved as altTitle when it differs
+    // (minus a leading "Watch "). Many anime sites are single-page apps
+    // that swap the page client-side, so this waits until the <h1> is
+    // there and og:url points at the series in the current URL before
+    // reading anything — otherwise it could save the previous series'
+    // details. No author for anime.
     extractMetadataJs: `
       (function() {
         var attempts = 0;
         function trySend() {
           var ogTitle = document.querySelector('meta[property="og:title"]');
           var ogImage = document.querySelector('meta[property="og:image"]');
-          var video = document.querySelector('video');
-          var authorEl = document.querySelector('.uploader a') || document.querySelector('[itemprop="author"]');
-
-          var title = (ogTitle && ogTitle.content) || document.title || null;
-          var imageUrl = (ogImage && ogImage.content) || (video && video.poster) || null;
-          var author = authorEl ? authorEl.textContent.trim() : null;
+          var ogUrl = document.querySelector('meta[property="og:url"]');
+          var h1 = document.querySelector('h1');
+          var seriesId = location.pathname.split('/')[2] || '';
+          var ready = h1 && h1.textContent.trim() &&
+            (!ogUrl || !seriesId || ogUrl.content.indexOf(seriesId) !== -1);
 
           attempts++;
-          if (!author && attempts < 10) {
+          if (!ready && attempts < 20) {
             setTimeout(trySend, 300);
             return;
           }
 
+          var title = h1 ? h1.textContent.trim() : null;
+          var altTitle = ogTitle && ogTitle.content
+            ? ogTitle.content.replace(/^Watch +/i, '').trim()
+            : null;
+          if (!title) {
+            title = altTitle || document.title || null;
+            altTitle = null;
+          }
+          if (altTitle === title) altTitle = null;
+          var video = document.querySelector('video');
+          var imageUrl = (ogImage && ogImage.content) || (video && video.poster) || null;
+
           window.ReactNativeWebView.postMessage(JSON.stringify({
             imageUrl: imageUrl,
             title: title,
-            author: author,
+            altTitle: altTitle,
+            author: null,
           }));
         }
         trySend();
