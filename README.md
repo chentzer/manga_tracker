@@ -67,7 +67,11 @@ are illustrative starting points you'll adapt to whatever you actually use:
    video's title (which uses `og:title`/`document.title` and often works
    without changes); everything else needs inspecting the real page DOM
    (right-click the element → Inspect) and swapping in the right selector.
-4. **Google Drive setup (for cloud sync — walkthrough below).**
+4. **`reverseSearch.url`** (manga, optional) — the reverse image search
+   site the Reverse button opens (placeholder:
+   `your-reverse-search.example.com`). Remove the `reverseSearch` block
+   to hide the button.
+5. **Google Drive setup (for cloud sync — walkthrough below).**
 
 ## Setting up Google Drive sync (step by step)
 
@@ -189,7 +193,14 @@ so nothing renders blank.
   App.js) switches to the Library tab and opens that exact entry's
   detail sheet directly, clearing any active filters that might
   otherwise hide it, rather than leaving you to find it in the list
-  yourself. A "Save Page Image" button
+  yourself. On types with `reverseSearch` set (Manga in the example), a
+  **Reverse** button beside the code box opens `src/ReverseSearch.js`:
+  the configured reverse image search site in a full-screen window. You
+  pick an image from the gallery there, and tapping a result whose link
+  matches `reverseSearch.resultRegex` (default: the type's `urlRegex`)
+  opens that code, and page if given, in the type's tab. Other links on
+  the search site don't open. A "Save Page Image" button (types with
+  `savePageImage: true` only — Manga in the example)
   grabs the largest currently-rendered image on the page (not necessarily
   the cover — whatever's actually on screen) and saves it straight to the
   phone's photo gallery via `expo-media-library`, named `code -- page`
@@ -424,12 +435,15 @@ so nothing renders blank.
   (it only actually applies insets on iOS), which is why the header
   used to collide with the status bar/notch on Android phones. A gear
   icon in the bottom-right corner of the Library tab opens a small
-  Settings sheet with two toggles: **App lock** (see `AppLock.js` below)
+  Settings sheet with **App lock** (see `AppLock.js` below)
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
-  `MediaWebView.js`; off by default so the normal UI stays clean). Both
-  are persisted via `getSetting()`/`setSetting()` in `db.js` so they
-  survive app restarts. Also coordinates the **View in
+  `MediaWebView.js`; off by default so the normal UI stays clean). Under
+  **Buttons**, switches hide the code search box, **Reverse** and **Save
+  Page Image** on the tabs that have them (all shown by default;
+  `BUTTON_SETTINGS` in App.js). The sheet scrolls when it doesn't fit.
+  Each setting is persisted via `getSetting()`/`setSetting()` in `db.js`
+  so it survives app restarts. Also coordinates the **View in
   Library** button (see `MediaWebView.js`): `handleViewInLibrary()`
   takes the `${mediaType}:${sourceId}` key that button passes up, stores
   it as `libraryFocusKey`, and switches to the Library tab — `EntryList`

@@ -7,6 +7,12 @@ import { entryExists, insertEntry, markSynced, markSyncFailed } from './db';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
+import ReverseSearch from './ReverseSearch';
+
+// Which optional controls to show (Settings → Buttons). Each also needs
+// the type to support it: buildUrlFromId/sources for the code box,
+// reverseSearch and savePageImage in mediaTypes.js.
+const ALL_BUTTONS = { codeSearch: true, reverseSearch: true, savePageImage: true };
 
 // Finds the largest image currently rendered on the page — for a manga
 // reader this is almost always the actual page being read, not a logo
@@ -309,8 +315,16 @@ function getDomainButtonMap(config) {
 // Renders a webview for ONE media type, driven entirely by its config
 // (see src/mediaTypes.js). Adding a new trackable type never touches
 // this file — just add an entry to MEDIA_TYPES.
-export default function MediaWebView({ config, isSignedInToGoogle, showDebugTools, onViewInLibrary }) {
+export default function MediaWebView({
+  config,
+  isSignedInToGoogle,
+  showDebugTools,
+  onViewInLibrary,
+  buttons = ALL_BUTTONS,
+}) {
   const webviewRef = useRef(null);
+  // The Reverse button's search window (ReverseSearch.js).
+  const [reverseVisible, setReverseVisible] = useState(false);
   const pendingSourceId = useRef(null);
   const pendingPageUrl = useRef(null);
   const currentUrlRef = useRef(null); // updated on every navigation, unlike pendingPageUrl
@@ -725,28 +739,53 @@ export default function MediaWebView({ config, isSignedInToGoogle, showDebugTool
     [config, isSignedInToGoogle, checkUrlAndExtract, logDebug]
   );
 
+  const reverseButton =
+    !config.reverseSearch || !config.buildUrlFromId || !buttons.reverseSearch ? null : (
+      <TouchableOpacity style={[styles.manualButton, styles.secondaryButton]} onPress={() => setReverseVisible(true)}>
+        <Text style={styles.manualButtonText}>Reverse</Text>
+      </TouchableOpacity>
+    );
+
+  // A reverse-search result: open that code (and page, if the result
+  // was a single page) in this tab.
+  const handleReverseResult = (code, page) => {
+    setReverseVisible(false);
+    const url = config.buildUrlFromId(code) + (page ? `${page}/` : '');
+    logDebug(`Reverse search: opening ${code}${page ? ` page ${page}` : ''}`);
+    webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
+  };
+
+  // The code box can be hidden in Settings; the bar stays for any buttons
+  // still shown.
+  const showCodeBar = buttons.codeSearch || reverseButton;
+
   return (
     <View style={styles.container}>
-      {config.buildUrlFromId ? (
-        <View style={styles.manualBar}>
-          <TextInput
-            style={styles.manualInput}
-            placeholder={`Enter ${config.label} code…`}
-            placeholderTextColor="#999"
-            value={manualCode}
-            onChangeText={setManualCode}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="default"
-            returnKeyType="go"
-            onSubmitEditing={handleManualSubmit}
-          />
-          <TouchableOpacity style={styles.manualButton} onPress={handleManualSubmit}>
-            <Text style={styles.manualButtonText}>Add</Text>
-          </TouchableOpacity>
+      {config.buildUrlFromId && showCodeBar ? (
+        <View style={[styles.manualBar, !buttons.codeSearch && styles.manualBarButtonsOnly]}>
+          {buttons.codeSearch ? (
+            <>
+              <TextInput
+                style={styles.manualInput}
+                placeholder={`Enter ${config.label} code…`}
+                placeholderTextColor="#999"
+                value={manualCode}
+                onChangeText={setManualCode}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="default"
+                returnKeyType="go"
+                onSubmitEditing={handleManualSubmit}
+              />
+              <TouchableOpacity style={styles.manualButton} onPress={handleManualSubmit}>
+                <Text style={styles.manualButtonText}>Add</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+          {reverseButton}
         </View>
       ) : null}
-      {config.sources ? (
+      {config.sources && buttons.codeSearch ? (
         <View style={styles.manualBar}>
           <TextInput
             style={styles.manualInput}
@@ -766,6 +805,14 @@ export default function MediaWebView({ config, isSignedInToGoogle, showDebugTool
           </TouchableOpacity>
         </View>
       ) : null}
+      {reverseButton ? (
+        <ReverseSearch
+          visible={reverseVisible}
+          config={config}
+          onClose={() => setReverseVisible(false)}
+          onOpenCode={handleReverseResult}
+        />
+      ) : null}
       {currentEntryKey ? (
         <TouchableOpacity
           style={styles.viewInLibraryButton}
@@ -774,15 +821,17 @@ export default function MediaWebView({ config, isSignedInToGoogle, showDebugTool
           <Text style={styles.saveImageButtonText}>📚 View in Library</Text>
         </TouchableOpacity>
       ) : null}
-      <TouchableOpacity
-        style={styles.saveImageButton}
-        onPress={handleSaveCurrentImage}
-        disabled={savingImage}
-      >
-        <Text style={styles.saveImageButtonText}>
-          {savingImage ? 'Saving…' : '⬇ Save Page Image'}
-        </Text>
-      </TouchableOpacity>
+      {config.savePageImage && buttons.savePageImage ? (
+        <TouchableOpacity
+          style={styles.saveImageButton}
+          onPress={handleSaveCurrentImage}
+          disabled={savingImage}
+        >
+          <Text style={styles.saveImageButtonText}>
+            {savingImage ? 'Saving…' : '⬇ Save Page Image'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       {showDebugTools ? (
         <>
           <TouchableOpacity style={styles.captureHtmlButton} onPress={handleCapturePageHtml}>
@@ -899,9 +948,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#e94560',
     borderRadius: 6,
     paddingHorizontal: 14,
+    minHeight: 34,
     justifyContent: 'center',
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
+  secondaryButton: { backgroundColor: '#1f4068' },
+  // Code box hidden in Settings: just the buttons, on the right.
+  manualBarButtonsOnly: { justifyContent: 'flex-end' },
   viewInLibraryButton: {
     backgroundColor: '#1a7a4c',
     paddingVertical: 8,

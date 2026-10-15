@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, Modal, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, Modal, Switch, ScrollView } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initDb, getSetting, setSetting } from './src/db';
 import MediaWebView from './src/MediaWebView';
@@ -25,12 +25,39 @@ export default function App() {
   );
 }
 
+// Settings → Buttons: optional controls on the browsing tabs, each shown
+// unless turned off (stored as `setting` = '0'). Each only appears on
+// tabs whose type supports it (see MediaWebView.js / mediaTypes.js).
+const BUTTON_SETTINGS = [
+  {
+    key: 'codeSearch',
+    setting: 'showCodeSearch',
+    label: 'Code search box',
+    hint: 'The "Enter code" / "Search code" box at the top of each tab.',
+  },
+  {
+    key: 'reverseSearch',
+    setting: 'showReverseSearchButton',
+    label: 'Reverse',
+    hint: 'Find a title from an image (types with reverseSearch set).',
+  },
+  {
+    key: 'savePageImage',
+    setting: 'showSavePageImageButton',
+    label: 'Save Page Image',
+    hint: 'Save the page on screen to the gallery (Manga).',
+  },
+];
+
 function AppContent() {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const [isSignedInToGoogle, setIsSignedInToGoogle] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  // Settings → Buttons: which optional controls the browsing tabs show
+  // (MediaWebView.js). All on unless turned off.
+  const [buttons, setButtons] = useState({ codeSearch: true, reverseSearch: true, savePageImage: true });
   // Settings → App lock; the setting lives in AppLock (src/AppLock.js).
   const { lockEnabled, changeLockEnabled } = useAppLockSetting();
   // Set when a "View in Library" button is tapped from a browsing tab —
@@ -47,6 +74,9 @@ function AppContent() {
   useEffect(() => {
     initDb();
     setShowDebugTools(getSetting('showDebugTools', '0') === '1');
+    setButtons(
+      Object.fromEntries(BUTTON_SETTINGS.map((b) => [b.key, getSetting(b.setting, '1') === '1']))
+    );
     // Restores the last signed-in Google session silently, if there is
     // one — no prompt, no account picker. Without this the app would
     // ask to reconnect Drive on every single launch, which is what was
@@ -59,6 +89,11 @@ function AppContent() {
   const toggleDebugTools = (value) => {
     setShowDebugTools(value);
     setSetting('showDebugTools', value ? '1' : '0');
+  };
+
+  const toggleButton = (button, value) => {
+    setButtons((current) => ({ ...current, [button.key]: value }));
+    setSetting(button.setting, value ? '1' : '0');
   };
 
   const handleGoogleSignIn = async () => {
@@ -202,6 +237,7 @@ function AppContent() {
               isSignedInToGoogle={isSignedInToGoogle}
               showDebugTools={showDebugTools}
               onViewInLibrary={handleViewInLibrary}
+              buttons={buttons}
             />
           </View>
         ))}
@@ -226,7 +262,8 @@ function AppContent() {
         onRequestClose={() => setSettingsVisible(false)}
       >
         <View style={styles.settingsOverlay}>
-          <View style={styles.settingsCard}>
+          {/* Scrolls when the settings don't fit on the screen. */}
+          <ScrollView style={styles.settingsCard} contentContainerStyle={styles.settingsCardContent}>
             <Text style={styles.settingsTitle}>Settings</Text>
             <View style={[styles.settingsRow, styles.settingsRowGap]}>
               <View style={styles.settingsRowText}>
@@ -248,10 +285,21 @@ function AppContent() {
               </View>
               <Switch value={showDebugTools} onValueChange={toggleDebugTools} />
             </View>
+
+            <Text style={styles.settingsSectionTitle}>Buttons</Text>
+            {BUTTON_SETTINGS.map((button, i) => (
+              <View key={button.key} style={[styles.settingsRow, i < BUTTON_SETTINGS.length - 1 && styles.settingsRowGap]}>
+                <View style={styles.settingsRowText}>
+                  <Text style={styles.settingsLabel}>{button.label}</Text>
+                  <Text style={styles.settingsHint}>{button.hint}</Text>
+                </View>
+                <Switch value={buttons[button.key]} onValueChange={(value) => toggleButton(button, value)} />
+              </View>
+            ))}
             <TouchableOpacity style={styles.settingsCloseButton} onPress={() => setSettingsVisible(false)}>
               <Text style={styles.settingsCloseButtonText}>Close</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -314,7 +362,17 @@ const styles = StyleSheet.create({
   settingsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 20,
+    flexGrow: 0,
+    maxHeight: '90%',
+  },
+  settingsCardContent: { padding: 20 },
+  settingsSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#888',
+    marginTop: 20,
+    marginBottom: 8,
+    textTransform: 'uppercase',
   },
   settingsTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16 },
   settingsRow: {

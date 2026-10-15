@@ -27,6 +27,21 @@ export const MEDIA_TYPES = {
     readStatusLabels: { read: 'Read', want: 'Want to Read' },
     // Set this to the actual site you browse.
     startUrl: 'https://your-manga-site.example.com',
+    // Shows a Reverse button beside the code box (see ReverseSearch.js):
+    // opens a reverse image search site where you pick a page image to
+    // find which manga it's from. Set `url` to the search site you use.
+    // Tapping a result whose link matches `resultRegex` opens that code
+    // in this tab (needs buildUrlFromId below). resultRegex is optional
+    // and defaults to this type's urlRegex, matched on any host — set it
+    // if the search site links somewhere with a different URL structure.
+    // Remove this block to hide the button.
+    reverseSearch: {
+      url: 'https://your-reverse-search.example.com',
+      // resultRegex: /^https?:\/\/[^/]+\/title\/(\d+)\/?(\d+)?/,
+    },
+    // Shows the "⬇ Save Page Image" button (the largest image on screen,
+    // saved to the gallery). Manga only by default.
+    savePageImage: true,
     // Example pattern: matches https://your-manga-site.example.com/title/12345/
     // (gallery page) and .../title/12345/1/ (reader page) alike -> capture
     // group 1 = "12345", capture group 2 = the page number when present
