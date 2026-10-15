@@ -1,5 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, Modal, Switch, ScrollView } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  StatusBar,
+  Alert,
+  Modal,
+  Switch,
+  ScrollView,
+  LayoutAnimation,
+} from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initDb, getSetting, setSetting } from './src/db';
 import MediaWebView from './src/MediaWebView';
@@ -49,8 +60,54 @@ const BUTTON_SETTINGS = [
   },
 ];
 
+// How long a browsing tab's page sits still before the tab row hides.
+const TAB_BAR_HIDE_MS = 3000;
+
 function AppContent() {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+
+  // The tab row hides on browsing tabs once the page has sat still (no
+  // scrolling) for TAB_BAR_HIDE_MS — taps on the page don't count. Pulling
+  // down at the very top of the page brings it back (src/tabBarWatch.js
+  // reports both). Always shown on the Library tab.
+  const [tabBarHidden, setTabBarHidden] = useState(false);
+  const tabBarHiddenRef = useRef(false);
+  const hideTimer = useRef(null);
+  const setTabBarHiddenAnimated = useCallback((hidden) => {
+    if (tabBarHiddenRef.current === hidden) return;
+    tabBarHiddenRef.current = hidden;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setTabBarHidden(hidden);
+  }, []);
+  const scheduleTabBarHide = useCallback(() => {
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      if (tabRef.current !== 'library') setTabBarHiddenAnimated(true);
+    }, TAB_BAR_HIDE_MS);
+  }, [setTabBarHiddenAnimated]);
+  useEffect(() => {
+    if (tab === 'library') {
+      clearTimeout(hideTimer.current);
+      setTabBarHiddenAnimated(false);
+    } else {
+      scheduleTabBarHide();
+    }
+  }, [tab, scheduleTabBarHide, setTabBarHiddenAnimated]);
+  useEffect(() => () => clearTimeout(hideTimer.current), []);
+  const handleTabBarActivity = useCallback(
+    (tabKey, kind) => {
+      if (tabKey !== tabRef.current) return; // a tab in the background
+      if (kind === 'pullTop') {
+        setTabBarHiddenAnimated(false);
+        scheduleTabBarHide();
+      } else if (kind === 'scroll' && !tabBarHiddenRef.current) {
+        scheduleTabBarHide();
+      }
+    },
+    [scheduleTabBarHide, setTabBarHiddenAnimated]
+  );
   const [isSignedInToGoogle, setIsSignedInToGoogle] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
@@ -211,7 +268,7 @@ function AppContent() {
         </View>
       </View>
 
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
         {TABS.map((t) => (
           <TouchableOpacity key={t.key} style={styles.tabItem} onPress={() => setTab(t.key)}>
             <Text style={tab === t.key ? styles.tabActive : styles.tabInactive}>{t.label}</Text>
@@ -238,6 +295,7 @@ function AppContent() {
               showDebugTools={showDebugTools}
               onViewInLibrary={handleViewInLibrary}
               buttons={buttons}
+              onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
             />
           </View>
         ))}
@@ -331,6 +389,7 @@ const styles = StyleSheet.create({
   },
   driveButtonText: { color: '#fff', fontSize: 12 },
   tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },
+  tabBarHidden: { height: 0, overflow: 'hidden' },
   tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center' },
   tabActive: { color: '#e94560', fontWeight: '700' },
   tabInactive: { color: '#888' },

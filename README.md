@@ -423,7 +423,12 @@ so nothing renders blank.
   after confirming first.
 - `App.js` — wraps everything in `SafeAreaProvider` + `AppLock`, then
   renders the tab bar built from the media type list plus the Library
-  tab. All tabs stay mounted simultaneously at all times — switching
+  tab. On browsing tabs the tab bar hides once the page hasn't scrolled
+  for 3 seconds (`TAB_BAR_HIDE_MS`; taps on the page don't count), and
+  comes back when you pull down at the very top of the page, like
+  pull-to-refresh. `src/tabBarWatch.js`, run inside each page, reports
+  scrolling and that pull; the bar always shows on the Library tab.
+  All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
   so each webview keeps its scroll position and navigation history when
   you switch away and back, including via the Library tab. The

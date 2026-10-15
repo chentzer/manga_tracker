@@ -8,6 +8,7 @@ import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService'
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
 import ReverseSearch from './ReverseSearch';
+import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 
 // Which optional controls to show (Settings → Buttons). Each also needs
 // the type to support it: buildUrlFromId/sources for the code box,
@@ -321,10 +322,15 @@ export default function MediaWebView({
   showDebugTools,
   onViewInLibrary,
   buttons = ALL_BUTTONS,
+  onTabBarActivity,
 }) {
   const webviewRef = useRef(null);
   // The Reverse button's search window (ReverseSearch.js).
   const [reverseVisible, setReverseVisible] = useState(false);
+  // Latest onTabBarActivity, for handleMessage (which isn't re-created
+  // every time App.js passes a new function).
+  const tabBarActivityRef = useRef(onTabBarActivity);
+  tabBarActivityRef.current = onTabBarActivity;
   const pendingSourceId = useRef(null);
   const pendingPageUrl = useRef(null);
   const currentUrlRef = useRef(null); // updated on every navigation, unlike pendingPageUrl
@@ -608,6 +614,12 @@ export default function MediaWebView({
       // polls for that and reports changes through this same channel.
       if (payload.type === 'urlchange') {
         checkUrlAndExtract(payload.url);
+        return;
+      }
+
+      // Scrolling / pull-at-top, for the auto-hiding tab row (App.js).
+      if (payload.type === 'tabBar') {
+        tabBarActivityRef.current?.(payload.kind);
         return;
       }
 
@@ -921,8 +933,12 @@ export default function MediaWebView({
         injectedJavaScriptBeforeContentLoaded={
           URL_WATCHER_JS +
           buildAutoConfirmJs(getDomainButtonMap(config)) +
-          (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '')
+          (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '') +
+          TAB_BAR_WATCH_JS
         }
+        // The tab-row watcher again once the page has loaded, since Android
+        // doesn't always run the script above (it only runs once per page).
+        injectedJavaScript={TAB_BAR_WATCH_JS}
       />
     </View>
   );
