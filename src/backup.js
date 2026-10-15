@@ -25,7 +25,7 @@ const COLUMNS = [
 ];
 
 // Each media type gets its own backup file (e.g. "manga-backup.csv",
-// "video-backup.csv") rather than one combined "library-backup.csv" —
+// "anime-backup.csv") rather than one combined "library-backup.csv" —
 // keeps them separate and easy to browse/open individually in Drive.
 function backupFileNameFor(mediaType) {
   return `${mediaType}-backup.csv`;

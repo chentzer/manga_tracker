@@ -1,15 +1,15 @@
-# Media Tracker (Manga + Video)
+# Media Tracker (Manga + Anime)
 
 Records an entry (name = extracted ID, cover = thumbnail image) whenever you
 browse to a matching URL in one of the app's two built-in webview tabs:
-manga and video. No duplicate entries per type. Optional Google Drive backup
+manga and anime. No duplicate entries per type. Optional Google Drive backup
 of covers, organized into per-type subfolders.
 
 This is a **configurable template**, not tied to any specific website —
 `src/mediaTypes.js` ships with two working examples (a manga-gallery
-pattern and a video pattern) with placeholder domains. Point it at
-whatever sites you actually use by editing that one file; see "Before you
-run it" below.
+pattern and an anime-streaming pattern). The sites themselves come from
+your local `.env`, so they never end up in the repo; see "Before you run
+it" below.
 
 ## Setup
 
@@ -48,25 +48,33 @@ during development. Scan the QR code from `expo start`.
 
 ## Before you run it
 
-Everything type-specific lives in **`src/mediaTypes.js`** — this is the only
-file you need to edit to point the app at your real sites. The two entries
-in there (`manga`, `video`) are working *examples*, not tied to any
-specific site — the domains are placeholders and the URL patterns/selectors
-are illustrative starting points you'll adapt to whatever you actually use:
+Everything type-specific lives in **`src/mediaTypes.js`**. The two entries
+in there (`manga`, `anime`) are working *examples*, not tied to any
+specific site — the URL patterns/selectors are starting points you'll
+adapt to whatever you actually use:
 
-1. **`startUrl`** for each type — replace the placeholder domain
-   (`your-manga-site.example.com`, `your-video-site.example.com`) with the
-   real site you browse.
+1. **Your sites, in `.env`** — copy `.env.example` to `.env` (git-ignored,
+   never committed) and set `MANGA_SITE_URL` and `ANIME_SITE_URL` to the
+   sites each tab should open, without a trailing slash. `app.config.js`
+   passes them to `mediaTypes.js`; without them the tabs open the
+   placeholder `*.example.com` domains. Restart `expo start` after
+   changing `.env`.
 2. **`urlRegex`** for each type — the examples match:
-   - manga: `/title/<id>/<page>` in the path
-   - video: `?v=<id>` as a query param
+   - manga: `/title/<id>-<slug>` (series page) or
+     `/title/<id>-<slug>/<chapterId>-chapter-<n>` (reader page), so every
+     chapter of a series is one entry
+   - anime: `/watch/<id>/...` (episode page) or `/info/<id>/...` (series
+     page) in the path, so every episode of a series is one entry
    Confirm these against your real site's actual URL structure and adjust
    the pattern (path segment names, query param names) as needed.
 3. **`extractMetadataJs`** for each type — grabs the cover image, title,
-   and author/uploader in one shot. Selectors are placeholders except
-   video's title (which uses `og:title`/`document.title` and often works
-   without changes); everything else needs inspecting the real page DOM
-   (right-click the element → Inspect) and swapping in the right selector.
+   alternate title and author in one shot. Both examples use generic
+   selectors (the page's `<h1>`, a "poster" image, `og:` meta tags, links
+   into the site's author search) that suit many sites; if yours differs,
+   inspect the real page (right-click the element → Inspect) and swap in
+   the right selector. Manga only records from the series page: reader
+   pages don't show the cover or author, so its script posts
+   `{ skip: '…' }` there and nothing is saved from that page.
 4. **`reverseSearch.url`** (manga, optional) — the reverse image search
    site the Reverse button opens (placeholder:
    `your-reverse-search.example.com`). Remove the `reverseSearch` block
@@ -127,7 +135,7 @@ below for what happens automatically after that.
 Two separate things sync to Drive once connected, both automatic:
 
 - **Cover images** — uploaded per entry, organized into
-  `MangaTracker/manga/` and `MangaTracker/video/` folders, right after
+  `MangaTracker/manga/` and `MangaTracker/anime/` folders, right after
   each entry is saved. Filenames follow `code - title.jpg` (e.g.
   `12345 - Some Manga Title.jpg`), falling back to just the code if no
   title was extracted.
@@ -135,7 +143,7 @@ Two separate things sync to Drive once connected, both automatic:
   `alt_title`, `author`, `score`, `tags`, `read_status`, `source_url`,
   `sync_status`, and `created_at`, written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
-  `MangaTracker/video-backup.csv`, etc — rather than one combined file,
+  `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
   so each type's data stays easy to open/browse individually. Each file
   is overwritten in place — not a growing pile of dated backups — and
   refreshes automatically after every new entry or rating change, plus
@@ -159,7 +167,7 @@ added to.
 
 Two different things are tracked per entry, on purpose:
 
-- **`source_id`** — the ID pulled straight from the URL (manga id, video
+- **`source_id`** — the ID pulled straight from the URL (manga id, anime
   id). This is what dedup is based on — it's guaranteed unique on
   the source site, unlike titles.
 - **`title`** — what's actually displayed in the library. Titles can be
@@ -179,7 +187,7 @@ so nothing renders blank.
   third type (e.g. articles) means adding one entry here — no other file
   needs to change.
 - `src/MediaWebView.js` — one generic webview component parameterized by a
-  media type config; used for both the manga and video tabs. Detects URL
+  media type config; used for both the manga and anime tabs. Detects URL
   matches two ways: native navigation events, and a polling script injected
   into the page (`URL_WATCHER_JS`) that catches single-page-app sites which
   change the URL via `history.pushState` without a full reload — native
@@ -204,7 +212,7 @@ so nothing renders blank.
   grabs the largest currently-rendered image on the page (not necessarily
   the cover — whatever's actually on screen) and saves it straight to the
   phone's photo gallery via `expo-media-library`, named `code -- page`
-  (e.g. `12345 -- 3`) using the current URL matched against the type's
+  (e.g. `abc12 -- ch60`) using the current URL matched against the type's
   `urlRegex`/`extractPageNumber` — falls back to a timestamp if the
   current page doesn't match the pattern at all. Accepts a
   `showDebugTools` prop (from App.js's Settings sheet) that reveals a
@@ -320,7 +328,7 @@ so nothing renders blank.
   leaving the app.
 - `src/db.js` — SQLite storage. Entries are unique per `(name, media_type)`
   pair, enforced by the database itself, not just app logic — so a manga ID
-  and a video ID can't collide, but the same id within one type always is.
+  and an anime ID can't collide, but the same id within one type always is.
   `alt_title` holds an optional secondary title in another language/script
   (e.g. an original Japanese title alongside a translated English one) —
   populated via `extractMetadataJs`'s optional `altTitle` field, shown
@@ -330,7 +338,7 @@ so nothing renders blank.
   storage mechanism when SQLite is already here.
 - `src/GoogleDriveService.js` — native Google Sign-In (no browser
   redirect) + multipart upload, organized
-  into `MangaTracker/manga/` and `MangaTracker/video/` folders in Drive.
+  into `MangaTracker/manga/` and `MangaTracker/anime/` folders in Drive.
   Also handles the CSV data backup file (`backupCsvToDrive`) and exposes
   `isDriveConnected()` so other modules can trigger backups opportunistically.
   `fetchBackupCsvContent()` and `downloadCoverForRestore()` support pulling
@@ -370,7 +378,7 @@ so nothing renders blank.
   not already present locally via `INSERT OR IGNORE`, so existing local
   entries are never touched or overwritten. For each restored entry it
   also tries to re-download a matching cover image from Drive's
-  `manga`/`video` subfolder by filename prefix — if none is found, the
+  `manga`/`anime` subfolder by filename prefix — if none is found, the
   entry still restores, just without a thumbnail until you browse back
   to that page. Triggered from the **Restore** button in `App.js`'s
   header (only shown once Drive is connected), and automatically before
@@ -388,7 +396,7 @@ so nothing renders blank.
   re-trigger later (e.g. if you switch away and back to Library without
   it changing again). Otherwise: unified library view with
   filter chips (All / Manga
-  / Videos), a Newest/Top Rated sort toggle, a **Filter by Artist**
+  / Anime), a Newest/Top Rated sort toggle, a **Filter by Artist**
   button that opens a modal listing every distinct artist across the
   whole library — grouped under a header per media type (only types
   with at least one saved artist show up), sorted alphabetically, tap a
@@ -406,7 +414,7 @@ so nothing renders blank.
   (not a star) opens a detail sheet showing the full title, author, media
   type, code, date added, sync status, an editable rating, a read-status
   toggle (labeled per the entry's own media type — "Read"/"Want to Read"
-  for manga, "Watched"/"Want to Watch" for video, via each type's
+  for manga, "Watched"/"Want to Watch" for anime, via each type's
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to
   unset), a tag
   editor (add/remove free-text tags), a tappable link to the original
@@ -512,9 +520,8 @@ store review entirely, which suits a personal tracker like this well.
 
 ## Known limitations / next steps
 
-- The manga image selector is still a placeholder (`querySelector('img')`)
-  and needs tuning per site's real DOM. The video poster extraction should
-  work out of the box on most sites, but confirm against yours.
+- The extraction selectors are generic guesses; confirm them against your
+  sites (the debug log shows what each save picked up).
 - Drive sync is fire-and-forget with a `failed` status on error; there's no
   automatic retry loop yet. A simple addition would be an effect that calls
   `getPendingSyncEntries()` on app start and retries each.

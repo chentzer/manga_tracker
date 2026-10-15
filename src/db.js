@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 
 const db = SQLite.openDatabaseSync('manga.db');
 
-// `source_id` is the ID pulled straight from the URL (manga id, video id,
+// `source_id` is the ID pulled straight from the URL (manga id, anime id,
 // etc.) — this is the dedup key, since it's guaranteed unique on the
 // source site. `title` is separate and purely for display: titles can be
 // missing, slow to load, or coincidentally shared between two different
@@ -63,6 +63,9 @@ export function initDb() {
   } catch (e) {
     // Column already exists — nothing to do.
   }
+
+  // The "video" type was renamed to "anime"; carry existing entries over.
+  db.runSync("UPDATE entries SET media_type = 'anime' WHERE media_type = 'video'");
 
   // Generic key-value store for small app preferences (e.g. whether
   // debug tools are shown) — not worth a whole new storage mechanism

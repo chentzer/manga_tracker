@@ -39,7 +39,7 @@ function StarRating({ score, onRate, size = 16 }) {
 }
 
 // Labels come from the entry's own media type (e.g. "Read" for manga,
-// "Watched" for video) — the underlying stored value is always 'read'
+// "Watched" for anime) — the underlying stored value is always 'read'
 // or 'want_to_read' regardless of type, only the wording differs.
 function ReadStatusToggle({ status, mediaType, onChange }) {
   const labels = getReadStatusLabels(mediaType);
@@ -164,7 +164,7 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDel
             <StarRating score={entry.score} onRate={(score) => onRate(entry, score)} size={24} />
 
             <Text style={styles.detailLabel}>
-              {entry.media_type === 'video' ? 'Watch status' : 'Read status'}
+              {entry.media_type === 'anime' ? 'Watch status' : 'Read status'}
             </Text>
             <ReadStatusToggle
               status={entry.read_status}
@@ -305,7 +305,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   // Every distinct tag currently in use, for the filter chip row —
   // computed from the (type-filtered) entries list, so it naturally
-  // narrows when switching between the Manga/Videos/All chips above.
+  // narrows when switching between the Manga/Anime/All chips above.
   const allTags = useMemo(() => {
     const set = new Set();
     entries.forEach((e) => parseTags(e.tags).forEach((t) => set.add(t)));
@@ -324,7 +324,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   const openArtistFilter = useCallback(() => {
     // Pulls a fresh, unfiltered set regardless of the current type-filter
     // chip (`entries` is already scoped to that chip, which would hide
-    // e.g. video artists entirely while "Manga" is selected) — this
+    // e.g. anime artists entirely while "Manga" is selected) — this
     // picker is meant to show every artist across every type at once,
     // grouped, independent of whatever the list itself is currently
     // filtered to.

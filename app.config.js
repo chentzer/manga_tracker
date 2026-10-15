@@ -45,6 +45,10 @@ export default {
         process.env.GOOGLE_CLIENT_ID_IOS || 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
       googleClientIdWeb:
         process.env.GOOGLE_CLIENT_ID_WEB || 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
+      // The site each tab opens (read by src/mediaTypes.js). Set your real
+      // sites in .env; the placeholders are used when they're missing.
+      mangaSiteUrl: process.env.MANGA_SITE_URL || 'https://your-manga-site.example.com',
+      animeSiteUrl: process.env.ANIME_SITE_URL || 'https://your-anime-site.example.com',
     },
   },
 };
