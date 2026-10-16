@@ -495,6 +495,14 @@ so nothing renders blank.
   **Buttons**, switches hide the code search box, **Reverse** and **Save
   Page Image** on the tabs that have them (all shown by default;
   `BUTTON_SETTINGS` in App.js). The sheet scrolls when it doesn't fit.
+  Under **Data saver** (`src/dataSaver.js`): **Load tabs only when
+  opened** (on by default; tabs no longer all load at start-up), **Unload
+  background tabs** (off; keeps only the current and last-used browsing
+  tab loaded, reopening others on the same page) and **Drive sync on
+  Wi-Fi only** (off; automatic backups and cover uploads wait for Wi-Fi
+  and catch up when it's back, while Backup Now / Restore / Connect
+  always run). Wi-Fi vs mobile data comes from `expo-network`, so it
+  needs a new app build. On mobile data, the Reverse button asks first.
   Each setting is persisted via `getSetting()`/`setSetting()` in `db.js`
   so it survives app restarts. Also coordinates the **View in
   Library** button (see `MediaWebView.js`): `handleViewInLibrary()`

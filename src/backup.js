@@ -1,6 +1,7 @@
 import { getAllEntries, getPendingSyncEntries, markSynced, markSyncFailed, entryExists, restoreEntry } from './db';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
+import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import {
   backupCsvToDrive,
   uploadImageToDrive,
@@ -122,9 +123,15 @@ function parseCsvToObjects(text) {
 // of this failing invisibly with no way to tell auto-backup apart from
 // "nothing changed yet". Backs up each media type to its own file
 // (e.g. "manga-backup.csv") rather than one combined file.
-export async function maybeBackupLibraryToDrive() {
+// force: true for the Backup Now / Connect buttons, which run even when
+// Settings → Data saver holds automatic sync for Wi-Fi.
+export async function maybeBackupLibraryToDrive({ force = false } = {}) {
   if (!isDriveConnected()) {
     return { attempted: false, success: false, error: null };
+  }
+  if (!force && !driveSyncAllowed()) {
+    markDriveSyncDeferred();
+    return { attempted: false, success: false, error: null, deferred: true };
   }
   const errors = [];
   for (const mediaConfig of MEDIA_TYPE_LIST) {
@@ -148,8 +155,12 @@ export async function maybeBackupLibraryToDrive() {
 // uploads only ever ran at the moment that specific entry was first
 // saved — this is what catches the rest up. Returns how many it
 // actually uploaded, so callers can show a useful count.
-export async function uploadPendingImages() {
+export async function uploadPendingImages({ force = false } = {}) {
   if (!isDriveConnected()) return 0;
+  if (!force && !driveSyncAllowed()) {
+    markDriveSyncDeferred();
+    return 0;
+  }
 
   const pending = getPendingSyncEntries().filter((e) => e.local_image_path);
   let uploaded = 0;

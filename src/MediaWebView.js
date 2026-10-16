@@ -1,5 +1,16 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Text, Keyboard, Modal, ScrollView, BackHandler } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Text,
+  Keyboard,
+  Modal,
+  ScrollView,
+  BackHandler,
+  Alert,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -18,6 +29,7 @@ import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
 import ReverseSearch from './ReverseSearch';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
+import { driveSyncAllowed, markDriveSyncDeferred, isOnMobileData } from './dataSaver';
 
 // Which optional controls to show (Settings → Buttons). Each also needs
 // the type to support it: buildUrlFromId/sources for the code box,
@@ -332,10 +344,19 @@ export default function MediaWebView({
   onViewInLibrary,
   buttons = ALL_BUTTONS,
   onTabBarActivity,
+  initialUrl = null,
+  onPageChange,
 }) {
   const webviewRef = useRef(null);
   // The Reverse button's search window (ReverseSearch.js).
   const [reverseVisible, setReverseVisible] = useState(false);
+  // First page: initialUrl (the page this tab was on before Data saver
+  // unloaded it — App.js) or the type's start page. Fixed at mount; a new
+  // source would reload the page.
+  const [startSource] = useState(() => ({ uri: initialUrl || config.startUrl }));
+  // Latest onPageChange, for the navigation handler below.
+  const pageChangeRef = useRef(onPageChange);
+  pageChangeRef.current = onPageChange;
   // Latest onTabBarActivity, for handleMessage (which isn't re-created
   // every time App.js passes a new function).
   const tabBarActivityRef = useRef(onTabBarActivity);
@@ -544,6 +565,8 @@ export default function MediaWebView({
   const handleNavigationStateChange = useCallback(
     (navState) => {
       currentUrlRef.current = navState.url;
+      // Kept by App.js, so Data saver can reopen this page after unloading.
+      pageChangeRef.current?.(navState.url);
       setCanGoBack(navState.canGoBack);
       // navState fires multiple times per navigation (start, in-progress,
       // finish). Extracting on the first ("start") event queries a page
@@ -767,7 +790,12 @@ export default function MediaWebView({
           );
         });
 
-        if (isSignedInToGoogle && localPath) {
+        // On mobile data with Drive sync set to Wi-Fi only, the cover stays
+        // pending and goes up with the Wi-Fi catch-up (App.js).
+        if (isSignedInToGoogle && localPath && !driveSyncAllowed()) {
+          markDriveSyncDeferred();
+          logDebug(`Cover upload for ${sourceId} waits for Wi-Fi (Settings → Data saver).`);
+        } else if (isSignedInToGoogle && localPath) {
           try {
             const driveFileId = await uploadImageToDrive(
               config.key,
@@ -792,9 +820,22 @@ export default function MediaWebView({
     [config, isSignedInToGoogle, checkUrlAndExtract, logDebug]
   );
 
+  // A reverse search site may download a lot in the page (models, search
+  // data), so on mobile data this asks first.
+  const openReverseSearch = () => {
+    if (!isOnMobileData()) {
+      setReverseVisible(true);
+      return;
+    }
+    Alert.alert('Use mobile data?', 'Reverse search sites can download a lot of data, especially the first time.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Continue', onPress: () => setReverseVisible(true) },
+    ]);
+  };
+
   const reverseButton =
     !config.reverseSearch || !config.buildUrlFromId || !buttons.reverseSearch ? null : (
-      <TouchableOpacity style={[styles.manualButton, styles.secondaryButton]} onPress={() => setReverseVisible(true)}>
+      <TouchableOpacity style={[styles.manualButton, styles.secondaryButton]} onPress={openReverseSearch}>
         <Text style={styles.manualButtonText}>Reverse</Text>
       </TouchableOpacity>
     );
@@ -945,7 +986,7 @@ export default function MediaWebView({
       </Modal>
       <WebView
         ref={webviewRef}
-        source={{ uri: config.startUrl }}
+        source={startSource}
         onNavigationStateChange={handleNavigationStateChange}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         onMessage={handleMessage}
