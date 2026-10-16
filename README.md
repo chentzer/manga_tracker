@@ -124,7 +124,7 @@ redirect URI to register, just the platform's native account picker.
      submit for Google's verification review.
 4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
    - Create one of type **Android**: package name from `app.config.js`
-     (`com.yourname.mangatracker` — change this to your own reverse-domain
+     (`com.chentzer.mangatracker` — change this to your own reverse-domain
      identifier first) and your app's SHA-1 signing certificate
      fingerprint — get this with `eas credentials` (select Android, then
      view the keystore). This client isn't referenced directly in code,

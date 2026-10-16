@@ -15,13 +15,13 @@ export default {
     assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.yourname.mangatracker',
+      bundleIdentifier: 'com.chentzer.mangatracker',
       infoPlist: {
         NSFaceIDUsageDescription: 'Face ID is used to lock the app and keep your library private.',
       },
     },
     android: {
-      package: 'com.yourname.mangatracker',
+      package: 'com.chentzer.mangatracker',
       permissions: ['INTERNET'],
     },
     scheme: 'mangatracker',
