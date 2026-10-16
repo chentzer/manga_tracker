@@ -250,11 +250,24 @@ finish date and sets progress to the total when the total is known.
   entry gets a ⚠ badge, the **⚠ To review** chip lists them, and its
   detail sheet shows each difference with the app's and MAL's value
   side by side — tap the one to keep, or change the detail yourself
-  further down (that settles it too). Added titles have no cover
-  or site page yet: their code is `mal-<id>` and their link goes to
-  MyAnimeList. The first time you open that title on the site, the
-  entry becomes a normal one (site code, link, cover and author) and
-  keeps everything from MAL. A title linked by title only gets the MAL
+  further down (that settles it too). Added titles have no site page
+  yet: their code is `mal-<id>` and their link goes to MyAnimeList. The
+  first time you open that title on the site, the entry becomes a normal
+  one (site code, link, cover and author) and keeps everything from MAL;
+  the site's cover replaces the imported one (kept if the site has none).
+- **Covers.** After an import, every title on that list with no cover
+  gets AniList's (same lookup as above, `coverImage.large`), four
+  downloads at a time, saved like covers from browsing
+  (`<type>-covers/<code>.jpg`) and backed up to Drive. The import's
+  summary shows right away; covers keep going in the background, and the
+  Library refreshes when they're done. A Drive restore brings these
+  covers back too.
+- **Data reminder.** Import asks first: it looks every title up and
+  downloads covers (about 0.1 MB a title), so Wi-Fi is recommended; it
+  says so when you're on mobile data.
+- **Progress** shows in the status pill beside ⚙️ as **Import** (the
+  AniList lookups, the import, then each cover and its upload), ending
+  with "✓ Imported N", or "✓ N/M covers" when some covers failed. A title linked by title only gets the MAL
   details it doesn't have yet; what you set in the app stays.
 - **Nothing is lost on the way through.** MAL fields without a column of
   their own (`my_id`, storage, ...) are kept as JSON in `mal_data`, so
@@ -548,8 +561,8 @@ so nothing renders blank.
   The Library row shows the group's name. Stored as `group_name` /
   `group_order`, both in the Drive backup.
 - `src/SyncStatusPill.js` / `src/syncStatus.js` — the pill beside the
-  Settings button. While a backup or restore runs it shows **Backup** or
-  **Restore**, filling from the left as it goes (full = done); then
+  Settings button. While a backup, restore or MAL import runs it shows
+  **Backup**, **Restore** or **Import**, filling from the left as it goes (full = done); then
   "✓ Backed up" / "✓ Restored 12" for 2 seconds, or a red "⚠ Backup
   failed" that stays until tapped (it then shows the error) or until a
   later backup works. It appears after half a second, so quick automatic

@@ -1,9 +1,10 @@
 // What Drive sync is doing right now, for the pill beside the Settings
-// button (SyncStatusPill.js). Backups, cover uploads and restores each
+// button (SyncStatusPill.js). Backups, cover uploads, restores and MAL
+// imports each
 // report as a job: beginSync() -> job.addTotal(n) / job.step() ->
 // job.end({ ok, error, summary }). Jobs that overlap are one activity:
-// their steps add up, so the bar never jumps back, and it's a Restore
-// while any restore is part of it. A button that runs several in a row
+// their steps add up, and it's a Restore (or an Import) while any
+// restore (or import) is part of it, rather than a Backup. A button that runs several in a row
 // (Backup Now: CSVs, notes, then covers) wraps them in a job of its own,
 // so they show as one.
 //
@@ -48,10 +49,10 @@ export function clearSyncResult() {
   emit();
 }
 
-// kind: 'backup' | 'restore'. Returns the job's handle.
+// kind: 'backup' | 'restore' | 'import'. Returns the job's handle.
 export function beginSync(kind, { show = false, total = 0 } = {}) {
   if (!activity) activity = { kind, show: false, done: 0, total: 0, error: null, summary: null };
-  if (kind === 'restore') activity.kind = 'restore';
+  if (kind !== 'backup') activity.kind = kind;
   activity.show = activity.show || show;
   const job = { kind, done: 0, total };
   jobs.push(job);

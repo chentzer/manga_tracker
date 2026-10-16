@@ -43,11 +43,13 @@ import {
   updateEntryFields,
   setEntryType,
   setAltTitle,
+  setCoverImage,
   getSetting,
   setSetting,
 } from './db';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
 import { isDriveConnected, uploadTextFileToDrive } from './GoogleDriveService';
+import { beginSync } from './syncStatus';
 import {
   FORMATS,
   malTypeOf,
@@ -308,12 +310,15 @@ async function readPickedFile(uri) {
 // ---------- Sorting imports (AniList) ----------
 
 const ANILIST_INFO_QUERY = `query ($ids: [Int], $type: MediaType) {
-  Page(perPage: 50) { media(idMal_in: $ids, type: $type) { idMal countryOfOrigin title { english } } }
+  Page(perPage: 50) {
+    media(idMal_in: $ids, type: $type) { idMal countryOfOrigin title { english } coverImage { large } }
+  }
 }`;
 
-// Map of MAL id → { country, english } from AniList, 50 per request.
-// Throws if AniList can't be reached.
-export async function lookUpOnAniList(malType, malIds) {
+// Map of MAL id → { country, english, cover } from AniList, 50 per
+// request (job: a status-pill job, one step per request). Throws if
+// AniList can't be reached.
+export async function lookUpOnAniList(malType, malIds, job = null) {
   const info = new Map();
   for (let i = 0; i < malIds.length; i += 50) {
     const res = await fetch(ANILIST_URL, {
@@ -327,10 +332,55 @@ export async function lookUpOnAniList(malType, malIds) {
     if (!res.ok) throw new Error(`AniList lookup failed (${res.status}).`);
     const json = await res.json();
     (json.data?.Page?.media || []).forEach((m) => {
-      info.set(m.idMal, { country: m.countryOfOrigin, english: m.title?.english || null });
+      info.set(m.idMal, {
+        country: m.countryOfOrigin,
+        english: m.title?.english || null,
+        cover: m.coverImage?.large || null,
+      });
     });
+    job?.step();
   }
   return info;
+}
+
+// ---------- Covers (AniList) ----------
+
+// Entries on this MAL list with no cover whose cover AniList gave
+// (`aniList` from lookUpOnAniList): each { entry, url }.
+function coverTargets(malType, aniList) {
+  return getAllEntries()
+    .filter((e) => malTypeOf(e.media_type) === malType && e.mal_id && !e.local_image_path)
+    .map((entry) => ({ entry, url: aniList.get(entry.mal_id)?.cover }))
+    .filter((t) => t.url);
+}
+
+// Downloads the covers, a few at a time, into the same folders and names
+// as covers saved while browsing, and queues them for Drive. Returns {
+// downloaded, failed }.
+async function downloadCovers(targets, job) {
+  let downloaded = 0;
+  let failed = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      const { entry, url } = targets[next++];
+      try {
+        const dir = `${FileSystem.documentDirectory}${entry.media_type}-covers/`;
+        const info = await FileSystem.getInfoAsync(dir);
+        if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        const result = await FileSystem.downloadAsync(url, `${dir}${entry.source_id}.jpg`);
+        if (result.status !== 200) throw new Error(`HTTP ${result.status}`);
+        setCoverImage(entry.source_id, entry.media_type, result.uri);
+        downloaded++;
+      } catch (err) {
+        console.warn(`Cover download failed for ${entry.source_id}:`, err.message);
+        failed++;
+      }
+      job.step();
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return { downloaded, failed };
 }
 
 // Which of the app's types an imported title belongs in: Korean titles
@@ -461,29 +511,58 @@ export function importParsedList({ mediaType, user, items }, aniList = new Map()
   return { mediaType, added, linked, alreadyThere, differing, manhwa };
 }
 
-// Lets you pick a MAL export file and imports it. Returns null if the
-// picker was cancelled.
-export async function pickAndImportMalList() {
+// Lets you pick a MAL export file and imports it, showing "Import" in
+// the status pill. Returns null if the picker was cancelled. The import
+// itself is done when this returns; covers for every title on that list
+// that has none (`covers` of them) then download in the background, still
+// in the pill, and `onCoversDone` runs (and is waited for) before the
+// pill finishes.
+export async function pickAndImportMalList({ onCoversDone } = {}) {
   const picked = await DocumentPicker.getDocumentAsync({
     type: '*/*',
     copyToCacheDirectory: true,
     multiple: false,
   });
   if (picked.canceled || !picked.assets || picked.assets.length === 0) return null;
-  const text = await readPickedFile(picked.assets[0].uri);
-  const parsed = parseMalXml(text);
-  const format = FORMATS[parsed.mediaType];
-  // Sorting into Manga/Manhwa and English titles need AniList; without it
-  // the import still runs (everything from the manga list goes to Manga).
-  let aniList = new Map();
-  let aniListFailed = false;
+  const job = beginSync('import', { show: true, total: 1 });
+  let result;
+  let targets = [];
   try {
-    aniList = await lookUpOnAniList(
-      parsed.mediaType,
-      parsed.items.map((item) => Number(item[format.idField])).filter(Boolean)
-    );
-  } catch (e) {
-    aniListFailed = true;
+    const text = await readPickedFile(picked.assets[0].uri);
+    const parsed = parseMalXml(text);
+    const format = FORMATS[parsed.mediaType];
+    const ids = parsed.items.map((item) => Number(item[format.idField])).filter(Boolean);
+    job.addTotal(Math.ceil(ids.length / 50));
+    // Sorting into Manga/Manhwa, English titles and covers need AniList;
+    // without it the import still runs (everything from the manga list
+    // goes to Manga, with no covers).
+    let aniList = new Map();
+    let aniListFailed = false;
+    try {
+      aniList = await lookUpOnAniList(parsed.mediaType, ids, job);
+    } catch (e) {
+      aniListFailed = true;
+    }
+    result = { ...importParsedList(parsed, aniList), aniListFailed };
+    job.step();
+    targets = coverTargets(parsed.mediaType, aniList);
+    job.addTotal(targets.length);
+  } catch (err) {
+    job.end({ ok: false, error: err.message });
+    throw err;
   }
-  return { ...importParsedList(parsed, aniList), aniListFailed };
+
+  (async () => {
+    const { downloaded, failed } = await downloadCovers(targets, job);
+    try {
+      await onCoversDone?.({ downloaded, failed });
+    } catch (e) {
+      // Reported by whatever it ran (e.g. the Drive upload's own job).
+    }
+    job.end({
+      summary: failed ? `${downloaded}/${targets.length} covers` : `Imported ${result.added}`,
+    });
+  })();
+
+  return { ...result, covers: targets.length };
 }

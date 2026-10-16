@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { clearSyncResult, getSyncStatus, onSyncStatus } from './syncStatus';
 
-// The pill beside the Settings button: "Backup" or "Restore" while Drive
-// sync runs, filling from the left as it goes (full = done), then
+// The pill beside the Settings button: "Backup", "Restore" or "Import"
+// (MAL import, src/malList.js) while it runs, filling from the left as it goes (full = done), then
 // "✓ Backed up" / "✓ Restored 12" for a moment, or a red "Backup failed"
 // that shows the error when tapped. Driven by syncStatus.js.
 
@@ -15,6 +15,7 @@ const SUCCESS_MS = 2000;
 const LABELS = {
   backup: { running: 'Backup', done: '✓ Backed up', failed: '⚠ Backup failed' },
   restore: { running: 'Restore', done: '✓ Restored', failed: '⚠ Restore failed' },
+  import: { running: 'Import', done: '✓ Imported', failed: '⚠ Import failed' },
 };
 
 export default function SyncStatusPill() {

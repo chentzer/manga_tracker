@@ -24,6 +24,7 @@ import {
   DATA_SAVER_DEFAULTS,
   dataSaverSetting,
   driveSyncAllowed,
+  isOnMobileData,
   onUnmetered,
   startNetworkWatch,
   takeDriveSyncDeferred,
@@ -396,10 +397,34 @@ function AppContent() {
     }
   };
 
-  const handleMalImport = async () => {
+  // Importing looks every title up on AniList and downloads covers, so it
+  // asks first, recommending Wi-Fi.
+  const handleMalImport = () => {
+    Alert.alert(
+      'Import uses data',
+      `Importing looks your titles up on AniList and downloads a cover for each one that has none — about 0.1 MB per title (roughly 15 MB for 150).${
+        isOnMobileData() ? " You're on mobile data right now." : ''
+      } Wi-Fi is recommended.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Choose file', onPress: runMalImport },
+      ]
+    );
+  };
+
+  const runMalImport = async () => {
     setMalBusy(true);
     try {
-      const result = await pickAndImportMalList();
+      const result = await pickAndImportMalList({
+        // Covers arrive after the summary: show them, and back them up
+        // (as part of the same pill).
+        onCoversDone: async ({ downloaded }) => {
+          if (downloaded > 0) {
+            reloadLibrary();
+            await uploadPendingImages();
+          }
+        },
+      });
       if (!result) return; // picker cancelled
       reloadLibrary();
       maybeBackupLibraryToDrive().then((backup) => {
@@ -422,8 +447,10 @@ function AppContent() {
           `${result.differing} differ from what's in the app — tap "⚠ To review" in the Library to go through them. Nothing in the app was overwritten.`
         );
       }
-      if (result.added > 0) {
-        lines.push('Added titles have no cover yet; open one in its tab to fill it in.');
+      if (result.covers > 0) {
+        lines.push(
+          `Downloading ${result.covers} cover${result.covers === 1 ? '' : 's'} in the background — the Import pill at the top shows how far it is.`
+        );
       }
       Alert.alert('Import done', lines.join('\n\n'));
     } catch (err) {

@@ -248,8 +248,14 @@ async function findCoverFileId(mediaType, sourceId) {
   const data = await res.json();
   // "contains" is a substring match, not "starts with" — Drive's query
   // language doesn't support anchoring, so double-check here to avoid
-  // e.g. source id "123" matching a file actually named "9123 - X.jpg".
-  const match = (data.files || []).find((f) => f.name.startsWith(sourceId));
+  // e.g. source id "123" matching a file actually named "9123 - X.jpg",
+  // and that what follows the id isn't more of an id ("mal-12" must not
+  // match "mal-123 - X.jpg").
+  const match = (data.files || []).find((f) => {
+    if (!f.name.startsWith(sourceId)) return false;
+    const rest = f.name.slice(sourceId.length);
+    return rest === '' || rest.startsWith(' ') || rest.startsWith('.');
+  });
   return match ? match.id : null;
 }
 

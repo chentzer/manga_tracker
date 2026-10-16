@@ -257,7 +257,7 @@ export function adoptImportedEntry(oldSourceId, mediaType, { sourceId, title, al
        title = COALESCE(?, title),
        author = COALESCE(?, author),
        source_url = ?,
-       local_image_path = ?,
+       local_image_path = COALESCE(?, local_image_path),
        sync_status = 'pending'
      WHERE source_id = ? AND media_type = ?`,
     [
@@ -408,6 +408,14 @@ export function getAllEntries(mediaType = null) {
 
 export function getPendingSyncEntries() {
   return db.getAllSync("SELECT * FROM entries WHERE sync_status != 'synced'");
+}
+
+// Sets an entry's cover file and queues it for upload to Drive.
+export function setCoverImage(sourceId, mediaType, localImagePath) {
+  db.runSync(
+    "UPDATE entries SET local_image_path = ?, sync_status = 'pending' WHERE source_id = ? AND media_type = ?",
+    [localImagePath, sourceId, mediaType]
+  );
 }
 
 export function setAltTitle(sourceId, mediaType, altTitle) {

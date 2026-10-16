@@ -19,7 +19,6 @@ import {
   fetchBackupCsvContent,
   downloadCoverForRestore,
 } from './GoogleDriveService';
-import { isImportedSourceId } from './malList';
 
 const COLUMNS = [
   'media_type',
@@ -311,17 +310,14 @@ async function runRestore(onProgress, job) {
       }
 
       let localImagePath = null;
-      // Titles imported from a MyAnimeList list have no cover yet.
-      if (!isImportedSourceId(sourceId)) {
-        try {
-          const dir = `${FileSystem.documentDirectory}${mediaType}-covers/`;
-          localImagePath = await downloadCoverForRestore(mediaType, sourceId, dir);
-          if (localImagePath) imagesRestored++;
-        } catch (err) {
-          // No matching cover found, or download failed — restore the
-          // entry's data anyway rather than losing it over a missing image.
-          console.warn(`Cover restore failed for ${sourceId}:`, err.message);
-        }
+      try {
+        const dir = `${FileSystem.documentDirectory}${mediaType}-covers/`;
+        localImagePath = await downloadCoverForRestore(mediaType, sourceId, dir);
+        if (localImagePath) imagesRestored++;
+      } catch (err) {
+        // No matching cover found, or download failed — restore the
+        // entry's data anyway rather than losing it over a missing image.
+        console.warn(`Cover restore failed for ${sourceId}:`, err.message);
       }
 
       const columns = {};

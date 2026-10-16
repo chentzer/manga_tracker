@@ -1059,6 +1059,10 @@ export default function MediaWebView({
         const adopted = !!(imported && isImportedSourceId(imported.source_id));
         if (adopted) {
           adoptImportedEntry(imported.source_id, config.key, details);
+          // The cover downloaded at import is replaced by the site's.
+          if (localPath && imported.local_image_path && imported.local_image_path !== localPath) {
+            FileSystem.deleteAsync(imported.local_image_path, { idempotent: true }).catch(() => {});
+          }
           logDebug(`Linked ${sourceId} to "${imported.title}" from your imported MyAnimeList list.`);
         } else {
           insertEntry({ ...details, mediaType: config.key, malId: payload.malId });
