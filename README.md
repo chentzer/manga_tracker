@@ -35,13 +35,12 @@ npx expo install --fix
 npx expo start -c          # -c clears the Metro bundler cache
 ```
 
-**Expo Go version note:** the Apple App Store / Google Play version of
-Expo Go currently supports SDK 54 (Expo has released newer SDKs, but they're
-waiting on App Store approval). This project is pinned to SDK 54 for that
-reason — if you see "failed to download remote update" it usually means a
-mismatch between the project's SDK and your installed Expo Go app; check
-[expo.dev/go](https://expo.dev/go) or the in-app Expo Go version screen if
-that happens again.
+**Expo version note:** this project is on Expo SDK 57 (React Native
+0.86). Expo Go only runs the SDK it was built for, and the app uses native
+modules Expo Go doesn't have (Google sign-in, sharing into the Notepad), so
+build it with `eas build` (or `npx expo run:android`) rather than relying on
+Expo Go. If Expo Go shows "failed to download remote update", its SDK
+doesn't match the project's; check [expo.dev/go](https://expo.dev/go).
 
 Requires the Expo Go app on your phone (or an iOS/Android simulator) to run
 during development. Scan the QR code from `expo start`.
@@ -750,6 +749,8 @@ store review entirely, which suits a personal tracker like this well.
   cached for the whole session, since they expire after about an hour —
   `GoogleSignin.getTokens()` handles refreshing under the hood cheaply,
   so there's no real cost to always asking.
+- **Save Page Image** imports `expo-media-library/legacy`: from SDK 57 the
+  plain import's `saveToLibraryAsync` throws at runtime.
 - File operations use `expo-file-system/legacy` rather than the plain
   `expo-file-system` import — SDK 54 replaced the old function-based API
   (`getInfoAsync`, `downloadAsync`, etc.) with a new `File`/`Directory`

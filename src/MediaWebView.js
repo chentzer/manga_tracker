@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
+// SDK 57: saveToLibraryAsync only works from the legacy entry point.
+import * as MediaLibrary from 'expo-media-library/legacy';
 import {
   getEntry,
   getEntryByMalId,
