@@ -92,22 +92,10 @@ export default function App() {
 // tabs whose type supports it (see MediaWebView.js / mediaTypes.js).
 const BUTTON_SETTINGS = [
   {
-    key: 'codeSearch',
-    setting: 'showCodeSearch',
-    label: 'Code search box',
-    hint: 'The "Enter code" / "Search code" box at the top of each tab.',
-  },
-  {
     key: 'siteMenu',
     setting: 'showSiteMenu',
     label: 'Site list',
-    hint: 'The ▾ menu in the search bar for switching between a tab\'s sites (Manhwa).',
-  },
-  {
-    key: 'reverseSearch',
-    setting: 'showReverseSearchButton',
-    label: 'Reverse',
-    hint: 'Find a title from an image (types with reverseSearch set).',
+    hint: 'The ▾ menu at the top of the tab for switching between a tab\'s sites (Manhwa).',
   },
   {
     key: 'savePageImage',
@@ -226,7 +214,7 @@ function AppContent({ notepadRefreshKey }) {
   const [notepadVisible, setNotepadVisible] = useState(false);
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
-  const [buttons, setButtons] = useState({ codeSearch: true, siteMenu: true, reverseSearch: true, savePageImage: true });
+  const [buttons, setButtons] = useState({ siteMenu: true, savePageImage: true });
   // Settings → App lock; the setting lives in AppLock (src/AppLock.js).
   const { lockEnabled, changeLockEnabled } = useAppLockSetting();
   // Set when a "View in Library" button is tapped from a browsing tab —

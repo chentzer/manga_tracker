@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   Text,
-  Keyboard,
   Modal,
   ScrollView,
   BackHandler,
@@ -34,15 +33,14 @@ import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
-import ReverseSearch from './ReverseSearch';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, pictureExtension, timeStamp } from './imageHold';
-import { driveSyncAllowed, markDriveSyncDeferred, isOnMobileData } from './dataSaver';
+import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 
 // Which optional controls to show (Settings → Buttons). Each also needs
-// the type to support it: buildUrlFromId/sources for the code box,
-// reverseSearch and savePageImage in mediaTypes.js.
-const ALL_BUTTONS = { codeSearch: true, siteMenu: true, reverseSearch: true, savePageImage: true };
+// the type to support it: several sites for the site list, savePageImage
+// in mediaTypes.js.
+const ALL_BUTTONS = { siteMenu: true, savePageImage: true };
 
 // Finds the largest image currently rendered on the page — for a manga
 // reader this is almost always the actual page being read, not a logo
@@ -413,11 +411,6 @@ export default function MediaWebView({
   );
   const viewInLibraryRef = useRef(onViewInLibrary);
   viewInLibraryRef.current = onViewInLibrary;
-  // The Reverse button's search window (ReverseSearch.js).
-  const [reverseVisible, setReverseVisible] = useState(false);
-  // The title search being shown: { query, index } into config.titleSearch,
-  // or null. Kept until closed or another search starts.
-  const [titleSearch, setTitleSearch] = useState(null);
   // The site list (multi-site tabs): its sites, whether it's open, and the
   // page's URL (for which site is ticked; set on every navigation).
   const [sites] = useState(() => getTabSites(config));
@@ -445,9 +438,6 @@ export default function MediaWebView({
   // its async download+upload — resulting in two separate Drive uploads
   // of the same image. This in-memory guard closes that gap.
   const inFlightSourceIds = useRef(new Set());
-  const [manualCode, setManualCode] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
   const [debugLog, setDebugLog] = useState([]);
   const [logVisible, setLogVisible] = useState(false);
   // Tracks whether the currently-loaded page corresponds to an entry
@@ -482,114 +472,6 @@ export default function MediaWebView({
     setSavingImage(true);
     webviewRef.current?.injectJavaScript(GRAB_LARGEST_IMAGE_JS);
   }, []);
-
-  // Title search (types with `titleSearch`): opens one site's search
-  // results at a time; the Next button moves the same search on.
-  const openTitleSearch = useCallback(
-    (query, index) => {
-      const site = config.titleSearch[index];
-      setTitleSearch({ query, index });
-      webviewRef.current?.injectJavaScript(
-        `window.location.href = ${JSON.stringify(site.buildSearchUrl(query))}; true;`
-      );
-    },
-    [config]
-  );
-
-  const handleManualSubmit = useCallback(() => {
-    const code = manualCode.trim();
-    if (!code) return;
-
-    // Types without codes (e.g. Manhwa) search titles instead.
-    if (config.titleSearch && !config.buildUrlFromId) {
-      Keyboard.dismiss();
-      setManualCode('');
-      openTitleSearch(code, 0);
-      return;
-    }
-    setTitleSearch(null);
-
-    // Duplicate check happens before navigating anywhere — a duplicate
-    // code is silently ignored rather than re-fetching/re-saving it.
-    if (getEntry(code, config.key)) {
-      setManualCode('');
-      Keyboard.dismiss();
-      return;
-    }
-
-    const url = config.buildUrlFromId(code);
-    webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
-    setManualCode('');
-    Keyboard.dismiss();
-  }, [manualCode, config, openTitleSearch]);
-
-  // Strips everything but letters/digits and lowercases, for comparing
-  // a searched-for code against a candidate result's extracted id —
-  // codes are written inconsistently across sites/queries ("ABC-123"
-  // vs "abc123"), so hyphens/case shouldn't matter for the comparison.
-  function normalizeCode(s) {
-    return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-
-  // Cross-site fallback search for multi-source types (e.g. otherCategory):
-  // tries each configured source's search URL in priority order via a
-  // plain app-level fetch (not the webview — this needs to inspect raw
-  // HTML from multiple sites without navigating away from whichever
-  // page is currently showing), and navigates the webview to the first
-  // genuinely matching result found. A "candidate result" is any link
-  // on that search results page matching the source's own urlRegex —
-  // deliberately reusing the same pattern used to recognize a genuine
-  // content page while browsing normally, so there's only one place
-  // per source that defines what a valid video URL looks like. Each
-  // candidate is then double-checked against the actual searched code
-  // (via normalizeCode, allowing a suffix like "-extended" to
-  // follow the real code) rather than trusted outright — some sites'
-  // search is fuzzy/broad rather than exact and can return a
-  // completely different code that just happens to share a number
-  // (e.g. searching "ABC-123" returning "XYZ-123").
-  const handleSearchSubmit = useCallback(async () => {
-    const query = searchQuery.trim();
-    if (!query || !config.sources) return;
-    Keyboard.dismiss();
-    setSearching(true);
-    logDebug(`Searching for "${query}" across ${config.sources.length} sites…`);
-    const normalizedQuery = normalizeCode(query);
-
-    try {
-      for (const source of config.sources) {
-        const searchUrl = source.buildSearchUrl(query);
-        try {
-          const res = await fetch(searchUrl);
-          const html = await res.text();
-          const hrefRegex = /href="([^"]+)"/g;
-          let hrefMatch;
-          let foundUrl = null;
-          while ((hrefMatch = hrefRegex.exec(html)) !== null) {
-            const href = hrefMatch[1];
-            const idMatch = href.match(source.urlRegex);
-            if (!idMatch) continue;
-            const candidateId = normalizeCode(source.extractId(idMatch));
-            if (candidateId.indexOf(normalizedQuery) === 0) {
-              foundUrl = href;
-              break;
-            }
-          }
-          if (foundUrl) {
-            logDebug(`Found on ${source.name}: ${foundUrl}`);
-            webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(foundUrl)}; true;`);
-            setSearchQuery('');
-            return;
-          }
-          logDebug(`Not found on ${source.name}, trying next…`);
-        } catch (err) {
-          logDebug(`Search on ${source.name} failed: ${err.message}`);
-        }
-      }
-      logDebug(`"${query}" not found on any configured site.`);
-    } finally {
-      setSearching(false);
-    }
-  }, [searchQuery, config, logDebug]);
 
   // After a chapter update on a site whose pages don't show volume
   // numbers (promptForVolumes in mediaTypes.js): says volumes read wasn't
@@ -1204,46 +1086,10 @@ export default function MediaWebView({
     [config, isSignedInToGoogle, checkUrlAndExtract, logDebug, applyProgress, saveHeldPicture]
   );
 
-  // A reverse search site may download a lot in the page (models, search
-  // data), so on mobile data this asks first.
-  const openReverseSearch = () => {
-    if (!isOnMobileData()) {
-      setReverseVisible(true);
-      return;
-    }
-    Alert.alert('Use mobile data?', 'Reverse search sites can download a lot of data, especially the first time.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Continue', onPress: () => setReverseVisible(true) },
-    ]);
-  };
-
-  const reverseButton =
-    !config.reverseSearch || !config.buildUrlFromId || !buttons.reverseSearch ? null : (
-      <TouchableOpacity style={[styles.manualButton, styles.secondaryButton]} onPress={openReverseSearch}>
-        <Text style={styles.manualButtonText}>Reverse</Text>
-      </TouchableOpacity>
-    );
-
-  // A reverse-search result: open that code (and page, if the result
-  // was a single page) in this tab.
-  const handleReverseResult = (code, page) => {
-    setReverseVisible(false);
-    const url = config.buildUrlFromId(code) + (page ? `${page}/` : '');
-    logDebug(`Reverse search: opening ${code}${page ? ` page ${page}` : ''}`);
-    webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
-  };
-
-  // Site list: picks one of the tab's sites. With a title search showing,
-  // the same search moves to that site; otherwise its home page opens.
+  // Site list: picks one of the tab's sites and opens its home page.
   const currentSiteIndex = siteIndexFor(sites, pageUrl || startSource.uri);
   const openSite = (site) => {
     setSiteMenuVisible(false);
-    const searchIndex = titleSearch ? config.titleSearch.findIndex((t) => t.name === site.name) : -1;
-    if (searchIndex >= 0) {
-      openTitleSearch(titleSearch.query, searchIndex);
-      return;
-    }
-    setTitleSearch(null);
     logDebug(`Site list: opening ${site.name}`);
     webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(site.homeUrl)}; true;`);
   };
@@ -1256,84 +1102,9 @@ export default function MediaWebView({
       </TouchableOpacity>
     );
 
-  // The code box can be hidden in Settings; the bar stays for any buttons
-  // still shown.
-  const showCodeBar = buttons.codeSearch || siteButton || reverseButton;
-
   return (
     <View style={styles.container}>
-      {(config.buildUrlFromId || config.titleSearch) && showCodeBar ? (
-        <View style={[styles.manualBar, !buttons.codeSearch && styles.manualBarButtonsOnly]}>
-          {siteButton}
-          {buttons.codeSearch ? (
-            <>
-              <TextInput
-                style={styles.manualInput}
-                placeholder={config.buildUrlFromId ? `Enter ${config.label} code…` : `Search ${config.label} title…`}
-                placeholderTextColor="#999"
-                value={manualCode}
-                onChangeText={setManualCode}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="default"
-                returnKeyType="go"
-                onSubmitEditing={handleManualSubmit}
-              />
-              <TouchableOpacity style={styles.manualButton} onPress={handleManualSubmit}>
-                <Text style={styles.manualButtonText}>{config.buildUrlFromId ? 'Add' : 'Search'}</Text>
-              </TouchableOpacity>
-            </>
-          ) : null}
-          {reverseButton}
-        </View>
-      ) : null}
-      {titleSearch ? (
-        <View style={styles.titleSearchBar}>
-          <Text style={styles.titleSearchText} numberOfLines={1}>
-            “{titleSearch.query}” on {config.titleSearch[titleSearch.index].name} ({titleSearch.index + 1}/
-            {config.titleSearch.length})
-          </Text>
-          {titleSearch.index + 1 < config.titleSearch.length ? (
-            <TouchableOpacity
-              style={[styles.manualButton, styles.secondaryButton]}
-              onPress={() => openTitleSearch(titleSearch.query, titleSearch.index + 1)}
-            >
-              <Text style={styles.manualButtonText}>Next: {config.titleSearch[titleSearch.index + 1].name} ›</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={8}>
-            <Text style={styles.titleSearchClose}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      {config.sources && buttons.codeSearch ? (
-        <View style={styles.manualBar}>
-          <TextInput
-            style={styles.manualInput}
-            placeholder={`Search code across ${config.sources.length} sites…`}
-            placeholderTextColor="#999"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="default"
-            returnKeyType="search"
-            onSubmitEditing={handleSearchSubmit}
-            editable={!searching}
-          />
-          <TouchableOpacity style={styles.manualButton} onPress={handleSearchSubmit} disabled={searching}>
-            <Text style={styles.manualButtonText}>{searching ? '…' : 'Search'}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      {reverseButton ? (
-        <ReverseSearch
-          visible={reverseVisible}
-          config={config}
-          onClose={() => setReverseVisible(false)}
-          onOpenCode={handleReverseResult}
-        />
-      ) : null}
+      {siteButton ? <View style={styles.manualBar}>{siteButton}</View> : null}
       {currentEntryKey ? (
         <TouchableOpacity
           style={styles.viewInLibraryButton}
@@ -1483,14 +1254,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#16213e',
     gap: 8,
   },
-  manualInput: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 14,
-  },
   manualButton: {
     backgroundColor: '#e94560',
     borderRadius: 6,
@@ -1499,9 +1262,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
-  secondaryButton: { backgroundColor: '#1f4068' },
   siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
-  // The site list drops down from the top left, under the search bar.
+  // The site list drops down from the top left, under its button.
   siteMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', paddingTop: 96, paddingHorizontal: 8 },
   siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4 },
   siteMenuRow: { paddingVertical: 10, paddingHorizontal: 14 },
@@ -1509,19 +1271,6 @@ const styles = StyleSheet.create({
   siteMenuText: { color: '#fff', fontSize: 15 },
   siteMenuTextCurrent: { color: '#e94560', fontWeight: '700' },
   siteMenuDomain: { color: '#8892b0', fontSize: 12, marginTop: 2 },
-  // Title search: which site's results are showing, and Next.
-  titleSearchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-    backgroundColor: '#16213e',
-  },
-  titleSearchText: { flex: 1, color: '#ddd', fontSize: 13 },
-  titleSearchClose: { fontSize: 13, fontWeight: '700', color: '#c0392b' },
-  // Code box hidden in Settings: just the buttons, on the right.
-  manualBarButtonsOnly: { justifyContent: 'flex-end' },
   viewInLibraryButton: {
     backgroundColor: '#1a7a4c',
     paddingVertical: 8,

@@ -300,18 +300,6 @@ export const MEDIA_TYPES = {
     },
     // Set MANGA_SITE_URL in .env to the site you browse.
     startUrl: MANGA_SITE_URL,
-    // Shows a Reverse button beside the code box (see ReverseSearch.js):
-    // opens a reverse image search site where you pick a page image to
-    // find which manga it's from. Set `url` to the search site you use.
-    // Tapping a result whose link matches `resultRegex` opens that code
-    // in this tab (needs buildUrlFromId below). resultRegex is optional
-    // and defaults to this type's urlRegex, matched on any host — set it
-    // if the search site links somewhere with a different URL structure.
-    // Remove this block to hide the button.
-    reverseSearch: {
-      url: 'https://your-reverse-search.example.com',
-      // resultRegex: /^https?:\/\/[^/]+\/title\/([a-z0-9]+)/i,
-    },
     // Shows the "⬇ Save Page Image" button (the largest image on screen,
     // saved to the gallery). Manga only by default.
     savePageImage: true,
@@ -321,9 +309,6 @@ export const MEDIA_TYPES = {
     // capture group 2 = the chapter number on reader pages. Adjust the
     // path segments to match your actual site's URLs.
     urlRegex: /^https?:\/\/[^/]+\/title\/([a-z0-9]+)(?:-[^/?#]*)?(?:\/\d+-chapter-([\d.]+))?/i,
-    // Reverse of urlRegex/extractId — turns a manga id typed in manually
-    // into a real URL the webview can navigate to.
-    buildUrlFromId: (id) => `${MANGA_SITE_URL}/title/${id}`,
     // Used by the "Save Page Image" feature to name the saved file as
     // "code -- chN" (e.g. "abc12 -- ch60"). Returns null on the series
     // page, in which case the caller falls back to just the code.
@@ -456,8 +441,7 @@ export const MEDIA_TYPES = {
     startUrl: MANHWA_SITE_URL,
     // Pop-ups and redirects can't leave the two sites.
     blockExternalNavigation: true,
-    // No codes: the search box takes a title and opens each site's results
-    // in turn, with a "Next ›" button (MediaWebView.js).
+    // The two sites' names (for the ▾ site list) and title search pages.
     titleSearch: [
       { name: MANHWA_HOST, buildSearchUrl: (q) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(q)}` },
       {
@@ -528,8 +512,6 @@ export const MEDIA_TYPES = {
     // the path segments to match your site's URLs.
     urlRegex: /^https?:\/\/[^/]+\/(?:watch|info)\/([A-Za-z0-9_-]+)/,
     extractId: (match) => match[1],
-    // Reverse of urlRegex/extractId, for a series id typed in manually.
-    buildUrlFromId: (id) => `${ANIME_SITE_URL}/watch/${id}`,
     // The episode an episode page is on (?ep=N), or null on the series
     // page. Opening an episode sets the entry to Watching and its
     // episodes watched (MediaWebView.js).
@@ -644,7 +626,6 @@ export const MEDIA_TYPES = {
   //       domain: 'site-a.example.com',
   //       urlRegex: /.../,
   //       extractId: (match) => match[1],
-  //       buildUrlFromId: (id) => `https://site-a.example.com/${id}`,
   //       buildSearchUrl: (code) => `https://site-a.example.com/search/${code}`,
   //       extractMetadataJs: `...`,
   //     },
@@ -654,8 +635,6 @@ export const MEDIA_TYPES = {
   //       urlRegex: /.../,
   //       extractId: (match) => match[1],
   //       buildSearchUrl: (code) => `https://site-b.example.com/?s=${code}`,
-  //       // No buildUrlFromId here is fine — that source just won't
-  //       // support direct manual entry, only being found via search.
   //       autoConfirmButtonText: 'Continue', // if this site has one
   //       extractMetadataJs: `...`,
   //     },

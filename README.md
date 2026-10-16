@@ -74,13 +74,8 @@ adapt to whatever you actually use:
    the right selector. Manga only records from the series page: reader
    pages don't show the cover or author, so its script posts
    `{ skip: '…' }` there and nothing is saved from that page.
-4. **`reverseSearch.url`** (manga, optional) — the reverse image search
-   site the Reverse button opens (placeholder:
-   `your-reverse-search.example.com`). Remove the `reverseSearch` block
-   to hide the button.
-5. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
-   The Manhwa tab has no codes: its box searches a title on the first
-   site, and a **Next ›** bar repeats the search on the second. The first
+4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
+   The ▾ site list at the top of the tab switches between them. The first
    is expected to be a Next.js comics site (series at `/series/<id>`,
    details in its `__NEXT_DATA__` JSON, search at `/browse?search=`); the
    second a site on the common WordPress manga theme (series at
@@ -91,7 +86,7 @@ adapt to whatever you actually use:
    stops the page from setting it, and hides the Family Mode switch and
    the "I'm an adult" button. Adjust the paths in `mediaTypes.js` if your
    sites differ.
-6. **Google Drive setup (for cloud sync — walkthrough below).**
+5. **Google Drive setup (for cloud sync — walkthrough below).**
 
 ## Setting up Google Drive sync (step by step)
 
@@ -350,23 +345,13 @@ so nothing renders blank.
   matches two ways: native navigation events, and a polling script injected
   into the page (`URL_WATCHER_JS`) that catches single-page-app sites which
   change the URL via `history.pushState` without a full reload — native
-  navigation events don't fire for those. Also renders a manual code-entry
-  bar when a type's config defines `buildUrlFromId` (currently just manga)
-  — typing a code and tapping Add checks for a duplicate first (silently
-  ignored if found), otherwise navigates the webview there so it goes
-  through the normal extraction/save flow. Whenever the current page
+  navigation events don't fire for those. Whenever the current page
   corresponds to an entry already in the library, a **View in Library**
   button appears — tapping it (via the `onViewInLibrary` prop from
   App.js) switches to the Library tab and opens that exact entry's
   detail sheet directly, clearing any active filters that might
   otherwise hide it, rather than leaving you to find it in the list
-  yourself. On types with `reverseSearch` set (Manga in the example), a
-  **Reverse** button beside the code box opens `src/ReverseSearch.js`:
-  the configured reverse image search site in a full-screen window. You
-  pick an image from the gallery there, and tapping a result whose link
-  matches `reverseSearch.resultRegex` (default: the type's `urlRegex`)
-  opens that code, and page if given, in the type's tab. Other links on
-  the search site don't open. A "Save Page Image" button (types with
+  yourself. A "Save Page Image" button (types with
   `savePageImage: true` only — Manga in the example)
   grabs the largest currently-rendered image on the page (not necessarily
   the cover — whatever's actually on screen) and saves it straight to the
@@ -461,25 +446,7 @@ so nothing renders blank.
   and use that source's own extraction logic — `getAllowedDomains()` and
   `getDomainButtonMap()` generalize the popup-blocking and
   auto-confirm-interstitial features the same way, so those still work
-  correctly across every source rather than assuming a single site. A
-  multi-source type shows a fallback **search box** instead of the
-  manual-entry box: `handleSearchSubmit()` tries each source's
-  `buildSearchUrl(code)` in priority order via a plain app-level `fetch`
-  (not the webview — this needs to inspect raw HTML from multiple sites
-  without navigating away from whatever's currently showing), regex-scans
-  the response for any `href` matching that source's own `urlRegex`, and
-  — critically — verifies each candidate's own extracted id actually
-  starts with the searched code (via `normalizeCode()`, stripping
-  hyphens/case so "ABC-123" matches "abc123...") before accepting it,
-  rather than trusting the first video-shaped link outright. This
-  matters because some sites' search is fuzzy/broad rather than exact
-  and can return a completely different code that just happens to share
-  a number (searching "ABC-123" returning "XYZ-123", for example).
-  Falls through to the next source if no genuinely matching result is
-  found. A source without `buildUrlFromId`
-  simply can't be reached by manual entry, only by search (e.g. when a
-  site's real content URLs embed a numeric id that isn't derivable from
-  the code alone).
+  correctly across every source rather than assuming a single site.
 - `src/relockGuard.js` — a tiny shared module letting any action mark an
   upcoming AppState transition as benign for a few seconds, so
   `AppLock.js`'s re-lock-on-resume logic doesn't fire for things like a
@@ -544,10 +511,9 @@ so nothing renders blank.
   every backup on Connect (see "What gets backed up" above). The
   Library reloads afterwards (`reloadKey`), even if it's the open tab.
 - **Site list** (`getTabSites()` in `MediaWebView.js`) — tabs with more
-  than one site (Manhwa) have a ▾ button at the left of the search bar,
+  than one site (Manhwa) have a ▾ button at the top left of the tab,
   named after the site you're on, opening a menu of the tab's sites.
-  Picking one opens its home page, or, while a title search's "Next" bar
-  is up, runs the same search on that site.
+  Picking one opens its home page.
 - **Groups (Manga, Anime)** — `groupField` in mediaTypes.js,
   `src/groups.js`. Entries saved one by one (volumes, parts, seasons) can
   be put in a named group from the detail sheet: **Add to a group…**
@@ -666,8 +632,8 @@ so nothing renders blank.
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
   `MediaWebView.js`; off by default so the normal UI stays clean). Under
-  **Buttons**, switches hide the code search box, the **Site list**,
-  **Reverse** and **Save Page Image** on the tabs that have them (all
+  **Buttons**, switches hide the **Site list** and **Save Page Image** on
+  the tabs that have them (all
   shown by default;
   `BUTTON_SETTINGS` in App.js). The sheet scrolls when it doesn't fit.
   Under **Data saver** (`src/dataSaver.js`): **Load tabs only when
@@ -677,7 +643,7 @@ so nothing renders blank.
   Wi-Fi only** (off; automatic backups and cover uploads wait for Wi-Fi
   and catch up when it's back, while Backup Now / Restore / Connect
   in Settings always run). Wi-Fi vs mobile data comes from `expo-network`, so it
-  needs a new app build. On mobile data, the Reverse button asks first.
+  needs a new app build.
   Each setting is persisted via `getSetting()`/`setSetting()` in `db.js`
   so it survives app restarts. Also coordinates the **View in
   Library** button (see `MediaWebView.js`): `handleViewInLibrary()`
