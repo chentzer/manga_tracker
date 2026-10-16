@@ -562,7 +562,10 @@ so nothing renders blank.
   `group_order`, both in the Drive backup.
 - **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
   lists of items (text or links, which open with a tap). The built-in
-  **Inbox** is for jotting things down; **Move** files an item into a named
+  **Inbox** is for jotting things down, and is where text and links
+  shared from other apps land (select them, then **Share › Manga
+  Tracker**; `expo-share-intent`, handled in App.js outside the app lock,
+  so sharing never asks to unlock). **Move** files an item into a named
   note, made with **＋ New**. Stored in SQLite (`notes`, `notebooks`).
   `src/notepadSync.js` syncs with Drive (`notepad.json`, plus a readable
   `Notepad.txt`, in the MangaTracker folder): note NAMES are shared by

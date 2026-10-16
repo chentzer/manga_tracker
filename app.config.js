@@ -37,6 +37,14 @@ export default {
           isAccessMediaLocationEnabled: true,
         },
       ],
+      // Share › Manga Tracker from other apps: selected text and links go
+      // to the Notepad's Inbox (App.js).
+      [
+        'expo-share-intent',
+        {
+          androidIntentFilters: ['text/*'],
+        },
+      ],
     ],
     extra: {
       googleClientIdAndroid:

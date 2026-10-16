@@ -47,15 +47,20 @@ function LinkifiedText({ content, style, linkStyle }) {
 }
 
 // Full-screen notepad (the 📝 button on the Library). Notes are lists of
-// items (text or links). The Inbox is built in, for jotting things down
-// quickly; items get moved into a named note ("Grocery list"…) from here.
+// items (text or links). The Inbox is built in and is where everything
+// shared from other apps lands — no unlock needed, so no picking a
+// destination at share time; items get moved into a named note
+// ("Grocery list"…) from here.
 //
 // Note NAMES are shared across devices (created/deleted everywhere);
 // CONTENTS are only ever this device's own. Deleting an item removes it
 // from Drive too; deleting a whole note keeps it in Drive. See
 // notepadSync.js.
 //
-export default function Notepad({ visible, onClose }) {
+//
+// refreshKey: bumped by App.js when something is shared in, so an
+// already open notepad reloads.
+export default function Notepad({ visible, onClose, refreshKey }) {
   const [notebooks, setNotebooks] = useState([]);
   const [counts, setCounts] = useState({ inbox: 0 });
   const [selectedId, setSelectedId] = useState(null); // null = Inbox
@@ -81,7 +86,7 @@ export default function Notepad({ visible, onClose }) {
 
   useEffect(() => {
     if (visible) reload();
-  }, [visible, reload]);
+  }, [visible, refreshKey, reload]);
 
   // While open: pick up notes created/deleted on other devices — sync
   // once on opening, and reload whenever any sync changes the list.
@@ -256,7 +261,7 @@ export default function Notepad({ visible, onClose }) {
           ListEmptyComponent={
             <Text style={styles.empty}>
               {selectedId == null
-                ? 'Nothing here yet. Add text or a link above, then use Move to file it into a note.'
+                ? 'Nothing here yet. Add text or a link above, or select text or a link in another app and tap Share › Manga Tracker — it lands here without unlocking. Then use Move to file it into a note.'
                 : 'This note is empty. Add items above, or move them here from the Inbox.'}
             </Text>
           }

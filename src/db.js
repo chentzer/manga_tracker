@@ -163,8 +163,9 @@ export function initDb() {
     );
   `);
   // Named notes ("Grocery list", ...). Each item in `notes` belongs to
-  // one via notebook_id; NULL means the built-in Inbox, for jotting
-  // things down quickly (items get moved into a named note later).
+  // one via notebook_id; NULL means the built-in Inbox, which is where
+  // anything shared in from another app lands (no unlock needed, so no
+  // choosing a destination either — items get moved later in-app).
   db.execSync(`
     CREATE TABLE IF NOT EXISTS notebooks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -291,7 +292,7 @@ export function createNotebook(title, updatedAt = null) {
   const clean = title.trim();
   if (!clean) throw new Error('Give the note a name.');
   if (clean.toLowerCase() === INBOX_TITLE.toLowerCase()) {
-    throw new Error(`"${INBOX_TITLE}" is the built-in note.`);
+    throw new Error(`"${INBOX_TITLE}" is reserved for shared items.`);
   }
   if (db.getFirstSync('SELECT id FROM notebooks WHERE title = ? COLLATE NOCASE', [clean])) {
     throw new Error(`A note called "${clean}" already exists.`);

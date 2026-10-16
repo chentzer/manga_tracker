@@ -10,9 +10,12 @@ import {
   Switch,
   ScrollView,
   LayoutAnimation,
+  Platform,
+  ToastAndroid,
 } from 'react-native';
+import { useShareIntent } from 'expo-share-intent';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { initDb, getSetting, setSetting } from './src/db';
+import { initDb, getSetting, setSetting, addNote } from './src/db';
 import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
@@ -42,12 +45,43 @@ const SITE_TAB_KEYS = MEDIA_TYPE_LIST.map((m) => m.key);
 const TABS = [...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label })), { key: 'library', label: 'Library' }];
 
 export default function App() {
+  // Bumped whenever a note arrives via the share sheet, so an already
+  // open Notepad reloads its list.
+  const [notepadRefreshKey, setNotepadRefreshKey] = useState(0);
+  // Text/links selected in another app and shared here via Android's
+  // share sheet. Handled up here, OUTSIDE AppLock, so saving never needs
+  // an unlock: AppLock renders only the lock screen until unlocked, so
+  // anything inside it can't run yet. Shares always go to the Inbox —
+  // choosing a specific note would mean showing note titles to whoever
+  // is holding a locked phone; items get moved to a note in-app instead.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+
+  // The database is ready before the share effect below runs, even for a
+  // share that cold-launches the app: AppLock calls initDb during its
+  // first render (it needs the App lock setting), and render comes before
+  // any effect.
+  useEffect(() => {
+    if (!hasShareIntent) return;
+    const shared = (shareIntent?.text || shareIntent?.webUrl || '').trim();
+    if (shared) {
+      addNote(shared); // no notebook = Inbox
+      setNotepadRefreshKey((k) => k + 1);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Saved to Notepad › Inbox', ToastAndroid.SHORT);
+      }
+      // Only reaches Drive if this run of the app is already signed in;
+      // otherwise AppContent catches it up once Drive is signed in.
+      syncNotepadToDrive();
+    }
+    resetShareIntent();
+  }, [hasShareIntent, shareIntent, resetShareIntent]);
+
   return (
     // SafeAreaProvider is required for react-native-safe-area-context's
     // SafeAreaView to work at all — without it, insets default to zero.
     <SafeAreaProvider>
       <AppLock>
-        <AppContent />
+        <AppContent notepadRefreshKey={notepadRefreshKey} />
       </AppLock>
     </SafeAreaProvider>
   );
@@ -105,7 +139,7 @@ const DATA_SAVER_SETTINGS = [
 // How long a browsing tab's page sits still before the tab row hides.
 const TAB_BAR_HIDE_MS = 3000;
 
-function AppContent() {
+function AppContent({ notepadRefreshKey }) {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -235,7 +269,9 @@ function AppContent() {
     restoreGoogleSession().then((restored) => {
       if (restored) {
         setIsSignedInToGoogle(true);
-        syncNotepadToDrive(); // picks up note names added on other devices
+        // Picks up note names added on other devices, and anything shared
+        // into the Inbox before Drive was signed in for this run.
+        syncNotepadToDrive();
         catchUpDriveSync();
       }
     });
@@ -540,7 +576,7 @@ function AppContent() {
         </View>
       </View>
 
-      <Notepad visible={notepadVisible} onClose={() => setNotepadVisible(false)} />
+      <Notepad visible={notepadVisible} onClose={() => setNotepadVisible(false)} refreshKey={notepadRefreshKey} />
 
       <Modal
         visible={settingsVisible}
