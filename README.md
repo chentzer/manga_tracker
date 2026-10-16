@@ -1,4 +1,4 @@
-# Media Tracker (Manga + Anime)
+# Manga Tracker
 
 Records an entry (name = extracted ID, cover = thumbnail image) whenever you
 browse to a matching URL in one of the app's two built-in webview tabs:
@@ -114,7 +114,7 @@ redirect URI to register, just the platform's native account picker.
 2. **APIs & Services → Library** → search "Google Drive API" → **Enable**.
 3. **APIs & Services → OAuth consent screen**:
    - User type: **External** (unless you have a Google Workspace org).
-   - Fill in app name (e.g. "Media Tracker"), your email for support/contact.
+   - Fill in app name (e.g. "Manga Tracker"), your email for support/contact.
    - Scopes: you don't need to add `drive.file` here manually — it's
      requested at sign-in time by the app.
    - Under **Test users**, add your own Google account email. While the

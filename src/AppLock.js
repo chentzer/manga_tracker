@@ -61,7 +61,7 @@ export default function AppLock({ children }) {
       }
 
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Unlock Media Tracker',
+        promptMessage: 'Unlock Manga Tracker',
         // Falls back to device PIN/pattern/password if biometrics aren't
         // enrolled or fail — most users won't have fingerprint/face setup
         // on every device, and locking them out entirely would be worse
@@ -156,7 +156,7 @@ export default function AppLock({ children }) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.icon}>🔒</Text>
-        <Text style={styles.title}>Media Tracker Locked</Text>
+        <Text style={styles.title}>Manga Tracker Locked</Text>
         {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
         <TouchableOpacity
           style={styles.button}

@@ -32,8 +32,8 @@ export default {
       [
         'expo-media-library',
         {
-          photosPermission: 'Allow Media Tracker to save images to your photo library.',
-          savePhotosPermission: 'Allow Media Tracker to save images to your photo library.',
+          photosPermission: 'Allow Manga Tracker to save images to your photo library.',
+          savePhotosPermission: 'Allow Manga Tracker to save images to your photo library.',
           isAccessMediaLocationEnabled: true,
         },
       ],

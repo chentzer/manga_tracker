@@ -508,7 +508,7 @@ function AppContent({ notepadRefreshKey }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.title}>Media Tracker</Text>
+        <Text style={styles.title}>Manga Tracker</Text>
         <View style={styles.headerRight}>
           {/* Backup / restore progress (src/SyncStatusPill.js). */}
           <SyncStatusPill />
