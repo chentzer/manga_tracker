@@ -23,6 +23,22 @@ import Constants from 'expo-constants';
 const extra = Constants.expoConfig?.extra || {};
 const MANGA_SITE_URL = extra.mangaSiteUrl || 'https://your-manga-site.example.com';
 const ANIME_SITE_URL = extra.animeSiteUrl || 'https://your-anime-site.example.com';
+const MANHWA_SITE_URL = extra.manhwaSiteUrl || 'https://your-manhwa-site.example.com';
+const MANHWA_SITE_2_URL = extra.manhwaSite2Url || 'https://your-second-manhwa-site.example.com';
+
+// "https://www.example.com/x" -> "example.com".
+function hostOf(url) {
+  const match = /^https?:\/\/(?:www\.)?([^/:]+)/i.exec(url);
+  return match ? match[1].toLowerCase() : url;
+}
+
+// A hostname as a regular-expression fragment.
+function hostPattern(url) {
+  return hostOf(url).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const MANHWA_HOST = hostOf(MANHWA_SITE_URL);
+const MANHWA_HOST_2 = hostOf(MANHWA_SITE_2_URL);
 
 // Scripts for "Watch next" / "Read next" (EntryList.js → MediaWebView.js).
 // Each runs on the page that was opened and either moves on to the wanted
@@ -112,6 +128,152 @@ function checkEpisodeJs(n) {
         }
       }
       check();
+    })();
+    true;
+  `;
+}
+
+// Reads a series on a Next.js comics site that embeds the series as JSON
+// (<script id="__NEXT_DATA__"> -> props.pageProps.series: title,
+// altTitles, author, artist, tags) with the cover as og:image. The site
+// changes pages without reloading, which leaves that JSON stale, and
+// chapter pages don't carry it, so the series page (/series/<id>) is
+// fetched whenever the JSON on screen isn't for this series.
+const NEXT_SERIES_READER_JS = `
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    function dataOf(doc) {
+      var el = doc.getElementById('__NEXT_DATA__');
+      try { return el ? JSON.parse(el.textContent) : null; } catch (e) { return null; }
+    }
+    function list(value) {
+      return [].concat(value || []).map(function(v) { return String(v).trim(); })
+        .filter(Boolean).join(', ') || null;
+    }
+    function read(data, doc) {
+      var series = data && data.props && data.props.pageProps && data.props.pageProps.series;
+      if (!series) return send({ title: document.title || null });
+      var og = doc.querySelector('meta[property="og:image"]');
+      send({
+        imageUrl: og ? og.content : null,
+        title: series.title || null,
+        altTitle: list(series.altTitles),
+        author: list(series.author) || list(series.artist),
+        genre: list(series.tags),
+      });
+    }
+    var parts = location.pathname.split('/').filter(Boolean);
+    var data = dataOf(document);
+    if (data && data.query && String(data.query.id) === parts[1] && parts.length === 2) return read(data, document);
+    fetch(location.origin + '/' + parts[0] + '/' + parts[1])
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        read(dataOf(doc), doc);
+      })
+      .catch(function() { send({ title: document.title || null }); });
+  })();
+  true;
+`;
+
+// Reads a series on a site using the common WordPress manga theme: title
+// in .post-title h1 (minus its "HOT"/"END" badges) and labelled rows
+// (.summary-heading + .summary-content), found by label so "Author(s)" and
+// "Writer(s)" both count. On a chapter page the series page
+// (/<section>/<slug>) is fetched and read instead.
+const WP_MANGA_SERIES_READER_JS = `
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    function text(el) { return el ? el.textContent.replace(/\\s+/g, ' ').trim() : ''; }
+    function read(doc) {
+      var fields = {};
+      var headings = doc.querySelectorAll('.summary-heading');
+      for (var i = 0; i < headings.length; i++) {
+        var content = headings[i].parentElement && headings[i].parentElement.querySelector('.summary-content');
+        var label = text(headings[i]).toLowerCase().replace(/\\(s\\)/g, '').replace(/:/g, '').trim();
+        if (content) fields[label] = content;
+      }
+      function field(names) {
+        for (var k = 0; k < names.length; k++) {
+          var el = fields[names[k]];
+          if (!el) continue;
+          var links = el.querySelectorAll('a');
+          var out = [];
+          for (var n = 0; n < links.length; n++) if (text(links[n])) out.push(text(links[n]));
+          var value = out.length ? out.join(', ') : text(el);
+          if (value) return value;
+        }
+        return null;
+      }
+      var titleEl = doc.querySelector('.post-title h1');
+      var title = null;
+      if (titleEl) {
+        var copy = titleEl.cloneNode(true);
+        var badges = copy.querySelectorAll('.manga-title-badges');
+        for (var b = 0; b < badges.length; b++) badges[b].parentNode.removeChild(badges[b]);
+        title = text(copy) || null;
+      }
+      var og = doc.querySelector('meta[property="og:image"]');
+      var img = doc.querySelector('.summary_image img');
+      send({
+        imageUrl: (og && og.content) || (img && (img.getAttribute('data-src') || img.getAttribute('src'))) || null,
+        title: title || document.title || null,
+        altTitle: field(['alternative', 'alt name']),
+        author: field(['author', 'writer']) || field(['artist']),
+        genre: field(['genre']),
+      });
+    }
+    var parts = location.pathname.split('/').filter(Boolean);
+    if (parts.length <= 2) return read(document);
+    fetch(location.origin + '/' + parts[0] + '/' + parts[1])
+      .then(function(r) { return r.text(); })
+      .then(function(html) { read(new DOMParser().parseFromString(html, 'text/html')); })
+      .catch(function() { send({ title: document.title || null }); });
+  })();
+  true;
+`;
+
+// Keeps a WordPress manga-theme site's Family Mode on (adult titles
+// hidden), with no way to switch it off from the app. These sites turn
+// Family Mode off with a "<name>-mature" cookie (e.g. for
+// comics.example.com, "comics-mature") and filter on the server, so
+// before every page loads this: removes that cookie (reloading once if it
+// was there), stops the page from setting it again, and hides the Family
+// Mode switch and the "I'm an adult" button.
+function familyModeLockJs(siteUrl) {
+  const host = hostOf(siteUrl);
+  return `
+    (function() {
+      var host = ${JSON.stringify(host)};
+      var here = location.hostname.replace(/^www\\./, '');
+      if (here !== host && here.slice(-host.length - 1) !== '.' + host) return;
+      var name = host.split('.')[0] + '-mature';
+      var has = new RegExp('(^|;\\\\s*)' + name + '=').test(document.cookie);
+      if (has) {
+        document.cookie = name + '=; path=/; max-age=0';
+        document.cookie = name + '=; path=/; domain=.' + host + '; max-age=0';
+        // Reload once so the server sends the family version; never loop.
+        var last = Number(sessionStorage.getItem('familyModeLockReload') || 0);
+        if (Date.now() - last > 10000) {
+          sessionStorage.setItem('familyModeLockReload', String(Date.now()));
+          location.reload();
+          return;
+        }
+      }
+      try {
+        var cookie = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+        Object.defineProperty(document, 'cookie', {
+          configurable: true,
+          get: function() { return cookie.get.call(document); },
+          set: function(value) {
+            if (String(value).trim().indexOf(name + '=') === 0) return;
+            cookie.set.call(document, value);
+          },
+        });
+      } catch (e) {}
+      var style = document.createElement('style');
+      style.textContent = '[title="Toggle Family Mode"], .btn-adult-confirm { display: none !important; }';
+      (document.head || document.documentElement).appendChild(style);
     })();
     true;
   `;
@@ -275,6 +437,62 @@ export const MEDIA_TYPES = {
       })();
       true;
     `,
+  },
+
+  manhwa: {
+    key: 'manhwa',
+    label: 'Manhwa',
+    readStatusLabels: {
+      reading: 'Reading',
+      read: 'Read',
+      on_hold: 'On Hold',
+      dropped: 'Dropped',
+      want: 'Want to Read',
+    },
+    // Set MANHWA_SITE_URL and MANHWA_SITE_2_URL in .env.
+    startUrl: MANHWA_SITE_URL,
+    // Pop-ups and redirects can't leave the two sites.
+    blockExternalNavigation: true,
+    // No codes: the search box takes a title and opens each site's results
+    // in turn, with a "Next ›" button (MediaWebView.js).
+    titleSearch: [
+      { name: MANHWA_HOST, buildSearchUrl: (q) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(q)}` },
+      {
+        name: MANHWA_HOST_2,
+        buildSearchUrl: (q) => `${MANHWA_SITE_2_URL}/?s=${encodeURIComponent(q)}&post_type=wp-manga`,
+      },
+    ],
+    // For titles not opened on a site yet (imported from MAL).
+    buildSearchUrl: (title) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(title)}`,
+    // First site: series at /series/<id>, chapters at /series/<id>/<key>
+    // (no chapter number in the address, so progress isn't tracked there).
+    // The code is the series id; on the second site it's the series slug,
+    // which always has letters, so the two can't clash.
+    urlRegex: new RegExp(`^https?://(?:www\\.)?${hostPattern(MANHWA_SITE_URL)}/series/(\\d+)`, 'i'),
+    extractId: (match) => match[1],
+    extractMetadataJs: NEXT_SERIES_READER_JS,
+    // "Read next" (Library): from the last chapter you opened, its Next
+    // button; otherwise the series page.
+    openNext: (entry, n) =>
+      entry.last_progress_url
+        ? { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) }
+        : { url: entry.source_url },
+    extraSources: [
+      {
+        name: MANHWA_HOST_2,
+        domain: MANHWA_HOST_2,
+        // Series at /serie/<slug>, chapters at /serie/<slug>/chapter-<n>.
+        urlRegex: new RegExp(
+          `^https?://(?:www\\.)?${hostPattern(MANHWA_SITE_2_URL)}/serie/([a-z0-9-]+)(?:/chapter-([\\d.]+))?`,
+          'i'
+        ),
+        extractId: (match) => match[1],
+        // Opening a chapter sets the entry to Reading and its chapters read.
+        extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+        extractMetadataJs: WP_MANGA_SERIES_READER_JS,
+        beforeLoadJs: familyModeLockJs(MANHWA_SITE_2_URL),
+      },
+    ],
   },
 
   anime: {

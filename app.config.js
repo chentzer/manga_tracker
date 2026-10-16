@@ -49,6 +49,9 @@ export default {
       // sites in .env; the placeholders are used when they're missing.
       mangaSiteUrl: process.env.MANGA_SITE_URL || 'https://your-manga-site.example.com',
       animeSiteUrl: process.env.ANIME_SITE_URL || 'https://your-anime-site.example.com',
+      // The Manhwa tab's two sites (see the manhwa type in src/mediaTypes.js).
+      manhwaSiteUrl: process.env.MANHWA_SITE_URL || 'https://your-manhwa-site.example.com',
+      manhwaSite2Url: process.env.MANHWA_SITE_2_URL || 'https://your-second-manhwa-site.example.com',
     },
   },
 };

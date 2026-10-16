@@ -79,7 +79,20 @@ adapt to whatever you actually use:
    site the Reverse button opens (placeholder:
    `your-reverse-search.example.com`). Remove the `reverseSearch` block
    to hide the button.
-5. **Google Drive setup (for cloud sync — walkthrough below).**
+5. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
+   The Manhwa tab has no codes: its box searches a title on the first
+   site, and a **Next ›** bar repeats the search on the second. The first
+   is expected to be a Next.js comics site (series at `/series/<id>`,
+   details in its `__NEXT_DATA__` JSON, search at `/browse?search=`); the
+   second a site on the common WordPress manga theme (series at
+   `/serie/<slug>`, chapters at `/serie/<slug>/chapter-<n>`, search at
+   `/?s=…&post_type=wp-manga`). A series is saved when you open it or any
+   of its chapters. The second site's **Family Mode stays on**: before
+   each page loads, `familyModeLockJs` removes its `<name>-mature` cookie,
+   stops the page from setting it, and hides the Family Mode switch and
+   the "I'm an adult" button. Adjust the paths in `mediaTypes.js` if your
+   sites differ.
+6. **Google Drive setup (for cloud sync — walkthrough below).**
 
 ## Setting up Google Drive sync (step by step)
 

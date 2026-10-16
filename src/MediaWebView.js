@@ -308,7 +308,14 @@ function resolveSource(config, url) {
     return null;
   }
   const match = url.match(config.urlRegex);
-  return match ? { source: config, match } : null;
+  if (match) return { source: config, match };
+  // A single-site type can also save pages from `extraSources` (e.g. the
+  // Manhwa tab's second site), each with its own pattern and script.
+  for (const source of config.extraSources || []) {
+    const extraMatch = url.match(source.urlRegex);
+    if (extraMatch) return { source, match: extraMatch };
+  }
+  return null;
 }
 
 // All domains considered "safe to navigate to" for this type — every
@@ -319,7 +326,16 @@ function getAllowedDomains(config) {
     return config.sources.map((s) => s.domain);
   }
   const host = getHostname(config.startUrl);
-  return host ? [host] : [];
+  return [...(host ? [host] : []), ...(config.extraSources || []).map((s) => s.domain)];
+}
+
+// Each site's own script to run before its pages load (e.g. keeping a
+// site's Family Mode on), from `beforeLoadJs` on the type or any of its
+// sources. Each script checks the hostname itself.
+function getBeforeLoadJs(config) {
+  return [config, ...(config.sources || []), ...(config.extraSources || [])]
+    .map((s) => s.beforeLoadJs || '')
+    .join('');
 }
 
 // Collects { domain: buttonText } across every source that defines an
@@ -367,6 +383,9 @@ export default function MediaWebView({
   viewInLibraryRef.current = onViewInLibrary;
   // The Reverse button's search window (ReverseSearch.js).
   const [reverseVisible, setReverseVisible] = useState(false);
+  // The title search being shown: { query, index } into config.titleSearch,
+  // or null. Kept until closed or another search starts.
+  const [titleSearch, setTitleSearch] = useState(null);
   // First page: initialUrl (the page this tab was on before Data saver
   // unloaded it — App.js) or the type's start page. Fixed at mount; a new
   // source would reload the page.
@@ -427,9 +446,31 @@ export default function MediaWebView({
     webviewRef.current?.injectJavaScript(GRAB_LARGEST_IMAGE_JS);
   }, []);
 
+  // Title search (types with `titleSearch`): opens one site's search
+  // results at a time; the Next button moves the same search on.
+  const openTitleSearch = useCallback(
+    (query, index) => {
+      const site = config.titleSearch[index];
+      setTitleSearch({ query, index });
+      webviewRef.current?.injectJavaScript(
+        `window.location.href = ${JSON.stringify(site.buildSearchUrl(query))}; true;`
+      );
+    },
+    [config]
+  );
+
   const handleManualSubmit = useCallback(() => {
     const code = manualCode.trim();
     if (!code) return;
+
+    // Types without codes (e.g. Manhwa) search titles instead.
+    if (config.titleSearch && !config.buildUrlFromId) {
+      Keyboard.dismiss();
+      setManualCode('');
+      openTitleSearch(code, 0);
+      return;
+    }
+    setTitleSearch(null);
 
     // Duplicate check happens before navigating anywhere — a duplicate
     // code is silently ignored rather than re-fetching/re-saving it.
@@ -443,7 +484,7 @@ export default function MediaWebView({
     webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
     setManualCode('');
     Keyboard.dismiss();
-  }, [manualCode, config]);
+  }, [manualCode, config, openTitleSearch]);
 
   // Strips everything but letters/digits and lowercases, for comparing
   // a searched-for code against a candidate result's extracted id —
@@ -964,13 +1005,13 @@ export default function MediaWebView({
 
   return (
     <View style={styles.container}>
-      {config.buildUrlFromId && showCodeBar ? (
+      {(config.buildUrlFromId || config.titleSearch) && showCodeBar ? (
         <View style={[styles.manualBar, !buttons.codeSearch && styles.manualBarButtonsOnly]}>
           {buttons.codeSearch ? (
             <>
               <TextInput
                 style={styles.manualInput}
-                placeholder={`Enter ${config.label} code…`}
+                placeholder={config.buildUrlFromId ? `Enter ${config.label} code…` : `Search ${config.label} title…`}
                 placeholderTextColor="#999"
                 value={manualCode}
                 onChangeText={setManualCode}
@@ -981,11 +1022,30 @@ export default function MediaWebView({
                 onSubmitEditing={handleManualSubmit}
               />
               <TouchableOpacity style={styles.manualButton} onPress={handleManualSubmit}>
-                <Text style={styles.manualButtonText}>Add</Text>
+                <Text style={styles.manualButtonText}>{config.buildUrlFromId ? 'Add' : 'Search'}</Text>
               </TouchableOpacity>
             </>
           ) : null}
           {reverseButton}
+        </View>
+      ) : null}
+      {titleSearch ? (
+        <View style={styles.titleSearchBar}>
+          <Text style={styles.titleSearchText} numberOfLines={1}>
+            “{titleSearch.query}” on {config.titleSearch[titleSearch.index].name} ({titleSearch.index + 1}/
+            {config.titleSearch.length})
+          </Text>
+          {titleSearch.index + 1 < config.titleSearch.length ? (
+            <TouchableOpacity
+              style={[styles.manualButton, styles.secondaryButton]}
+              onPress={() => openTitleSearch(titleSearch.query, titleSearch.index + 1)}
+            >
+              <Text style={styles.manualButtonText}>Next: {config.titleSearch[titleSearch.index + 1].name} ›</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={8}>
+            <Text style={styles.titleSearchClose}>✕</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
       {config.sources && buttons.codeSearch ? (
@@ -1125,6 +1185,7 @@ export default function MediaWebView({
           URL_WATCHER_JS +
           buildAutoConfirmJs(getDomainButtonMap(config)) +
           (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '') +
+          getBeforeLoadJs(config) +
           TAB_BAR_WATCH_JS
         }
         // The tab-row watcher again once the page has loaded, since Android
@@ -1160,6 +1221,17 @@ const styles = StyleSheet.create({
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
   secondaryButton: { backgroundColor: '#1f4068' },
+  // Title search: which site's results are showing, and Next.
+  titleSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    backgroundColor: '#16213e',
+  },
+  titleSearchText: { flex: 1, color: '#ddd', fontSize: 13 },
+  titleSearchClose: { fontSize: 13, fontWeight: '700', color: '#c0392b' },
   // Code box hidden in Settings: just the buttons, on the right.
   manualBarButtonsOnly: { justifyContent: 'flex-end' },
   viewInLibraryButton: {
