@@ -283,6 +283,9 @@ export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
     label: 'Manga',
+    // Books saved one by one (volumes, parts) can be put in a named group,
+    // listed in each one's detail sheet (EntryList.js, src/groups.js).
+    groupField: true,
     // Labels shown for the status toggle/badge on this type's entries
     // ("Read" for manga; anime uses "Watched" further down). The stored
     // values are the same for every type — MyAnimeList's five statuses
@@ -498,6 +501,8 @@ export const MEDIA_TYPES = {
   anime: {
     key: 'anime',
     label: 'Anime',
+    // Seasons, parts and films can be put in a named group (as Manga).
+    groupField: true,
     // "Watching"/"Watched" instead of manga's "Reading"/"Read" — same
     // stored values, just different wording per type.
     readStatusLabels: {

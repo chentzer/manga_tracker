@@ -531,6 +531,33 @@ so nothing renders blank.
   Drive (only shown once Drive is connected), and automatically before
   every backup on Connect (see "What gets backed up" above). The
   Library reloads afterwards (`reloadKey`), even if it's the open tab.
+- **Site list** (`getTabSites()` in `MediaWebView.js`) — tabs with more
+  than one site (Manhwa) have a ▾ button at the left of the search bar,
+  named after the site you're on, opening a menu of the tab's sites.
+  Picking one opens its home page, or, while a title search's "Next" bar
+  is up, runs the same search on that site.
+- **Groups (Manga, Anime)** — `groupField` in mediaTypes.js,
+  `src/groups.js`. Entries saved one by one (volumes, parts, seasons) can
+  be put in a named group from the detail sheet: **Add to a group…**
+  picks an existing group or creates one with the name you type, and a
+  chip suggests one from the title ("Summer Days 4" goes with "Summer
+  Days", or makes a new group with the other parts already saved). In a
+  group the sheet shows its name (**Rename** renames it for every entry)
+  and every entry in it, which open with a tap and reorder with ▲ / ▼,
+  plus **+ Add more** (search the type) and **Remove this from group**.
+  The Library row shows the group's name. Stored as `group_name` /
+  `group_order`, both in the Drive backup.
+- `src/SyncStatusPill.js` / `src/syncStatus.js` — the pill beside the
+  Settings button. While a backup or restore runs it shows **Backup** or
+  **Restore**, filling from the left as it goes (full = done); then
+  "✓ Backed up" / "✓ Restored 12" for 2 seconds, or a red "⚠ Backup
+  failed" that stays until tapped (it then shows the error) or until a
+  later backup works. It appears after half a second, so quick automatic
+  backups never flash it; automatic backups that only write the CSVs
+  don't show it at all unless they fail. Backup Now, Restore, Connect and
+  cover uploads always do. Progress is one step per type's file plus one
+  per cover uploaded (Backup Now counts the covers up front), or one per
+  row for a restore.
 - `src/EntryList.js` — accepts an `active` prop and re-fetches whenever it
   becomes `true`, since the component now stays permanently mounted
   (App.js toggles visibility rather than mounting/unmounting on tab
@@ -586,9 +613,12 @@ so nothing renders blank.
   renders the tab bar built from the media type list plus the Library
   tab. On browsing tabs the tab bar hides once the page hasn't scrolled
   for 3 seconds (`TAB_BAR_HIDE_MS`; taps on the page don't count), and
-  comes back when you pull down at the very top of the page, like
-  pull-to-refresh. `src/tabBarWatch.js`, run inside each page, reports
-  scrolling and that pull; the bar always shows on the Library tab.
+  comes back when you pull down at the very top of the page. Pulling
+  further (about 160px) and letting go reloads the page, with a small
+  "Pull to refresh" / "Release to refresh" pill at the top meanwhile
+  (Android's web view has no pull-to-refresh of its own).
+  `src/tabBarWatch.js`, run inside each page, handles both and reports
+  scrolling; the bar always shows on the Library tab.
   All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
   so each webview keeps its scroll position and navigation history when
@@ -606,8 +636,9 @@ so nothing renders blank.
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
   `MediaWebView.js`; off by default so the normal UI stays clean). Under
-  **Buttons**, switches hide the code search box, **Reverse** and **Save
-  Page Image** on the tabs that have them (all shown by default;
+  **Buttons**, switches hide the code search box, the **Site list**,
+  **Reverse** and **Save Page Image** on the tabs that have them (all
+  shown by default;
   `BUTTON_SETTINGS` in App.js). The sheet scrolls when it doesn't fit.
   Under **Data saver** (`src/dataSaver.js`): **Load tabs only when
   opened** (on by default; tabs no longer all load at start-up), **Unload

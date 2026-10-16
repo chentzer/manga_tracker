@@ -16,7 +16,9 @@ import { initDb, getSetting, setSetting } from './src/db';
 import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
-import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup } from './src/backup';
+import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup, countPendingImages } from './src/backup';
+import SyncStatusPill from './src/SyncStatusPill';
+import { beginSync } from './src/syncStatus';
 import { exportMalList, pickAndImportMalList, MAL_LISTS } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
@@ -57,6 +59,12 @@ const BUTTON_SETTINGS = [
     setting: 'showCodeSearch',
     label: 'Code search box',
     hint: 'The "Enter code" / "Search code" box at the top of each tab.',
+  },
+  {
+    key: 'siteMenu',
+    setting: 'showSiteMenu',
+    label: 'Site list',
+    hint: 'The ▾ menu in the search bar for switching between a tab\'s sites (Manhwa).',
   },
   {
     key: 'reverseSearch',
@@ -178,7 +186,7 @@ function AppContent() {
   const [settingsVisible, setSettingsVisible] = useState(false);
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
-  const [buttons, setButtons] = useState({ codeSearch: true, reverseSearch: true, savePageImage: true });
+  const [buttons, setButtons] = useState({ codeSearch: true, siteMenu: true, reverseSearch: true, savePageImage: true });
   // Settings → App lock; the setting lives in AppLock (src/AppLock.js).
   const { lockEnabled, changeLockEnabled } = useAppLockSetting();
   // Set when a "View in Library" button is tapped from a browsing tab —
@@ -244,10 +252,13 @@ function AppContent() {
   };
 
   const handleGoogleSignIn = async () => {
+    let syncJob = null;
     try {
       await signInToGoogle();
       setIsSignedInToGoogle(true);
       setRestoring(true);
+      // The restore, backup and uploads below show as one in the status pill.
+      syncJob = beginSync('restore', { show: true });
 
       // Always merge in anything from Drive FIRST, before ever backing
       // up — this makes it impossible for connecting to overwrite a
@@ -274,8 +285,10 @@ function AppContent() {
       if (uploaded > 0) {
         parts.push(`Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'} that hadn't synced yet.`);
       }
+      syncJob?.end({ summary: 'Connected' });
       Alert.alert('Connected', parts.join(' '));
     } catch (err) {
+      syncJob?.end({ ok: false, error: err.message });
       Alert.alert('Sign-in failed', err.message);
     } finally {
       setRestoring(false);
@@ -288,8 +301,19 @@ function AppContent() {
       return;
     }
     // force: runs even when Data saver holds automatic sync for Wi-Fi.
-    await maybeBackupLibraryToDrive({ force: true });
-    const uploaded = await uploadPendingImages({ force: true });
+    // The CSVs and covers show as one backup in the status pill, with the
+    // covers counted from the start (one step each).
+    const syncJob = beginSync('backup', { show: true, total: countPendingImages() });
+    let uploaded = 0;
+    try {
+      await maybeBackupLibraryToDrive({ force: true });
+      uploaded = await uploadPendingImages({ force: true, job: syncJob });
+      syncJob.end();
+    } catch (err) {
+      syncJob.end({ ok: false, error: err.message });
+      Alert.alert('Backup failed', err.message);
+      return;
+    }
     takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
     Alert.alert(
       'Backed up',
@@ -414,10 +438,14 @@ function AppContent() {
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <Text style={styles.title}>Media Tracker</Text>
-        {/* Settings (incl. Drive and MyAnimeList), on every tab. */}
-        <TouchableOpacity onPress={() => setSettingsVisible(true)} hitSlop={10} style={styles.headerSettingsButton}>
-          <Text style={styles.headerSettingsIcon}>⚙️</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Backup / restore progress (src/SyncStatusPill.js). */}
+          <SyncStatusPill />
+          {/* Settings (incl. Drive and MyAnimeList), on every tab. */}
+          <TouchableOpacity onPress={() => setSettingsVisible(true)} hitSlop={10} style={styles.headerSettingsButton}>
+            <Text style={styles.headerSettingsIcon}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
@@ -597,6 +625,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   title: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerSettingsButton: { paddingHorizontal: 4, paddingVertical: 2 },
   headerSettingsIcon: { fontSize: 22 },
   tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },

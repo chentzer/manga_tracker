@@ -38,7 +38,7 @@ import { driveSyncAllowed, markDriveSyncDeferred, isOnMobileData } from './dataS
 // Which optional controls to show (Settings → Buttons). Each also needs
 // the type to support it: buildUrlFromId/sources for the code box,
 // reverseSearch and savePageImage in mediaTypes.js.
-const ALL_BUTTONS = { codeSearch: true, reverseSearch: true, savePageImage: true };
+const ALL_BUTTONS = { codeSearch: true, siteMenu: true, reverseSearch: true, savePageImage: true };
 
 // Finds the largest image currently rendered on the page — for a manga
 // reader this is almost always the actual page being read, not a logo
@@ -291,6 +291,34 @@ function getHostname(url) {
   return match ? match[1].toLowerCase().replace(/^www\./, '') : null;
 }
 
+// The sites a tab can switch between with its site list (the ▾ button in
+// the search bar): the type's own site and its `extraSources`, or each of
+// `sources`. Each has a name, a domain and a home page (the type's
+// startUrl for the first site, otherwise the site's front page). Empty
+// for one-site tabs.
+function getTabSites(config) {
+  if (config.sources) {
+    return config.sources.map((s, i) => ({
+      name: s.name,
+      domain: s.domain,
+      homeUrl: i === 0 ? config.startUrl : `https://${s.domain}/`,
+    }));
+  }
+  const mainName = config.titleSearch?.[0]?.name;
+  if (!config.extraSources || !mainName) return [];
+  return [
+    { name: mainName, domain: getHostname(config.startUrl), homeUrl: config.startUrl },
+    ...config.extraSources.map((s) => ({ name: s.name, domain: s.domain, homeUrl: `https://${s.domain}/` })),
+  ];
+}
+
+// Index into `sites` of the site `url` is on, or -1.
+function siteIndexFor(sites, url) {
+  const host = getHostname(url);
+  if (!host) return -1;
+  return sites.findIndex((s) => host === s.domain || host.endsWith(`.${s.domain}`));
+}
+
 // A media type is either single-source (manga, anime — url pattern,
 // extraction, etc live directly on the config) or multi-source (e.g. otherCategory —
 // a `sources` array, one entry per site, since different sites carry
@@ -386,6 +414,11 @@ export default function MediaWebView({
   // The title search being shown: { query, index } into config.titleSearch,
   // or null. Kept until closed or another search starts.
   const [titleSearch, setTitleSearch] = useState(null);
+  // The site list (multi-site tabs): its sites, whether it's open, and the
+  // page's URL (for which site is ticked; set on every navigation).
+  const [sites] = useState(() => getTabSites(config));
+  const [siteMenuVisible, setSiteMenuVisible] = useState(false);
+  const [pageUrl, setPageUrl] = useState(null);
   // First page: initialUrl (the page this tab was on before Data saver
   // unloaded it — App.js) or the type's start page. Fixed at mount; a new
   // source would reload the page.
@@ -784,6 +817,7 @@ export default function MediaWebView({
   const handleNavigationStateChange = useCallback(
     (navState) => {
       currentUrlRef.current = navState.url;
+      setPageUrl(navState.url);
       // Kept by App.js, so Data saver can reopen this page after unloading.
       pageChangeRef.current?.(navState.url);
       setCanGoBack(navState.canGoBack);
@@ -1113,14 +1147,38 @@ export default function MediaWebView({
     webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
   };
 
+  // Site list: picks one of the tab's sites. With a title search showing,
+  // the same search moves to that site; otherwise its home page opens.
+  const currentSiteIndex = siteIndexFor(sites, pageUrl || startSource.uri);
+  const openSite = (site) => {
+    setSiteMenuVisible(false);
+    const searchIndex = titleSearch ? config.titleSearch.findIndex((t) => t.name === site.name) : -1;
+    if (searchIndex >= 0) {
+      openTitleSearch(titleSearch.query, searchIndex);
+      return;
+    }
+    setTitleSearch(null);
+    logDebug(`Site list: opening ${site.name}`);
+    webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(site.homeUrl)}; true;`);
+  };
+  const siteButton =
+    sites.length < 2 || !buttons.siteMenu ? null : (
+      <TouchableOpacity style={[styles.manualButton, styles.siteButton]} onPress={() => setSiteMenuVisible(true)}>
+        <Text style={styles.manualButtonText} numberOfLines={1}>
+          {currentSiteIndex >= 0 ? sites[currentSiteIndex].name : 'Sites'} ▾
+        </Text>
+      </TouchableOpacity>
+    );
+
   // The code box can be hidden in Settings; the bar stays for any buttons
   // still shown.
-  const showCodeBar = buttons.codeSearch || reverseButton;
+  const showCodeBar = buttons.codeSearch || siteButton || reverseButton;
 
   return (
     <View style={styles.container}>
       {(config.buildUrlFromId || config.titleSearch) && showCodeBar ? (
         <View style={[styles.manualBar, !buttons.codeSearch && styles.manualBarButtonsOnly]}>
+          {siteButton}
           {buttons.codeSearch ? (
             <>
               <TextInput
@@ -1245,6 +1303,25 @@ export default function MediaWebView({
           </Modal>
         </>
       ) : null}
+      <Modal visible={siteMenuVisible} transparent animationType="fade" onRequestClose={() => setSiteMenuVisible(false)}>
+        <TouchableOpacity style={styles.siteMenuOverlay} activeOpacity={1} onPress={() => setSiteMenuVisible(false)}>
+          <View style={styles.siteMenu}>
+            {sites.map((site, i) => (
+              <TouchableOpacity
+                key={site.domain}
+                style={[styles.siteMenuRow, i < sites.length - 1 && styles.siteMenuRowGap]}
+                onPress={() => openSite(site)}
+              >
+                <Text style={[styles.siteMenuText, i === currentSiteIndex && styles.siteMenuTextCurrent]}>
+                  {i === currentSiteIndex ? '✓ ' : ''}
+                  {site.name}
+                </Text>
+                <Text style={styles.siteMenuDomain}>{site.domain}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
       <Modal visible={logVisible} animationType="slide" onRequestClose={() => setLogVisible(false)}>
         <View style={styles.logModal}>
           <View style={styles.logHeader}>
@@ -1335,6 +1412,15 @@ const styles = StyleSheet.create({
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
   secondaryButton: { backgroundColor: '#1f4068' },
+  siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
+  // The site list drops down from the top left, under the search bar.
+  siteMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', paddingTop: 96, paddingHorizontal: 8 },
+  siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4 },
+  siteMenuRow: { paddingVertical: 10, paddingHorizontal: 14 },
+  siteMenuRowGap: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a3a5e' },
+  siteMenuText: { color: '#fff', fontSize: 15 },
+  siteMenuTextCurrent: { color: '#e94560', fontWeight: '700' },
+  siteMenuDomain: { color: '#8892b0', fontSize: 12, marginTop: 2 },
   // Title search: which site's results are showing, and Next.
   titleSearchBar: {
     flexDirection: 'row',

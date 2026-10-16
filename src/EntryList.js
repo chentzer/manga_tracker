@@ -28,6 +28,7 @@ import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId } from './malList';
 import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
+import { groupKey, groupOrder, guessGroup } from './groups';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -335,6 +336,236 @@ function ConflictReview({ entry, onResolve }) {
   );
 }
 
+// Groups for types with `groupField` (Manga, Anime): entries saved one by
+// one (volumes, parts, sequels) put together under a name you choose. The
+// detail sheet of any entry in a group lists the whole group, in an order
+// you change with ▲ / ▼, and each one opens from there (src/groups.js).
+function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen }) {
+  // The open panel: 'join' (put this entry in a group), 'add' (add other
+  // entries to its group) or 'rename'; and that panel's text box.
+  const [mode, setMode] = useState(null);
+  const [text, setText] = useState('');
+  useEffect(() => {
+    setMode(null);
+    setText('');
+  }, [entry.source_id, entry.media_type]);
+  const name = entry.group_name;
+
+  // Every group in this type, with how many entries it has.
+  const groups = useMemo(() => {
+    const byName = new Map();
+    for (const e of sameType) {
+      if (!e.group_name) continue;
+      const key = groupKey(e.group_name);
+      const g = byName.get(key) || { name: e.group_name, count: 0 };
+      g.count += 1;
+      byName.set(key, g);
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [sameType]);
+  const membersOf = (groupName) =>
+    sameType.filter((e) => groupKey(e.group_name) === groupKey(groupName)).sort(groupOrder);
+
+  // Not in a group yet: a one-tap suggestion from the title ("Summer Days
+  // 4" -> the "Summer Days" group, or a new one with the other parts
+  // already saved).
+  const suggestion = useMemo(() => {
+    if (name) return null;
+    const guess = guessGroup(entry.title);
+    if (!guess) return null;
+    const existing = groups.find((g) => groupKey(g.name) === groupKey(guess.name));
+    if (existing) return { label: `Add to “${existing.name}”`, name: existing.name, books: [entry] };
+    const others = sameType.filter(
+      (e) =>
+        e.source_id !== entry.source_id && !e.group_name && groupKey(guessGroup(e.title)?.name) === groupKey(guess.name)
+    );
+    if (!others.length) return null;
+    const books = [entry, ...others].sort(
+      (a, b) => (parseFloat(guessGroup(a.title).part) || 0) - (parseFloat(guessGroup(b.title).part) || 0)
+    );
+    return {
+      label: `New group “${guess.name}” with ${others.length} other${others.length === 1 ? '' : 's'}`,
+      name: guess.name,
+      books,
+    };
+  }, [name, entry, groups, sameType]);
+
+  const toggle = (panel) => {
+    setMode(mode === panel ? null : panel);
+    setText(panel === 'rename' ? name || '' : '');
+  };
+  // Puts this entry into the group called `groupName` (a new one, or the
+  // existing one with that name), at the end.
+  const join = (groupName) => {
+    const trimmed = groupName.trim();
+    if (!trimmed) return;
+    const existing = groups.find((g) => groupKey(g.name) === groupKey(trimmed));
+    onWriteGroup([...(existing ? membersOf(existing.name) : []), entry], existing ? existing.name : trimmed);
+    setMode(null);
+  };
+
+  if (!name) {
+    const query = groupKey(text);
+    const matches = groups.filter((g) => !query || groupKey(g.name).includes(query));
+    return (
+      <>
+        <Text style={styles.detailLabel}>Group</Text>
+        <TouchableOpacity onPress={() => toggle('join')}>
+          <Text style={styles.groupLink}>{mode === 'join' ? 'Cancel' : 'Add to a group…'}</Text>
+        </TouchableOpacity>
+        {suggestion && mode !== 'join' ? (
+          <TouchableOpacity style={styles.groupSuggestion} onPress={() => onWriteGroup(suggestion.books, suggestion.name)}>
+            <Text style={styles.groupSuggestionText}>{suggestion.label}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {mode === 'join' ? (
+          <View style={styles.groupPanel}>
+            <View style={styles.tagInputRow}>
+              <TextInput
+                style={styles.tagInput}
+                value={text}
+                onChangeText={setText}
+                placeholder="New group name, or search"
+                placeholderTextColor="#999"
+                onSubmitEditing={() => join(text)}
+                returnKeyType="done"
+              />
+              <TouchableOpacity
+                style={[styles.tagAddButton, !text.trim() && styles.groupButtonOff]}
+                onPress={() => join(text)}
+                disabled={!text.trim()}
+              >
+                <Text style={styles.tagAddButtonText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+            {matches.length ? (
+              <View style={[styles.tagWrap, styles.groupPanel]}>
+                {matches.slice(0, 20).map((g) => (
+                  <TouchableOpacity key={g.name} style={styles.tagChip} onPress={() => join(g.name)}>
+                    <Text style={styles.tagChipText}>
+                      {g.name} ({g.count})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.groupHint}>
+                {groups.length ? 'No group with that name yet — Create makes it.' : 'No groups yet — type a name and tap Create.'}
+              </Text>
+            )}
+          </View>
+        ) : null}
+      </>
+    );
+  }
+
+  // Entries that can be added: the rest of this type, matching the search
+  // (or, with nothing typed, the ones whose title looks like this group's).
+  const query = groupKey(text);
+  const candidates =
+    mode === 'add'
+      ? sameType
+          .filter((e) => groupKey(e.group_name) !== groupKey(name))
+          .filter((e) =>
+            query
+              ? groupKey(e.title).includes(query) || groupKey(e.source_id).includes(query)
+              : groupKey(guessGroup(e.title)?.name) === groupKey(name)
+          )
+          .slice(0, 15)
+      : [];
+  return (
+    <>
+      <Text style={styles.detailLabel}>Group</Text>
+      <View style={styles.groupHeader}>
+        <Text style={styles.groupName} numberOfLines={2}>
+          {name}
+        </Text>
+        <TouchableOpacity onPress={() => toggle('rename')} hitSlop={6}>
+          <Text style={styles.groupLink}>{mode === 'rename' ? 'Cancel' : 'Rename'}</Text>
+        </TouchableOpacity>
+      </View>
+      {mode === 'rename' ? (
+        <View style={[styles.tagInputRow, styles.groupPanel]}>
+          <TextInput
+            style={styles.tagInput}
+            value={text}
+            onChangeText={setText}
+            placeholder="Group name"
+            placeholderTextColor="#999"
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.tagAddButton, !text.trim() && styles.groupButtonOff]}
+            disabled={!text.trim()}
+            onPress={() => {
+              onWriteGroup(members, text.trim());
+              setMode(null);
+            }}
+          >
+            <Text style={styles.tagAddButtonText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      <Text style={styles.detailLabel}>In this group ({members.length})</Text>
+      {members.map((p, i) => {
+        const isThis = p.source_id === entry.source_id;
+        const move = (to) => {
+          const next = [...members];
+          [next[i], next[to]] = [next[to], next[i]];
+          onWriteGroup(next, name);
+        };
+        return (
+          <View key={p.source_id} style={[styles.groupRow, isThis && styles.groupRowThis]}>
+            <TouchableOpacity style={styles.groupRowMain} onPress={() => !isThis && onOpen(p)} disabled={isThis}>
+              <Text style={styles.groupRowNumber}>{i + 1}</Text>
+              <Text style={[styles.groupRowTitle, isThis && styles.groupRowTitleThis]} numberOfLines={1}>
+                {p.title || p.source_id}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => move(i - 1)} disabled={i === 0} hitSlop={6}>
+              <Text style={[styles.groupArrow, i === 0 && styles.groupArrowOff]}>▲</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => move(i + 1)} disabled={i === members.length - 1} hitSlop={6}>
+              <Text style={[styles.groupArrow, i === members.length - 1 && styles.groupArrowOff]}>▼</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+      <View style={styles.groupActions}>
+        <TouchableOpacity onPress={() => toggle('add')}>
+          <Text style={styles.groupLink}>{mode === 'add' ? 'Done adding' : '+ Add more'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onLeave(entry)}>
+          <Text style={[styles.groupLink, styles.groupLeave]}>Remove this from group</Text>
+        </TouchableOpacity>
+      </View>
+      {mode === 'add' ? (
+        <View style={styles.groupPanel}>
+          <TextInput
+            style={styles.tagInput}
+            value={text}
+            onChangeText={setText}
+            placeholder="Search titles…"
+            placeholderTextColor="#999"
+          />
+          {candidates.map((e) => (
+            <TouchableOpacity key={e.source_id} style={styles.groupRow} onPress={() => onWriteGroup([...members, e], name)}>
+              <Text style={styles.groupRowNumber}>+</Text>
+              <Text style={styles.groupRowTitle} numberOfLines={1}>
+                {e.title || e.source_id}
+                {e.group_name ? `  (in “${e.group_name}”)` : ''}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {!candidates.length ? (
+            <Text style={styles.groupHint}>{query ? 'Nothing matches.' : 'Type part of a title to find entries to add.'}</Text>
+          ) : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
 function DetailModal({
   entry,
   onClose,
@@ -347,6 +578,11 @@ function DetailModal({
   onSetRepeating,
   onPickAgain,
   onDelete,
+  groupMembers = [],
+  sameTypeEntries = [],
+  onWriteGroup,
+  onLeaveGroup,
+  onOpenEntry,
 }) {
   const [fullImageVisible, setFullImageVisible] = useState(false);
 
@@ -455,6 +691,17 @@ function DetailModal({
 
             <Text style={styles.detailLabel}>Priority</Text>
             <PriorityPicker value={entry.priority} onChange={(priority) => update({ priority })} />
+
+            {MEDIA_TYPES[entry.media_type]?.groupField ? (
+              <GroupDetails
+                entry={entry}
+                members={groupMembers}
+                sameType={sameTypeEntries}
+                onWriteGroup={onWriteGroup}
+                onLeave={onLeaveGroup}
+                onOpen={onOpenEntry}
+              />
+            ) : null}
 
             <Text style={styles.detailLabel}>Tags</Text>
             <TagEditor tags={tags} onChange={(newTags) => onSetTags(entry, newTags)} />
@@ -792,6 +1039,26 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [load, backupSilently]
   );
 
+  // Groups: `ordered` becomes the group called `name`, in that order
+  // (group_order 0, 1, 2, …). Used for making, adding to, renaming and
+  // reordering a group.
+  const handleWriteGroup = useCallback(
+    (ordered, name) => {
+      ordered.forEach((e, i) => updateEntryFields(e.source_id, e.media_type, { group_name: name, group_order: i }));
+      load();
+      backupSilently();
+    },
+    [load, backupSilently]
+  );
+  const handleLeaveGroup = useCallback(
+    (item) => {
+      updateEntryFields(item.source_id, item.media_type, { group_name: null, group_order: null });
+      load();
+      backupSilently();
+    },
+    [load, backupSilently]
+  );
+
   // Settles one "differs from MAL" detail: takes MAL's value, or keeps the
   // app's.
   const handleResolveConflict = useCallback(
@@ -952,6 +1219,20 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       getEntry(selectedKey.slice(selectedKey.indexOf(':') + 1), selectedKey.split(':')[0])
     : null;
   const conflictCount = entries.filter((e) => e.mal_conflicts).length;
+  // Groups: every entry of the open one's type (whatever the type filter
+  // shows), and the members of its group, in order. `entries` is a
+  // dependency so changes show straight away.
+  const selectedType = selectedEntry?.media_type;
+  const sameTypeEntries = useMemo(
+    () => (selectedType && MEDIA_TYPES[selectedType]?.groupField ? getAllEntries(selectedType) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedType, entries]
+  );
+  const groupMembers = useMemo(() => {
+    const name = groupKey(selectedEntry?.group_name);
+    if (!name) return [];
+    return sameTypeEntries.filter((e) => groupKey(e.group_name) === name).sort(groupOrder);
+  }, [sameTypeEntries, selectedEntry]);
 
   const handleClearAll = useCallback(() => {
     if (entries.length === 0) return;
@@ -1124,6 +1405,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
                 {item.score ? <Text style={styles.scoreBadge}>★ {item.score}</Text> : null}
                 {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
                 {item.mal_conflicts ? <Text style={styles.conflictBadge}>⚠ differs from MAL</Text> : null}
+                {item.group_name ? (
+                  <Text style={styles.progressBadge} numberOfLines={1}>
+                    {item.group_name}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
@@ -1158,6 +1444,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onSetRepeating={handleSetRepeating}
         onPickAgain={randomOpened ? pickRandomNow : null}
         onDelete={handleDeleteEntry}
+        groupMembers={groupMembers}
+        sameTypeEntries={sameTypeEntries}
+        onWriteGroup={handleWriteGroup}
+        onLeaveGroup={handleLeaveGroup}
+        onOpenEntry={(e) => setSelectedKey(`${e.media_type}:${e.source_id}`)}
       />
 
       <RandomModal
@@ -1514,4 +1805,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fullImage: { width: '100%', height: '100%' },
+  groupLink: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },
+  groupLeave: { color: '#c0392b' },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  groupName: { flex: 1, fontSize: 15, fontWeight: '700', color: '#0f3460' },
+  groupActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 8 },
+  groupPanel: { marginTop: 10 },
+  groupHint: { fontSize: 13, color: '#888', marginTop: 8 },
+  groupButtonOff: { opacity: 0.4 },
+  groupSuggestion: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    backgroundColor: '#16213e',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  groupSuggestionText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  groupRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6, paddingHorizontal: 6, borderRadius: 6 },
+  groupRowThis: { backgroundColor: '#eef1f8' },
+  groupRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupRowNumber: { minWidth: 24, fontWeight: '700', color: '#0f3460' },
+  groupRowTitle: { flex: 1, color: '#333' },
+  groupRowTitleThis: { fontWeight: '700' },
+  groupArrow: { fontSize: 16, color: '#0f3460' },
+  groupArrowOff: { color: '#ccc' },
 });

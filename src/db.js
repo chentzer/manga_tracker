@@ -101,6 +101,10 @@ export function initDb() {
     // anilist_checked: the day totals/genres were last looked up on
     // AniList (malList.js), so unknown totals are asked about once a day.
     'anilist_checked TEXT',
+    // group_name / group_order: the group a book is in and its place
+    // there (types with groupField; src/groups.js).
+    'group_name TEXT',
+    'group_order INTEGER',
   ].forEach((column) => {
     try {
       db.execSync(`ALTER TABLE entries ADD COLUMN ${column};`);
@@ -226,6 +230,8 @@ export const EDITABLE_COLUMNS = [
   'last_progress_url',
   'repeat_progress',
   'anilist_checked',
+  'group_name',
+  'group_order',
 ];
 
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.

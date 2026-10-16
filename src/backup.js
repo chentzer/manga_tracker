@@ -10,6 +10,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
+import { beginSync } from './syncStatus';
 import {
   backupCsvToDrive,
   uploadImageToDrive,
@@ -51,6 +52,8 @@ const COLUMNS = [
   'last_progress_url',
   'repeat_progress',
   'anilist_checked',
+  'group_name',
+  'group_order',
 ];
 
 // Number columns: a CSV gives back strings.
@@ -65,6 +68,7 @@ const NUMBER_COLUMNS = [
   'repeating',
   'is_adult',
   'repeat_progress',
+  'group_order',
 ];
 
 // Each media type gets its own backup file (e.g. "manga-backup.csv",
@@ -163,7 +167,9 @@ function parseCsvToObjects(text) {
 // "nothing changed yet". Backs up each media type to its own file
 // (e.g. "manga-backup.csv") rather than one combined file.
 // force: true for the Backup Now / Connect buttons, which run even when
-// Settings → Data saver holds automatic sync for Wi-Fi.
+// Settings → Data saver holds automatic sync for Wi-Fi. It also shows the
+// status pill; an automatic backup only shows it if it fails
+// (syncStatus.js).
 export async function maybeBackupLibraryToDrive({ force = false } = {}) {
   if (!isDriveConnected()) {
     return { attempted: false, success: false, error: null };
@@ -173,6 +179,7 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
     return { attempted: false, success: false, error: null, deferred: true };
   }
   const errors = [];
+  const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length });
   for (const mediaConfig of MEDIA_TYPE_LIST) {
     try {
       await backupCsvToDrive(entriesToCsv(mediaConfig.key), backupFileNameFor(mediaConfig.key));
@@ -180,12 +187,19 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
       console.warn(`Drive backup failed for ${mediaConfig.key}:`, err.message);
       errors.push(`${mediaConfig.label}: ${err.message}`);
     }
+    job.step();
   }
+  job.end({ ok: errors.length === 0, error: errors.join('\n') });
   return {
     attempted: true,
     success: errors.length === 0,
     error: errors.length > 0 ? errors.join('; ') : null,
   };
+}
+
+// How many covers uploadPendingImages has to upload.
+export function countPendingImages() {
+  return getPendingSyncEntries().filter((e) => e.local_image_path).length;
 }
 
 // Uploads cover images for any entry that was recorded before Drive got
@@ -194,7 +208,10 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
 // uploads only ever ran at the moment that specific entry was first
 // saved — this is what catches the rest up. Returns how many it
 // actually uploaded, so callers can show a useful count.
-export async function uploadPendingImages({ force = false } = {}) {
+// job: a status-pill job (syncStatus.js) to report to, one step per
+// cover, instead of its own — Backup Now counts the covers in its total
+// up front so the bar never goes back.
+export async function uploadPendingImages({ force = false, job: outerJob = null } = {}) {
   if (!isDriveConnected()) return 0;
   if (!force && !driveSyncAllowed()) {
     markDriveSyncDeferred();
@@ -203,6 +220,10 @@ export async function uploadPendingImages({ force = false } = {}) {
 
   const pending = getPendingSyncEntries().filter((e) => e.local_image_path);
   let uploaded = 0;
+  let failed = 0;
+  if (!pending.length) return 0;
+  // Uploading covers is the slow part of a backup, so it shows the pill.
+  const job = outerJob || beginSync('backup', { show: true, total: pending.length });
 
   for (const entry of pending) {
     try {
@@ -216,9 +237,17 @@ export async function uploadPendingImages({ force = false } = {}) {
     } catch (err) {
       markSyncFailed(entry.source_id, entry.media_type);
       console.warn(`Pending image upload failed for ${entry.source_id}:`, err.message);
+      failed++;
     }
+    job.step();
   }
 
+  const error = `${failed} of ${pending.length} cover${pending.length === 1 ? '' : 's'} didn't upload. They're tried again at the next backup.`;
+  if (outerJob) {
+    if (failed) outerJob.fail(error);
+  } else {
+    job.end({ ok: failed === 0, error });
+  }
   return uploaded;
 }
 
@@ -237,17 +266,34 @@ export async function restoreFromDriveBackup(onProgress) {
   if (!isDriveConnected()) {
     throw new Error('Connect Google Drive first.');
   }
+  const job = beginSync('restore', { show: true });
+  try {
+    const result = await runRestore(onProgress, job);
+    job.end({ summary: result.restored ? `Restored ${result.restored}` : 'Nothing new to restore' });
+    return result;
+  } catch (err) {
+    job.end({ ok: false, error: `Restore failed: ${err.message}` });
+    throw err;
+  }
+}
 
+async function runRestore(onProgress, job) {
   let restored = 0;
   let skipped = 0;
   let imagesRestored = 0;
   let processed = 0;
 
+  // Every type's file first, so the status pill knows how many rows there
+  // are in all (one step each).
+  const files = [];
   for (const mediaConfig of MEDIA_TYPE_LIST) {
     const csvText = await fetchBackupCsvContent(backupFileNameFor(mediaConfig.key));
     if (!csvText) continue; // nothing backed up yet for this type
+    files.push({ mediaConfig, rows: parseCsvToObjects(csvText) });
+  }
+  job.addTotal(files.reduce((n, f) => n + f.rows.length, 0));
 
-    const rows = parseCsvToObjects(csvText);
+  for (const { mediaConfig, rows } of files) {
     // Backups made before the MyAnimeList fields (no start_date column)
     // hold scores on the old 1-5 scale.
     const oldScoreScale = rows.length > 0 && !('start_date' in rows[0]);
@@ -256,6 +302,7 @@ export async function restoreFromDriveBackup(onProgress) {
       const sourceId = row.source_id;
       const mediaType = row.media_type || mediaConfig.key;
       processed++;
+      job.step();
 
       if (!sourceId || entryExists(sourceId, mediaType)) {
         skipped++;
