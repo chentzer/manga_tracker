@@ -96,7 +96,7 @@ adapt to whatever you actually use:
 
 ## Setting up Google Drive sync (step by step)
 
-This is the part that needs real setup before "Connect Drive" in the app
+This is the part that needs real setup before Settings → Google Drive → Connect in the app
 will work. Client IDs live in a local `.env` file (git-ignored — never
 committed) rather than in the config itself, so your real values never
 end up in version control.
@@ -136,7 +136,7 @@ redirect URI to register, just the platform's native account picker.
    `GOOGLE_CLIENT_ID_WEB` there.
 6. Since this uses a native module, it needs a real build — this won't
    work in Expo Go. Build with `eas build`, install the resulting APK,
-   then tap **Connect Drive** in that installed app. It always merges in
+   then tap ⚙️ (top right) → **Google Drive → Connect** in that installed app. It always merges in
    anything from Drive first, then backs up — see "What gets backed up"
    below for exactly why that ordering matters.
 
@@ -164,25 +164,26 @@ Two separate things sync to Drive once connected, both automatic:
   so each type's data stays easy to open/browse individually. Each file
   is overwritten in place — not a growing pile of dated backups — and
   refreshes automatically after every new entry or rating change, plus
-  on demand via the **Backup Now** button in the header.
+  on demand via **Backup Now** in Settings (⚙️, top right).
 
-If your phone is lost or reset, install the app fresh and tap **Connect
-Drive** — it pulls each type's CSV back down and re-adds every entry not
+If your phone is lost or reset, install the app fresh and tap **Settings
+→ Google Drive → Connect** — it pulls each type's CSV back down and re-adds every entry not
 already on the device (including re-downloading cover images where
 available)
 *before* ever writing anything back to Drive. This ordering is
-unconditional and automatic: **Connect Drive always restores first, then
+unconditional and automatic: **Connect always restores first, then
 backs up** — regardless of whether the local library is empty, has a few
 entries, or is way behind what's in Drive, connecting can never overwrite
 Drive with less data than it already had. There's also a standalone
-**Restore** button (next to Backup Now) for re-checking Drive at any
+**Restore** button (next to Backup Now in Settings) for re-checking Drive at any
 later point, e.g. after adding entries on a second device — existing
 local entries are never touched or overwritten by either path, only
 added to.
 
 ## MyAnimeList export / import
 
-The Library's **⬆ Export** and **⬇ Import** buttons work with
+**Settings → MyAnimeList** (⚙️, top right) has **⬆ Export Manga**,
+**⬆ Export Anime** and **⬇ Import MAL list**, which work with
 MyAnimeList (MAL) list files, in the same XML format MAL's own "Export
 My List" produces and its import page accepts. Code: `src/malList.js`
 (files) and `src/malFormat.js` (the format and how it maps onto an entry).
@@ -222,8 +223,8 @@ finish date and sets progress to the total when the total is known.
   opening one on a site without MAL links (the Manhwa sites) finds it by
   name instead of adding it twice. Without AniList (offline), the import
   still runs and everything from the manga list goes to Manga.
-- **Export** writes one list, `mangalist.xml` or `animelist.xml` — the
-  selected type chip's list, or it asks which when "All" is selected. It
+- **Export** writes one list, `mangalist.xml` or `animelist.xml`
+  (whichever button you tapped). It
   opens the share sheet (save it to Files, send it, ...) and, when Drive
   is connected, saves it to the `MangaTracker` folder on Drive,
   replacing the previous export there. Entries without a MAL id are left
@@ -526,9 +527,10 @@ so nothing renders blank.
   also tries to re-download a matching cover image from Drive's
   `manga`/`anime` subfolder by filename prefix — if none is found, the
   entry still restores, just without a thumbnail until you browse back
-  to that page. Triggered from the **Restore** button in `App.js`'s
-  header (only shown once Drive is connected), and automatically before
-  every backup on Connect Drive (see "What gets backed up" above).
+  to that page. Triggered from the **Restore** button in Settings → Google
+  Drive (only shown once Drive is connected), and automatically before
+  every backup on Connect (see "What gets backed up" above). The
+  Library reloads afterwards (`reloadKey`), even if it's the open tab.
 - `src/EntryList.js` — accepts an `active` prop and re-fetches whenever it
   becomes `true`, since the component now stays permanently mounted
   (App.js toggles visibility rather than mounting/unmounting on tab
@@ -576,8 +578,8 @@ so nothing renders blank.
   as a simple comma-separated field rather
   than a separate table — fine at personal-library scale, and the
   distinct-tag list for the filter row is just computed from whatever's
-  in use. **⬆ Export** / **⬇ Import** next to the type chips handle
-  MyAnimeList list files (see "MyAnimeList export / import" above). A
+  in use. MyAnimeList list files are handled from Settings (see
+  "MyAnimeList export / import" above). A
   "Clear All" button wipes *every* entry the same way, also
   after confirming first.
 - `App.js` — wraps everything in `SafeAreaProvider` + `AppLock`, then
@@ -598,8 +600,9 @@ so nothing renders blank.
   `react-native` — the built-in one is effectively a no-op on Android
   (it only actually applies insets on iOS), which is why the header
   used to collide with the status bar/notch on Android phones. A gear
-  icon in the bottom-right corner of the Library tab opens a small
-  Settings sheet with **App lock** (see `AppLock.js` below)
+  icon at the top right of the header (on every tab) opens the Settings
+  sheet: **Google Drive** (Connect/Reconnect, Backup Now, Restore),
+  **MyAnimeList** (export/import), then **App lock** (see `AppLock.js` below)
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
   `MediaWebView.js`; off by default so the normal UI stays clean). Under
@@ -612,7 +615,7 @@ so nothing renders blank.
   tab loaded, reopening others on the same page) and **Drive sync on
   Wi-Fi only** (off; automatic backups and cover uploads wait for Wi-Fi
   and catch up when it's back, while Backup Now / Restore / Connect
-  always run). Wi-Fi vs mobile data comes from `expo-network`, so it
+  in Settings always run). Wi-Fi vs mobile data comes from `expo-network`, so it
   needs a new app build. On mobile data, the Reverse button asks first.
   Each setting is persisted via `getSetting()`/`setSetting()` in `db.js`
   so it survives app restarts. Also coordinates the **View in

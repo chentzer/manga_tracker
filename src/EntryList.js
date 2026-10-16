@@ -26,8 +26,8 @@ import {
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
-import { exportMalList, pickAndImportMalList, isImportedSourceId, MAL_LISTS } from './malList';
-import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString, malTypeOf } from './malFormat';
+import { isImportedSourceId } from './malList';
+import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -597,7 +597,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
   );
 }
 
-export default function EntryList({ active = true, focusKey = null, onFocusHandled, onOpenInTab }) {
+export default function EntryList({ active = true, reloadKey = 0, focusKey = null, onFocusHandled, onOpenInTab }) {
   const [entries, setEntries] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(null); // null = all types
@@ -626,6 +626,12 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   useEffect(() => {
     if (active) load();
   }, [active, load]);
+
+  // Bumped by App.js after changes made from Settings (MAL import, Drive
+  // restore), which can happen while the Library is already showing.
+  useEffect(() => {
+    if (reloadKey) load();
+  }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set by a "View in Library" button on a browsing tab — opens that
   // entry's detail sheet directly rather than leaving you to find it
@@ -732,7 +738,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   const backupSilently = useCallback(() => {
     maybeBackupLibraryToDrive().then((result) => {
       if (result.attempted && !result.success) {
-        Alert.alert('Drive backup failed', result.error || 'Unknown error — try Backup Now from the header.');
+        Alert.alert('Drive backup failed', result.error || 'Unknown error — try Backup Now in Settings.');
       }
     });
   }, []);
@@ -947,81 +953,6 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     : null;
   const conflictCount = entries.filter((e) => e.mal_conflicts).length;
 
-  // Export/Import of MyAnimeList lists (see malList.js). Export works on
-  // one type: the selected type chip, or it asks when "All" is selected.
-  const [busy, setBusy] = useState(false);
-
-  const runExport = useCallback(async (malType) => {
-    setBusy(true);
-    try {
-      const result = await exportMalList(malType);
-      const listLabel = MAL_LISTS.find((l) => l.key === malType).label;
-      const lines = [`${result.exported} ${listLabel} entries exported.`];
-      if (result.hentai > 0) lines.push(`${result.hentai} hentai titles left out.`);
-      if (result.skipped > 0) {
-        lines.push(
-          `${result.skipped} left out: no MyAnimeList id yet. Open them once in their tab to pick it up.`
-        );
-      }
-      if (result.drive === 'saved') {
-        lines.push('Saved to Google Drive (replacing the last export).');
-      } else if (result.drive === 'not connected') {
-        lines.push("Not saved to Google Drive: Drive isn't connected.");
-      } else {
-        lines.push(`Saving to Google Drive failed: ${result.drive}`);
-      }
-      Alert.alert('Export done', lines.join('\n\n'));
-    } catch (err) {
-      Alert.alert('Export failed', err.message);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const handleExport = useCallback(() => {
-    if (filter) {
-      runExport(malTypeOf(filter));
-      return;
-    }
-    Alert.alert('Export which list?', "Exports in MyAnimeList's list format. Manga includes manhwa.", [
-      ...MAL_LISTS.map((l) => ({ text: l.label, onPress: () => runExport(l.key) })),
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [filter, runExport]);
-
-  const handleImport = useCallback(async () => {
-    setBusy(true);
-    try {
-      const result = await pickAndImportMalList();
-      if (!result) return; // picker cancelled
-      load();
-      backupSilently();
-      const label = MAL_LISTS.find((l) => l.key === result.mediaType).label;
-      const lines = [`${result.added} ${label} titles added.`];
-      if (result.manhwa > 0) lines.push(`${result.manhwa} Korean titles are under Manhwa.`);
-      if (result.aniListFailed) {
-        lines.push("Couldn't reach AniList, so manhwa couldn't be told apart: everything went to Manga.");
-      }
-      if (result.linked > 0) {
-        lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
-      }
-      if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
-      if (result.differing > 0) {
-        lines.push(
-          `${result.differing} differ from what's in the app — tap "⚠ To review" to go through them. Nothing in the app was overwritten.`
-        );
-      }
-      if (result.added > 0) {
-        lines.push('Added titles have no cover yet; open one in its tab to fill it in.');
-      }
-      Alert.alert('Import done', lines.join('\n\n'));
-    } catch (err) {
-      Alert.alert('Import failed', err.message);
-    } finally {
-      setBusy(false);
-    }
-  }, [load, backupSilently]);
-
   const handleClearAll = useCallback(() => {
     if (entries.length === 0) return;
 
@@ -1064,16 +995,6 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
             <Text style={filter === f.key ? styles.filterTextActive : styles.filterText}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity
-          style={[styles.listFileChip, styles.listFileChipFirst]}
-          onPress={handleExport}
-          disabled={busy}
-        >
-          <Text style={styles.listFileText}>⬆ Export</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.listFileChip} onPress={handleImport} disabled={busy}>
-          <Text style={styles.listFileText}>⬇ Import</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={[styles.filterBar, styles.filterBarWrap]}>
@@ -1316,14 +1237,6 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   clearAllText: { color: '#c0392b', fontSize: 13, fontWeight: '600' },
-  listFileChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#e3ecfa',
-  },
-  listFileChipFirst: { marginLeft: 'auto' },
-  listFileText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
   statusFilterBar: { flexGrow: 0 },
   statusFilterBarContent: { padding: 10, gap: 8 },
   filterText: { color: '#333', fontSize: 13 },

@@ -17,6 +17,7 @@ import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
 import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup } from './src/backup';
+import { exportMalList, pickAndImportMalList, MAL_LISTS } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
   dataSaverSetting,
@@ -185,6 +186,10 @@ function AppContent() {
   // Cleared once EntryList has consumed it, so it doesn't re-trigger on
   // every re-render or every time you switch back to that tab.
   const [libraryFocusKey, setLibraryFocusKey] = useState(null);
+  // Bumped after Settings changes the library (MAL import, Drive restore)
+  // so the Library reloads even if it's already the open tab.
+  const [libraryReloadKey, setLibraryReloadKey] = useState(0);
+  const reloadLibrary = () => setLibraryReloadKey((k) => k + 1);
 
   const handleViewInLibrary = (entryKey) => {
     setLibraryFocusKey(entryKey);
@@ -255,6 +260,7 @@ function AppContent() {
       // force: connecting is your own action, so it runs even when Data
       // saver holds automatic sync for Wi-Fi.
       const restoreResult = await restoreFromDriveBackup();
+      if (restoreResult.restored > 0) reloadLibrary();
       await maybeBackupLibraryToDrive({ force: true });
       const uploaded = await uploadPendingImages({ force: true }); // catch up any images saved before connecting
       takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
@@ -310,6 +316,7 @@ function AppContent() {
             setRestoring(true);
             try {
               const result = await restoreFromDriveBackup();
+              if (result.restored > 0) reloadLibrary();
               if (result.restored === 0) {
                 Alert.alert(
                   'Nothing to restore',
@@ -320,7 +327,7 @@ function AppContent() {
               } else {
                 Alert.alert(
                   'Restore complete',
-                  `Added ${result.restored} ${result.restored === 1 ? 'entry' : 'entries'} (${result.imagesRestored} with cover images restored). Open the Library tab (or pull to refresh if you're already there) to see them.`
+                  `Added ${result.restored} ${result.restored === 1 ? 'entry' : 'entries'} (${result.imagesRestored} with cover images restored).`
                 );
               }
             } catch (err) {
@@ -334,28 +341,83 @@ function AppContent() {
     );
   };
 
+  // Settings → MyAnimeList: export/import MAL list files (src/malList.js).
+  // MAL has two lists; the manga one includes manhwa.
+  const [malBusy, setMalBusy] = useState(false);
+
+  const runMalExport = async (malType) => {
+    setMalBusy(true);
+    try {
+      const result = await exportMalList(malType);
+      const listLabel = MAL_LISTS.find((l) => l.key === malType).label;
+      const lines = [`${result.exported} ${listLabel} entries exported.`];
+      if (result.hentai > 0) lines.push(`${result.hentai} hentai titles left out.`);
+      if (result.skipped > 0) {
+        lines.push(
+          `${result.skipped} left out: no MyAnimeList id yet. Open them once in their tab to pick it up.`
+        );
+      }
+      if (result.drive === 'saved') {
+        lines.push('Saved to Google Drive (replacing the last export).');
+      } else if (result.drive === 'not connected') {
+        lines.push("Not saved to Google Drive: Drive isn't connected.");
+      } else {
+        lines.push(`Saving to Google Drive failed: ${result.drive}`);
+      }
+      Alert.alert('Export done', lines.join('\n\n'));
+    } catch (err) {
+      Alert.alert('Export failed', err.message);
+    } finally {
+      setMalBusy(false);
+    }
+  };
+
+  const handleMalImport = async () => {
+    setMalBusy(true);
+    try {
+      const result = await pickAndImportMalList();
+      if (!result) return; // picker cancelled
+      reloadLibrary();
+      maybeBackupLibraryToDrive().then((backup) => {
+        if (backup.attempted && !backup.success) {
+          Alert.alert('Drive backup failed', backup.error || 'Unknown error — try Backup Now.');
+        }
+      });
+      const label = MAL_LISTS.find((l) => l.key === result.mediaType).label;
+      const lines = [`${result.added} ${label} titles added.`];
+      if (result.manhwa > 0) lines.push(`${result.manhwa} Korean titles are under Manhwa.`);
+      if (result.aniListFailed) {
+        lines.push("Couldn't reach AniList, so manhwa couldn't be told apart: everything went to Manga.");
+      }
+      if (result.linked > 0) {
+        lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
+      }
+      if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
+      if (result.differing > 0) {
+        lines.push(
+          `${result.differing} differ from what's in the app — tap "⚠ To review" in the Library to go through them. Nothing in the app was overwritten.`
+        );
+      }
+      if (result.added > 0) {
+        lines.push('Added titles have no cover yet; open one in its tab to fill it in.');
+      }
+      Alert.alert('Import done', lines.join('\n\n'));
+    } catch (err) {
+      Alert.alert('Import failed', err.message);
+    } finally {
+      setMalBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <Text style={styles.title}>Media Tracker</Text>
-        <View style={styles.headerButtons}>
-          {isSignedInToGoogle ? (
-            <TouchableOpacity onPress={handleBackupNow} style={styles.backupButton} disabled={restoring}>
-              <Text style={styles.driveButtonText}>Backup Now</Text>
-            </TouchableOpacity>
-          ) : null}
-          {isSignedInToGoogle ? (
-            <TouchableOpacity onPress={handleRestoreFromDrive} style={styles.backupButton} disabled={restoring}>
-              <Text style={styles.driveButtonText}>{restoring ? 'Restoring…' : 'Restore'}</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity onPress={handleGoogleSignIn} style={styles.driveButton} disabled={restoring}>
-            <Text style={styles.driveButtonText}>
-              {isSignedInToGoogle ? '☁️ Connected' : 'Connect Drive'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {/* Settings (incl. Drive and MyAnimeList), on every tab. */}
+        <TouchableOpacity onPress={() => setSettingsVisible(true)} hitSlop={10} style={styles.headerSettingsButton}>
+          <Text style={styles.headerSettingsIcon}>⚙️</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
@@ -402,15 +464,11 @@ function AppContent() {
         <View style={[styles.tabPane, { display: tab === 'library' ? 'flex' : 'none' }]}>
           <EntryList
             active={tab === 'library'}
+            reloadKey={libraryReloadKey}
             focusKey={libraryFocusKey}
             onFocusHandled={() => setLibraryFocusKey(null)}
             onOpenInTab={handleOpenInTab}
           />
-          {tab === 'library' ? (
-            <TouchableOpacity style={styles.settingsFab} onPress={() => setSettingsVisible(true)}>
-              <Text style={styles.settingsFabIcon}>⚙️</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
       </View>
 
@@ -424,6 +482,56 @@ function AppContent() {
           {/* Scrolls when the settings don't fit on the screen. */}
           <ScrollView style={styles.settingsCard} contentContainerStyle={styles.settingsCardContent}>
             <Text style={styles.settingsTitle}>Settings</Text>
+
+            <Text style={styles.settingsSectionTitle}>Google Drive</Text>
+            <View style={styles.settingsRow}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>
+                  {isSignedInToGoogle ? '☁️ Cloud sync is on' : 'Cloud sync is off'}
+                </Text>
+                <Text style={styles.settingsHint}>
+                  {isSignedInToGoogle
+                    ? 'Your library and covers are backed up to Google Drive automatically.'
+                    : 'Connect Google Drive to back up your library and covers automatically.'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.settingsSmallButton} onPress={handleGoogleSignIn} disabled={restoring}>
+                <Text style={styles.settingsSmallButtonText}>{isSignedInToGoogle ? 'Reconnect' : 'Connect'}</Text>
+              </TouchableOpacity>
+            </View>
+            {isSignedInToGoogle ? (
+              <View style={styles.settingsButtonRow}>
+                <TouchableOpacity style={styles.settingsWideButton} onPress={handleBackupNow} disabled={restoring}>
+                  <Text style={styles.settingsSmallButtonText}>Backup Now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingsWideButton} onPress={handleRestoreFromDrive} disabled={restoring}>
+                  <Text style={styles.settingsSmallButtonText}>{restoring ? 'Restoring…' : 'Restore'}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <Text style={styles.settingsSectionTitle}>MyAnimeList</Text>
+            <Text style={styles.settingsHint}>
+              Export or import MAL list files. Manga includes manhwa. Exports are also saved to Google
+              Drive when it's connected; imports add missing titles and mark differences to review.
+            </Text>
+            <View style={styles.settingsButtonRow}>
+              {MAL_LISTS.map((l) => (
+                <TouchableOpacity
+                  key={l.key}
+                  style={styles.settingsWideButton}
+                  onPress={() => runMalExport(l.key)}
+                  disabled={malBusy}
+                >
+                  <Text style={styles.settingsSmallButtonText}>⬆ Export {l.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.settingsWideButton} onPress={handleMalImport} disabled={malBusy}>
+              <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : '⬇ Import MAL list'}</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.settingsSectionTitle}>App</Text>
             <View style={[styles.settingsRow, styles.settingsRowGap]}>
               <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>App lock</Text>
@@ -489,20 +597,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   title: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerButtons: { flexDirection: 'row', gap: 8 },
-  backupButton: {
-    backgroundColor: '#1f4068',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  driveButton: {
-    backgroundColor: '#0f3460',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  driveButtonText: { color: '#fff', fontSize: 12 },
+  headerSettingsButton: { paddingHorizontal: 4, paddingVertical: 2 },
+  headerSettingsIcon: { fontSize: 22 },
   tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },
   tabBarHidden: { height: 0, overflow: 'hidden' },
   tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center' },
@@ -510,23 +606,6 @@ const styles = StyleSheet.create({
   tabInactive: { color: '#888' },
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
-  settingsFab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#16213e',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  settingsFabIcon: { fontSize: 22 },
   settingsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -567,4 +646,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   settingsCloseButtonText: { color: '#fff', fontWeight: '600' },
+  settingsButtonRow: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 12 },
+  settingsWideButton: {
+    flex: 1,
+    backgroundColor: '#16213e',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  settingsSmallButton: {
+    backgroundColor: '#16213e',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
 });
