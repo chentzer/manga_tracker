@@ -157,7 +157,13 @@ async function findFile(name, parentId) {
 // growing pile of dated backups. Called once per media type (e.g.
 // "manga-backup.csv", "anime-backup.csv") so each type's data lives in
 // its own file rather than one combined one. Returns the file id.
-export async function backupCsvToDrive(csvContent, fileName = 'library-backup.csv') {
+export function backupCsvToDrive(csvContent, fileName = 'library-backup.csv') {
+  return uploadTextFileToDrive(csvContent, fileName, 'text/csv');
+}
+
+// Creates or overwrites a text file (by name) at the root of the
+// MangaTracker Drive folder. Returns the file id.
+export async function uploadTextFileToDrive(content, fileName, mimeType) {
   const token = await getToken();
   if (!cachedRootFolderId) {
     cachedRootFolderId = await findOrCreateFolder('MangaTracker');
@@ -172,11 +178,11 @@ export async function backupCsvToDrive(csvContent, fileName = 'library-backup.cs
       `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`,
       {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/csv' },
-        body: csvContent,
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': mimeType },
+        body: content,
       }
     );
-    if (!res.ok) throw new Error(`Drive backup update failed: ${res.status}`);
+    if (!res.ok) throw new Error(`Drive update of ${fileName} failed: ${res.status}`);
     return existingId;
   }
 
@@ -187,8 +193,8 @@ export async function backupCsvToDrive(csvContent, fileName = 'library-backup.cs
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
     `${JSON.stringify(metadata)}\r\n` +
     `--${boundary}\r\n` +
-    `Content-Type: text/csv\r\n\r\n` +
-    `${csvContent}\r\n` +
+    `Content-Type: ${mimeType}\r\n\r\n` +
+    `${content}\r\n` +
     `--${boundary}--`;
 
   const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
@@ -199,7 +205,7 @@ export async function backupCsvToDrive(csvContent, fileName = 'library-backup.cs
     },
     body,
   });
-  if (!res.ok) throw new Error(`Drive backup create failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Drive upload of ${fileName} failed: ${res.status}`);
   const data = await res.json();
   return data.id;
 }

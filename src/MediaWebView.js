@@ -3,7 +3,16 @@ import { View, StyleSheet, TextInput, TouchableOpacity, Text, Keyboard, Modal, S
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
-import { entryExists, insertEntry, markSynced, markSyncFailed } from './db';
+import {
+  getEntry,
+  getEntryByMalId,
+  insertEntry,
+  adoptImportedEntry,
+  setMalId,
+  markSynced,
+  markSyncFailed,
+} from './db';
+import { isImportedSourceId } from './malList';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
@@ -386,7 +395,7 @@ export default function MediaWebView({
 
     // Duplicate check happens before navigating anywhere — a duplicate
     // code is silently ignored rather than re-fetching/re-saving it.
-    if (entryExists(code, config.key)) {
+    if (getEntry(code, config.key)) {
       setManualCode('');
       Keyboard.dismiss();
       return;
@@ -503,12 +512,16 @@ export default function MediaWebView({
       const { source, match } = resolved;
 
       const sourceId = source.extractId(match);
-      if (entryExists(sourceId, config.key)) {
+      // Already recorded entries are skipped, except ones still missing
+      // their MyAnimeList id (recorded before it was read): the page is
+      // read again just to fill that in.
+      const existing = getEntry(sourceId, config.key);
+      if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
         setCurrentEntryKey(`${config.key}:${sourceId}`);
         return;
       }
-      setCurrentEntryKey(null);
+      setCurrentEntryKey(existing ? `${config.key}:${sourceId}` : null);
       if (inFlightSourceIds.current.has(sourceId)) {
         logDebug(`Matched ${sourceId} — already being processed, skipping duplicate trigger.`);
         return;
@@ -681,8 +694,15 @@ export default function MediaWebView({
       const pageUrl = pendingPageUrl.current;
 
       // Re-check right before writing, closing the gap between the
-      // nav-state check and this async step.
-      if (entryExists(sourceId, config.key)) {
+      // nav-state check and this async step. An existing entry only gets
+      // its MyAnimeList id filled in, if it was missing.
+      const existing = getEntry(sourceId, config.key);
+      if (existing) {
+        if (!existing.mal_id && payload.malId) {
+          setMalId(sourceId, config.key, payload.malId);
+          logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
+          maybeBackupLibraryToDrive();
+        }
         pendingSourceId.current = null;
         pendingPageUrl.current = null;
         inFlightSourceIds.current.delete(sourceId);
@@ -716,15 +736,24 @@ export default function MediaWebView({
       }
 
       try {
-        insertEntry({
+        // A title imported from a MyAnimeList list (no cover, no site
+        // link yet) becomes this entry, keeping its status, score and
+        // tags, rather than being recorded a second time.
+        const imported = payload.malId ? getEntryByMalId(payload.malId, config.key) : null;
+        const details = {
           sourceId,
-          mediaType: config.key,
           title: payload.title,
           altTitle: payload.altTitle,
           author: payload.author,
           sourceUrl: pageUrl,
           localImagePath: localPath,
-        });
+        };
+        if (imported && isImportedSourceId(imported.source_id)) {
+          adoptImportedEntry(imported.source_id, config.key, details);
+          logDebug(`Linked ${sourceId} to "${imported.title}" from your imported MyAnimeList list.`);
+        } else {
+          insertEntry({ ...details, mediaType: config.key, malId: payload.malId });
+        }
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`
         );

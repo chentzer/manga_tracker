@@ -17,10 +17,27 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { getAllEntries, setScore, setTags, setReadStatus, parseTags, deleteEntry, clearAllEntries } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
+import { exportMalList, pickAndImportMalList } from './malList';
 
 const STARS = [1, 2, 3, 4, 5];
 // Fallback for any media type that doesn't define its own readStatusLabels.
-const DEFAULT_READ_STATUS_LABELS = { read: 'Read', want: 'Want to Read' };
+const DEFAULT_READ_STATUS_LABELS = {
+  reading: 'Reading',
+  read: 'Read',
+  on_hold: 'On Hold',
+  dropped: 'Dropped',
+  want: 'Want to Read',
+};
+// The five statuses, in MyAnimeList's order. `label` is the key into a
+// type's readStatusLabels.
+const READ_STATUSES = [
+  { key: 'reading', label: 'reading', icon: '▶️' },
+  { key: 'read', label: 'read', icon: '📖' },
+  { key: 'on_hold', label: 'on_hold', icon: '⏸️' },
+  { key: 'dropped', label: 'dropped', icon: '✖️' },
+  { key: 'want_to_read', label: 'want', icon: '📌' },
+];
+const READ_STATUS_ICONS = Object.fromEntries(READ_STATUSES.map((s) => [s.key, s.icon]));
 
 function getReadStatusLabels(mediaType) {
   return MEDIA_TYPES[mediaType]?.readStatusLabels || DEFAULT_READ_STATUS_LABELS;
@@ -39,14 +56,11 @@ function StarRating({ score, onRate, size = 16 }) {
 }
 
 // Labels come from the entry's own media type (e.g. "Read" for manga,
-// "Watched" for anime) — the underlying stored value is always 'read'
-// or 'want_to_read' regardless of type, only the wording differs.
+// "Watched" for anime) — the stored values are the same for every type,
+// only the wording differs.
 function ReadStatusToggle({ status, mediaType, onChange }) {
   const labels = getReadStatusLabels(mediaType);
-  const options = [
-    { key: 'read', label: `📖 ${labels.read}` },
-    { key: 'want_to_read', label: `📌 ${labels.want}` },
-  ];
+  const options = READ_STATUSES.map((s) => ({ key: s.key, label: `${s.icon} ${labels[s.label]}` }));
   return (
     <View style={styles.readStatusRow}>
       {options.map((s) => (
@@ -149,6 +163,12 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDel
               <Text style={styles.detailLabel}>Code</Text>
               <Text style={styles.detailValue}>{entry.source_id}</Text>
             </View>
+            {entry.mal_id ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>MyAnimeList</Text>
+                <Text style={styles.detailValue}>{entry.mal_id}</Text>
+              </View>
+            ) : null}
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Added</Text>
               <Text style={styles.detailValue}>{entry.created_at}</Text>
@@ -221,7 +241,10 @@ const RATING_FILTERS = [
 ];
 const READ_STATUS_FILTERS = [
   { key: null, label: 'Any status' },
+  { key: 'reading', label: '▶️ Reading/Watching' },
   { key: 'read', label: '📖 Read/Watched' },
+  { key: 'on_hold', label: '⏸️ On Hold' },
+  { key: 'dropped', label: '✖️ Dropped' },
   { key: 'want_to_read', label: '📌 Want to Read/Watch' },
 ];
 
@@ -422,6 +445,70 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     ? entries.find((e) => `${e.media_type}:${e.source_id}` === selectedKey) || null
     : null;
 
+  // Export/Import of MyAnimeList lists (see malList.js). Export works on
+  // one type: the selected type chip, or it asks when "All" is selected.
+  const [busy, setBusy] = useState(false);
+
+  const runExport = useCallback(async (mediaType) => {
+    setBusy(true);
+    try {
+      const result = await exportMalList(mediaType);
+      const lines = [`${result.exported} ${MEDIA_TYPES[mediaType].label} entries exported.`];
+      if (result.skipped > 0) {
+        lines.push(
+          `${result.skipped} left out: no MyAnimeList id yet. Open them once in their tab to pick it up.`
+        );
+      }
+      if (result.drive === 'saved') {
+        lines.push('Saved to Google Drive (replacing the last export).');
+      } else if (result.drive === 'not connected') {
+        lines.push("Not saved to Google Drive: Drive isn't connected.");
+      } else {
+        lines.push(`Saving to Google Drive failed: ${result.drive}`);
+      }
+      Alert.alert('Export done', lines.join('\n\n'));
+    } catch (err) {
+      Alert.alert('Export failed', err.message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const handleExport = useCallback(() => {
+    if (filter) {
+      runExport(filter);
+      return;
+    }
+    Alert.alert('Export which list?', "Exports in MyAnimeList's list format.", [
+      ...MEDIA_TYPE_LIST.map((m) => ({ text: m.label, onPress: () => runExport(m.key) })),
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, [filter, runExport]);
+
+  const handleImport = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await pickAndImportMalList();
+      if (!result) return; // picker cancelled
+      load();
+      backupSilently();
+      const label = MEDIA_TYPES[result.mediaType].label;
+      const lines = [`${result.added} ${label} titles added.`];
+      if (result.linked > 0) {
+        lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
+      }
+      if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
+      if (result.added > 0) {
+        lines.push('Added titles have no cover yet; open one in its tab to fill it in.');
+      }
+      Alert.alert('Import done', lines.join('\n\n'));
+    } catch (err) {
+      Alert.alert('Import failed', err.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [load, backupSilently]);
+
   const handleClearAll = useCallback(() => {
     if (entries.length === 0) return;
 
@@ -464,6 +551,16 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
             <Text style={filter === f.key ? styles.filterTextActive : styles.filterText}>{f.label}</Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[styles.listFileChip, styles.listFileChipFirst]}
+          onPress={handleExport}
+          disabled={busy}
+        >
+          <Text style={styles.listFileText}>⬆ Export</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.listFileChip} onPress={handleImport} disabled={busy}>
+          <Text style={styles.listFileText}>⬇ Import</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.filterBar}>
@@ -511,7 +608,12 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         ))}
       </View>
 
-      <View style={styles.filterBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.statusFilterBar}
+        contentContainerStyle={styles.statusFilterBarContent}
+      >
         {READ_STATUS_FILTERS.map((r) => (
           <TouchableOpacity
             key={r.key ?? 'any'}
@@ -523,7 +625,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {allTags.length > 0 ? (
         <ScrollView
@@ -569,10 +671,8 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
               <StarRating score={item.score} onRate={(score) => rate(item, score)} />
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
-                {item.read_status ? (
-                  <Text style={styles.readStatusBadge}>
-                    {item.read_status === 'read' ? '📖' : '📌'}
-                  </Text>
+                {READ_STATUS_ICONS[item.read_status] ? (
+                  <Text style={styles.readStatusBadge}>{READ_STATUS_ICONS[item.read_status]}</Text>
                 ) : null}
                 <Text style={styles.status}>
                   {item.sync_status === 'synced' ? '☁️ Synced' : '📴 Local only'}
@@ -667,6 +767,16 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   clearAllText: { color: '#c0392b', fontSize: 13, fontWeight: '600' },
+  listFileChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#e3ecfa',
+  },
+  listFileChipFirst: { marginLeft: 'auto' },
+  listFileText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
+  statusFilterBar: { flexGrow: 0 },
+  statusFilterBarContent: { padding: 10, gap: 8 },
   filterText: { color: '#333', fontSize: 13 },
   filterTextActive: { color: '#fff', fontSize: 13, fontWeight: '600' },
   searchBar: {
@@ -802,7 +912,7 @@ const styles = StyleSheet.create({
   },
   detailCloseButtonText: { color: '#fff', fontWeight: '600' },
   readStatusBadge: { fontSize: 13 },
-  readStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  readStatusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   readStatusChip: {
     paddingHorizontal: 12,
     paddingVertical: 8,

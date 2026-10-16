@@ -28,12 +28,18 @@ export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
     label: 'Manga',
-    // Labels shown for the read-status toggle/badge on this type's
-    // entries — "Read" makes sense for manga; anime uses "Watched"
-    // instead further down. The underlying stored value is always
-    // 'read' or 'want_to_read' regardless of type; only the display
-    // wording changes.
-    readStatusLabels: { read: 'Read', want: 'Want to Read' },
+    // Labels shown for the status toggle/badge on this type's entries
+    // ("Read" for manga; anime uses "Watched" further down). The stored
+    // values are the same for every type — MyAnimeList's five statuses
+    // ('reading', 'read', 'on_hold', 'dropped', 'want_to_read') — only
+    // the wording changes.
+    readStatusLabels: {
+      reading: 'Reading',
+      read: 'Read',
+      on_hold: 'On Hold',
+      dropped: 'Dropped',
+      want: 'Want to Read',
+    },
     // Set MANGA_SITE_URL in .env to the site you browse.
     startUrl: MANGA_SITE_URL,
     // Shows a Reverse button beside the code box (see ReverseSearch.js):
@@ -106,6 +112,8 @@ export const MEDIA_TYPES = {
     // - altTitle: the first <li> inside an element whose class mentions
     //   "alts" (alternative titles)
     // - author: links into the site's author/artist search
+    // - malId: the number in the page's link to myanimelist.net/manga/<id>
+    //   (used to export/import MyAnimeList lists, see malList.js)
     extractMetadataJs: `
       (function() {
         if (location.pathname.split('/').filter(Boolean).length > 2) {
@@ -142,11 +150,15 @@ export const MEDIA_TYPES = {
             if (name && names.indexOf(name) === -1) names.push(name);
           }
 
+          var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
+          var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+
           window.ReactNativeWebView.postMessage(JSON.stringify({
             imageUrl: imageUrl,
             title: title,
             altTitle: altTitle,
             author: names.join(', ') || null,
+            malId: malMatch ? Number(malMatch[1]) : null,
           }));
         }
         trySend();
@@ -158,9 +170,15 @@ export const MEDIA_TYPES = {
   anime: {
     key: 'anime',
     label: 'Anime',
-    // "Watched" instead of manga's "Read" — same underlying stored
-    // value ('read'/'want_to_read'), just different wording per type.
-    readStatusLabels: { read: 'Watched', want: 'Want to Watch' },
+    // "Watching"/"Watched" instead of manga's "Reading"/"Read" — same
+    // stored values, just different wording per type.
+    readStatusLabels: {
+      reading: 'Watching',
+      read: 'Watched',
+      on_hold: 'On Hold',
+      dropped: 'Dropped',
+      want: 'Want to Watch',
+    },
     // Double-tap left half of the video to rewind, right half to
     // fast-forward (YouTube-style) — set to however many seconds each
     // tap should skip, or omit/0 to disable. Harmless to leave on
@@ -189,14 +207,16 @@ export const MEDIA_TYPES = {
     // (check the debug log's "Checking URL: ..." lines) and extraction
     // will skip until you're past it.
     // interstitialKeywords: ['some-marker-found-in-the-url'],
-    // Title comes from the page's <h1> (usually the English title) and
-    // the thumbnail from og:image. og:title often holds the original/
+    // Title comes from the first piece of text in the page's <h1>
+    // (usually the English title; some pages also put badges or a
+    // summary inside the <h1>) and the thumbnail from og:image. og:title often holds the original/
     // romanized title instead, so it's saved as altTitle when it differs
     // (minus a leading "Watch "). Many anime sites are single-page apps
     // that swap the page client-side, so this waits until the <h1> is
     // there and og:url points at the series in the current URL before
     // reading anything — otherwise it could save the previous series'
-    // details. No author for anime.
+    // details. No author for anime. malId comes from the page's link to
+    // myanimelist.net/anime/<id> (see malList.js).
     extractMetadataJs: `
       (function() {
         var attempts = 0;
@@ -215,7 +235,17 @@ export const MEDIA_TYPES = {
             return;
           }
 
-          var title = h1 ? h1.textContent.trim() : null;
+          var title = null;
+          if (h1) {
+            var walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
+            var node;
+            while ((node = walker.nextNode())) {
+              if (node.textContent.trim()) {
+                title = node.textContent.trim();
+                break;
+              }
+            }
+          }
           var altTitle = ogTitle && ogTitle.content
             ? ogTitle.content.replace(/^Watch +/i, '').trim()
             : null;
@@ -227,11 +257,15 @@ export const MEDIA_TYPES = {
           var video = document.querySelector('video');
           var imageUrl = (ogImage && ogImage.content) || (video && video.poster) || null;
 
+          var malLink = document.querySelector('a[href*="myanimelist.net/anime/"]');
+          var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]anime[/]([0-9]+)/);
+
           window.ReactNativeWebView.postMessage(JSON.stringify({
             imageUrl: imageUrl,
             title: title,
             altTitle: altTitle,
             author: null,
+            malId: malMatch ? Number(malMatch[1]) : null,
           }));
         }
         trySend();

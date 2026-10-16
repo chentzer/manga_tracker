@@ -64,6 +64,22 @@ export function initDb() {
     // Column already exists — nothing to do.
   }
 
+  // mal_id: the entry's MyAnimeList id, read from the site's link to
+  // MyAnimeList (or from an imported MAL list). mal_data: the entry's
+  // fields from an imported MAL list, as JSON, so an export can give
+  // back exactly what came in (dates, 1-10 score, progress, ...). See
+  // malList.js.
+  try {
+    db.execSync('ALTER TABLE entries ADD COLUMN mal_id INTEGER;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+  try {
+    db.execSync('ALTER TABLE entries ADD COLUMN mal_data TEXT;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+
   // The "video" type was renamed to "anime"; carry existing entries over.
   db.runSync("UPDATE entries SET media_type = 'anime' WHERE media_type = 'video'");
 
@@ -107,7 +123,66 @@ export function entryExists(sourceId, mediaType) {
   return !!row;
 }
 
-export function insertEntry({ sourceId, mediaType, title, altTitle, author, sourceUrl, localImagePath }) {
+export function getEntry(sourceId, mediaType) {
+  return db.getFirstSync(
+    'SELECT * FROM entries WHERE source_id = ? AND media_type = ?',
+    [sourceId, mediaType]
+  );
+}
+
+export function getEntryByMalId(malId, mediaType) {
+  return db.getFirstSync(
+    'SELECT * FROM entries WHERE mal_id = ? AND media_type = ?',
+    [malId, mediaType]
+  );
+}
+
+export function setMalId(sourceId, mediaType, malId) {
+  db.runSync(
+    'UPDATE entries SET mal_id = ? WHERE source_id = ? AND media_type = ?',
+    [malId, sourceId, mediaType]
+  );
+}
+
+export function setMalData(sourceId, mediaType, malId, malData) {
+  db.runSync(
+    'UPDATE entries SET mal_id = ?, mal_data = ? WHERE source_id = ? AND media_type = ?',
+    [malId, malData, sourceId, mediaType]
+  );
+}
+
+// Turns an entry imported from a MAL list (source_id "mal-<id>", no
+// cover) into a normal one once you open that title on the site: it
+// takes the site's id, URL, cover and details, and keeps your status,
+// score, tags and MAL fields. The MAL title is kept as the alternate
+// title when the site doesn't give one.
+export function adoptImportedEntry(oldSourceId, mediaType, { sourceId, title, altTitle, author, sourceUrl, localImagePath }) {
+  db.runSync(
+    `UPDATE entries SET
+       source_id = ?,
+       alt_title = COALESCE(?, CASE WHEN ? IS NULL OR title = ? THEN alt_title ELSE title END),
+       title = COALESCE(?, title),
+       author = COALESCE(?, author),
+       source_url = ?,
+       local_image_path = ?,
+       sync_status = 'pending'
+     WHERE source_id = ? AND media_type = ?`,
+    [
+      sourceId,
+      altTitle ?? null,
+      title ?? null,
+      title ?? null,
+      title ?? null,
+      author ?? null,
+      sourceUrl ?? null,
+      localImagePath ?? null,
+      oldSourceId,
+      mediaType,
+    ]
+  );
+}
+
+export function insertEntry({ sourceId, mediaType, title, altTitle, author, sourceUrl, localImagePath, malId }) {
   // INSERT OR IGNORE closes the race between an entryExists() check and
   // this write (e.g. two rapid navigations to the same item).
   // read_status defaults to 'read' (not left unset) — you're actively
@@ -115,9 +190,9 @@ export function insertEntry({ sourceId, mediaType, title, altTitle, author, sour
   // the sensible default rather than making every new entry start as
   // an unset/"want to" item you'd have to manually mark.
   db.runSync(
-    `INSERT OR IGNORE INTO entries (source_id, media_type, title, alt_title, author, source_url, local_image_path, read_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'read')`,
-    [sourceId, mediaType, title ?? null, altTitle ?? null, author ?? null, sourceUrl ?? null, localImagePath]
+    `INSERT OR IGNORE INTO entries (source_id, media_type, title, alt_title, author, source_url, local_image_path, read_status, mal_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'read', ?)`,
+    [sourceId, mediaType, title ?? null, altTitle ?? null, author ?? null, sourceUrl ?? null, localImagePath, malId ?? null]
   );
 }
 
@@ -147,11 +222,13 @@ export function restoreEntry({
   localImagePath,
   syncStatus,
   createdAt,
+  malId,
+  malData,
 }) {
   db.runSync(
     `INSERT OR IGNORE INTO entries
-     (source_id, media_type, title, alt_title, author, score, tags, read_status, source_url, local_image_path, sync_status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (source_id, media_type, title, alt_title, author, score, tags, read_status, source_url, local_image_path, sync_status, created_at, mal_id, mal_data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)`,
     [
       sourceId,
       mediaType,
@@ -165,6 +242,8 @@ export function restoreEntry({
       localImagePath || null,
       syncStatus || 'pending',
       createdAt || null,
+      malId || null,
+      malData || null,
     ]
   );
 }
@@ -216,7 +295,9 @@ export function setTags(sourceId, mediaType, tags) {
   );
 }
 
-// status is 'read' | 'want_to_read' | null (unset).
+// status is null (unset) or one of MyAnimeList's five list statuses:
+// 'reading' (reading/watching), 'read' (completed), 'on_hold',
+// 'dropped', 'want_to_read' (plan to read/watch).
 export function setReadStatus(sourceId, mediaType, status) {
   db.runSync(
     'UPDATE entries SET read_status = ? WHERE source_id = ? AND media_type = ?',

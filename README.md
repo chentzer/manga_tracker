@@ -141,7 +141,7 @@ Two separate things sync to Drive once connected, both automatic:
   title was extracted.
 - **Full entry data** — every entry's `media_type`, `source_id`, `title`,
   `alt_title`, `author`, `score`, `tags`, `read_status`, `source_url`,
-  `sync_status`, and `created_at`, written to a separate CSV file **per
+  `sync_status`, `created_at`, `mal_id` and `mal_data`, written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
   `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
   so each type's data stays easy to open/browse individually. Each file
@@ -162,6 +162,42 @@ Drive with less data than it already had. There's also a standalone
 later point, e.g. after adding entries on a second device — existing
 local entries are never touched or overwritten by either path, only
 added to.
+
+## MyAnimeList export / import
+
+The Library's **⬆ Export** and **⬇ Import** buttons work with
+MyAnimeList (MAL) list files, in the same XML format MAL's own "Export
+My List" produces and its import page accepts. Code: `src/malList.js`.
+
+- **MAL ids.** Every entry can carry its MAL id (`mal_id`). Entries you
+  record by browsing get it from the page's link to `myanimelist.net`
+  (see `extractMetadataJs` in `mediaTypes.js`). Entries recorded before
+  this existed pick it up the next time you open them in their tab.
+- **Export** writes one list, `mangalist.xml` or `animelist.xml` — the
+  type chip that's selected, or it asks which when "All" is selected. It
+  opens the share sheet (save it to Files, send it, ...) and, when Drive
+  is connected, saves it to the `MangaTracker` folder on Drive,
+  replacing the previous export there. Entries without a MAL id are left
+  out (the summary says how many). The file's user name and id come from
+  the last list you imported.
+- **Import** takes a MAL export (`.xml`, or the `.xml.gz` MAL gives you)
+  and adds every title that isn't in the library yet, matched by MAL id
+  and then by title. A title that's already there (recorded by browsing)
+  but has no MAL id just gets it filled in. Added titles have no cover
+  or site page yet: their code is `mal-<id>` and their link goes to
+  MyAnimeList. The first time you open that title on the site, the
+  entry becomes a normal one (site code, link, cover and author) and
+  keeps your status, rating and tags.
+- **Nothing is lost on the way through.** An imported entry keeps its
+  MAL fields as JSON (`mal_data`: dates, 1–10 score, progress, priority,
+  ...), and an export gives them back unchanged, except for what you
+  changed in the app (status, tags, and the score if you re-rated it).
+- **Statuses** are MAL's five: Reading/Watching, Read/Watched
+  (Completed), On Hold, Dropped and Want to Read/Watch (Plan to ...). An
+  entry with no status exports as Plan to Read/Watch.
+- **Scores.** MAL scores 1–10 and the app uses 1–5 stars: an import
+  halves and rounds (7 → ★4), an export doubles (★4 → 8) unless the
+  stars still match the imported score, which then goes out as it was.
 
 ## Name vs. dedup key
 
@@ -404,17 +440,19 @@ so nothing renders blank.
   fresh, unfiltered set on open (via `openArtistFilter()`) regardless of
   the current type-filter chip, since the point is to show every artist
   across every type at once rather than just whichever type happens to
-  be selected. A minimum-rating filter (★4+, ★3+, etc), a read-status filter
-  (Read/Watched / Want to Read/Watch — combined generic wording here
-  since this filter spans both media types at once), and a scrollable
+  be selected. A minimum-rating filter (★4+, ★3+, etc), a scrollable
+  status filter (Reading/Watching, Read/Watched, On Hold, Dropped, Want
+  to Read/Watch — combined generic wording here since this filter spans
+  both media types at once), and a scrollable
   row of tag filter chips
   (multi-select — an entry must have *all* selected tags to match) — all
   client-side over the already-loaded list, so toggling any of them is
   instant. A tappable 1–5 star rating sits on each entry. Tapping a row
   (not a star) opens a detail sheet showing the full title, author, media
-  type, code, date added, sync status, an editable rating, a read-status
-  toggle (labeled per the entry's own media type — "Read"/"Want to Read"
-  for manga, "Watched"/"Want to Watch" for anime, via each type's
+  type, code, MyAnimeList id, date added, sync status, an editable
+  rating, a status toggle with MyAnimeList's five statuses (labeled per
+  the entry's own media type — "Reading"/"Read"/"Want to Read" for
+  manga, "Watching"/"Watched"/"Want to Watch" for anime, via each type's
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to
   unset), a tag
   editor (add/remove free-text tags), a tappable link to the original
@@ -427,7 +465,9 @@ so nothing renders blank.
   as a simple comma-separated field rather
   than a separate table — fine at personal-library scale, and the
   distinct-tag list for the filter row is just computed from whatever's
-  in use. A "Clear All" button wipes *every* entry the same way, also
+  in use. **⬆ Export** / **⬇ Import** next to the type chips handle
+  MyAnimeList list files (see "MyAnimeList export / import" above). A
+  "Clear All" button wipes *every* entry the same way, also
   after confirming first.
 - `App.js` — wraps everything in `SafeAreaProvider` + `AppLock`, then
   renders the tab bar built from the media type list plus the Library
