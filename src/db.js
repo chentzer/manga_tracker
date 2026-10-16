@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { columnsFromMalItem } from './malFormat';
 
 const db = SQLite.openDatabaseSync('manga.db');
 
@@ -65,19 +66,56 @@ export function initDb() {
   }
 
   // mal_id: the entry's MyAnimeList id, read from the site's link to
-  // MyAnimeList (or from an imported MAL list). mal_data: the entry's
-  // fields from an imported MAL list, as JSON, so an export can give
-  // back exactly what came in (dates, 1-10 score, progress, ...). See
-  // malList.js.
-  try {
-    db.execSync('ALTER TABLE entries ADD COLUMN mal_id INTEGER;');
-  } catch (e) {
-    // Column already exists — nothing to do.
-  }
-  try {
-    db.execSync('ALTER TABLE entries ADD COLUMN mal_data TEXT;');
-  } catch (e) {
-    // Column already exists — nothing to do.
+  // MyAnimeList (or from an imported MAL list). mal_data: the MAL fields
+  // from an imported list that have no column of their own, as JSON, so
+  // an export can give back exactly what came in. The rest mirror MAL's
+  // own list fields (dates, progress, ...) — see malFormat.js.
+  const hadMalColumns = hasColumn('start_date');
+  [
+    'mal_id INTEGER',
+    'mal_data TEXT',
+    'start_date TEXT',
+    'finish_date TEXT',
+    'progress INTEGER',
+    'progress_volumes INTEGER',
+    'total INTEGER',
+    'total_volumes INTEGER',
+    'times_repeated INTEGER',
+    'repeating INTEGER',
+    'priority TEXT',
+    'comments TEXT',
+    'series_type TEXT',
+  ].forEach((column) => {
+    try {
+      db.execSync(`ALTER TABLE entries ADD COLUMN ${column};`);
+    } catch (e) {
+      // Column already exists — nothing to do.
+    }
+  });
+  // Scores went from 1-5 stars to MAL's 1-10. Done once, when the MAL
+  // columns arrive: entries imported from MAL get their exact score (and
+  // dates, progress, ...) back from mal_data; the rest are doubled.
+  if (!hadMalColumns) {
+    db.withTransactionSync(() => {
+      db.getAllSync('SELECT source_id, media_type, score, mal_data FROM entries').forEach((row) => {
+        let item = null;
+        try {
+          item = row.mal_data ? JSON.parse(row.mal_data) : null;
+        } catch (e) {
+          item = null;
+        }
+        if (item) {
+          // Status and tags stay as set in the app; so does the score,
+          // if it was re-rated since the import.
+          const { tags, read_status, ...columns } = columnsFromMalItem(row.media_type, item);
+          const importedStars = columns.score ? Math.max(1, Math.round(columns.score / 2)) : null;
+          if ((row.score || null) !== importedStars) columns.score = row.score ? row.score * 2 : null;
+          updateEntryFields(row.source_id, row.media_type, columns);
+        } else if (row.score) {
+          updateEntryFields(row.source_id, row.media_type, { score: row.score * 2 });
+        }
+      });
+    });
   }
 
   // The "video" type was renamed to "anime"; carry existing entries over.
@@ -98,6 +136,10 @@ export function initDb() {
   if (getSetting('appLockEnabled') === null) {
     setSetting('appLockEnabled', existingInstall ? '1' : '0');
   }
+}
+
+function hasColumn(name) {
+  return db.getAllSync('PRAGMA table_info(entries)').some((c) => c.name === name);
 }
 
 // Values are always stored/read as strings — callers compare/convert as
@@ -144,10 +186,33 @@ export function setMalId(sourceId, mediaType, malId) {
   );
 }
 
-export function setMalData(sourceId, mediaType, malId, malData) {
+// Columns that can be set through updateEntryFields / restoreEntry.
+export const EDITABLE_COLUMNS = [
+  'score',
+  'tags',
+  'read_status',
+  'start_date',
+  'finish_date',
+  'progress',
+  'progress_volumes',
+  'total',
+  'total_volumes',
+  'times_repeated',
+  'repeating',
+  'priority',
+  'comments',
+  'series_type',
+  'mal_id',
+  'mal_data',
+];
+
+// Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.
+export function updateEntryFields(sourceId, mediaType, fields) {
+  const keys = Object.keys(fields).filter((k) => EDITABLE_COLUMNS.includes(k));
+  if (keys.length === 0) return;
   db.runSync(
-    'UPDATE entries SET mal_id = ?, mal_data = ? WHERE source_id = ? AND media_type = ?',
-    [malId, malData, sourceId, mediaType]
+    `UPDATE entries SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE source_id = ? AND media_type = ?`,
+    [...keys.map((k) => (fields[k] === undefined ? null : fields[k])), sourceId, mediaType]
   );
 }
 
@@ -203,48 +268,47 @@ export function markSynced(sourceId, mediaType, driveFileId) {
   );
 }
 
-// Inserts a full entry restored from a Drive CSV backup — unlike
-// insertEntry (used when actively browsing), this accepts every field
-// including score/tags/read_status/created_at, since a restore is
-// bringing back data that already existed rather than recording
-// something fresh. INSERT OR IGNORE means restoring never overwrites an
-// entry that already exists locally.
+// Inserts a full entry restored from a Drive CSV backup or imported from
+// a MyAnimeList list — unlike insertEntry (used when actively browsing),
+// this accepts every field, since it's bringing back data that already
+// existed rather than recording something fresh. Besides the fields
+// named below it takes any of EDITABLE_COLUMNS by column name (score,
+// read_status, start_date, ...). INSERT OR IGNORE means it never
+// overwrites an entry that already exists locally.
 export function restoreEntry({
   sourceId,
   mediaType,
   title,
   altTitle,
   author,
-  score,
-  tags,
-  readStatus,
   sourceUrl,
   localImagePath,
   syncStatus,
   createdAt,
   malId,
   malData,
+  ...columns
 }) {
+  const fields = {
+    source_id: sourceId,
+    media_type: mediaType,
+    title: title || null,
+    alt_title: altTitle || null,
+    author: author || null,
+    source_url: sourceUrl || null,
+    local_image_path: localImagePath || null,
+    sync_status: syncStatus || 'pending',
+    mal_id: malId || null,
+    mal_data: malData || null,
+  };
+  EDITABLE_COLUMNS.forEach((k) => {
+    if (columns[k] !== undefined && columns[k] !== '') fields[k] = columns[k];
+  });
+  const keys = Object.keys(fields);
   db.runSync(
-    `INSERT OR IGNORE INTO entries
-     (source_id, media_type, title, alt_title, author, score, tags, read_status, source_url, local_image_path, sync_status, created_at, mal_id, mal_data)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)`,
-    [
-      sourceId,
-      mediaType,
-      title || null,
-      altTitle || null,
-      author || null,
-      score || null,
-      tags || null,
-      readStatus || null,
-      sourceUrl || null,
-      localImagePath || null,
-      syncStatus || 'pending',
-      createdAt || null,
-      malId || null,
-      malData || null,
-    ]
+    `INSERT OR IGNORE INTO entries (${keys.join(', ')}, created_at)
+     VALUES (${keys.map(() => '?').join(', ')}, COALESCE(?, CURRENT_TIMESTAMP))`,
+    [...keys.map((k) => fields[k]), createdAt || null]
   );
 }
 
@@ -255,7 +319,7 @@ export function markSyncFailed(sourceId, mediaType) {
   );
 }
 
-// score is 1-5, or null to clear a rating.
+// score is 1-10 (MyAnimeList's scale), or null to clear a rating.
 export function setScore(sourceId, mediaType, score) {
   db.runSync(
     'UPDATE entries SET score = ? WHERE source_id = ? AND media_type = ?',

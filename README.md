@@ -141,7 +141,10 @@ Two separate things sync to Drive once connected, both automatic:
   title was extracted.
 - **Full entry data** — every entry's `media_type`, `source_id`, `title`,
   `alt_title`, `author`, `score`, `tags`, `read_status`, `source_url`,
-  `sync_status`, `created_at`, `mal_id` and `mal_data`, written to a separate CSV file **per
+  `sync_status`, `created_at`, `mal_id`, `mal_data` and the MyAnimeList
+  fields (`start_date`, `finish_date`, `progress`, `progress_volumes`,
+  `total`, `total_volumes`, `times_repeated`, `repeating`, `priority`,
+  `comments`, `series_type`), written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
   `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
   so each type's data stays easy to open/browse individually. Each file
@@ -167,7 +170,27 @@ added to.
 
 The Library's **⬆ Export** and **⬇ Import** buttons work with
 MyAnimeList (MAL) list files, in the same XML format MAL's own "Export
-My List" produces and its import page accepts. Code: `src/malList.js`.
+My List" produces and its import page accepts. Code: `src/malList.js`
+(files) and `src/malFormat.js` (the format and how it maps onto an entry).
+
+Entries hold the same details a MAL list does, all editable in the
+detail sheet:
+
+| In the app | MAL field |
+|---|---|
+| Status (5) | `my_status` |
+| Score 1–10 (MAL's wording: 10 Masterpiece … 1 Appalling) | `my_score` |
+| Episodes / chapters, of a total | `my_watched_episodes` / `my_read_chapters`, `series_episodes` / `manga_chapters` |
+| Volumes, of a total (manga) | `my_read_volumes`, `manga_volumes` |
+| Start / finish date (`YYYY-MM-DD`, `00` for an unknown month or day) | `my_start_date`, `my_finish_date` |
+| Times rewatched / reread, and rewatching / rereading now | `my_times_watched` / `my_times_read`, `my_rewatching` / `my_rereading` |
+| Priority (Low / Medium / High) | `my_priority` |
+| Tags, comments | `my_tags`, `my_comments` |
+| Series type (anime, e.g. TV / Movie; shown, not edited) | `series_type` |
+
+Like on MAL, setting a status to Reading/Watching fills in an empty
+start date with today, and Read/Watched (Completed) fills in an empty
+finish date and sets progress to the total when the total is known.
 
 - **MAL ids.** Every entry can carry its MAL id (`mal_id`). Entries you
   record by browsing get it from the page's link to `myanimelist.net`
@@ -187,17 +210,18 @@ My List" produces and its import page accepts. Code: `src/malList.js`.
   or site page yet: their code is `mal-<id>` and their link goes to
   MyAnimeList. The first time you open that title on the site, the
   entry becomes a normal one (site code, link, cover and author) and
-  keeps your status, rating and tags.
-- **Nothing is lost on the way through.** An imported entry keeps its
-  MAL fields as JSON (`mal_data`: dates, 1–10 score, progress, priority,
-  ...), and an export gives them back unchanged, except for what you
-  changed in the app (status, tags, and the score if you re-rated it).
+  keeps everything from MAL. A title linked by title only gets the MAL
+  details it doesn't have yet; what you set in the app stays.
+- **Nothing is lost on the way through.** MAL fields without a column of
+  their own (`my_id`, storage, ...) are kept as JSON in `mal_data`, so
+  exporting an unchanged import gives back the same file.
 - **Statuses** are MAL's five: Reading/Watching, Read/Watched
   (Completed), On Hold, Dropped and Want to Read/Watch (Plan to ...). An
   entry with no status exports as Plan to Read/Watch.
-- **Scores.** MAL scores 1–10 and the app uses 1–5 stars: an import
-  halves and rounds (7 → ★4), an export doubles (★4 → 8) unless the
-  stars still match the imported score, which then goes out as it was.
+- **Scores** used to be 1–5 stars. On the first start after the update,
+  existing scores are doubled (★4 → 8), entries imported from MAL get
+  their exact MAL score back (unless re-rated in the app since), and a
+  Drive backup from before the change is doubled when restored.
 
 ## Name vs. dedup key
 
@@ -440,17 +464,19 @@ so nothing renders blank.
   fresh, unfiltered set on open (via `openArtistFilter()`) regardless of
   the current type-filter chip, since the point is to show every artist
   across every type at once rather than just whichever type happens to
-  be selected. A minimum-rating filter (★4+, ★3+, etc), a scrollable
+  be selected. A scrollable minimum-score filter (★9+, ★8+, etc), a scrollable
   status filter (Reading/Watching, Read/Watched, On Hold, Dropped, Want
   to Read/Watch — combined generic wording here since this filter spans
   both media types at once), and a scrollable
   row of tag filter chips
   (multi-select — an entry must have *all* selected tags to match) — all
   client-side over the already-loaded list, so toggling any of them is
-  instant. A tappable 1–5 star rating sits on each entry. Tapping a row
-  (not a star) opens a detail sheet showing the full title, author, media
-  type, code, MyAnimeList id, date added, sync status, an editable
-  rating, a status toggle with MyAnimeList's five statuses (labeled per
+  instant. Each row shows its score (★ 8) and progress (12/24 ep).
+  Tapping a row opens a detail sheet showing the full title, author,
+  media type, code, MyAnimeList id, date added, sync status, the
+  MyAnimeList fields (score 1–10, progress, dates, rewatches, priority,
+  comments — see "MyAnimeList export / import"), a status toggle with
+  MyAnimeList's five statuses (labeled per
   the entry's own media type — "Reading"/"Read"/"Want to Read" for
   manga, "Watching"/"Watched"/"Want to Watch" for anime, via each type's
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to

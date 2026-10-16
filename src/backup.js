@@ -1,4 +1,12 @@
-import { getAllEntries, getPendingSyncEntries, markSynced, markSyncFailed, entryExists, restoreEntry } from './db';
+import {
+  getAllEntries,
+  getPendingSyncEntries,
+  markSynced,
+  markSyncFailed,
+  entryExists,
+  restoreEntry,
+  EDITABLE_COLUMNS,
+} from './db';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
 import {
@@ -25,6 +33,29 @@ const COLUMNS = [
   'created_at',
   'mal_id',
   'mal_data',
+  'start_date',
+  'finish_date',
+  'progress',
+  'progress_volumes',
+  'total',
+  'total_volumes',
+  'times_repeated',
+  'repeating',
+  'priority',
+  'comments',
+  'series_type',
+];
+
+// Number columns: a CSV gives back strings.
+const NUMBER_COLUMNS = [
+  'score',
+  'mal_id',
+  'progress',
+  'progress_volumes',
+  'total',
+  'total_volumes',
+  'times_repeated',
+  'repeating',
 ];
 
 // Each media type gets its own backup file (e.g. "manga-backup.csv",
@@ -198,6 +229,9 @@ export async function restoreFromDriveBackup(onProgress) {
     if (!csvText) continue; // nothing backed up yet for this type
 
     const rows = parseCsvToObjects(csvText);
+    // Backups made before the MyAnimeList fields (no start_date column)
+    // hold scores on the old 1-5 scale.
+    const oldScoreScale = rows.length > 0 && !('start_date' in rows[0]);
 
     for (const row of rows) {
       const sourceId = row.source_id;
@@ -224,21 +258,26 @@ export async function restoreFromDriveBackup(onProgress) {
         }
       }
 
+      const columns = {};
+      EDITABLE_COLUMNS.forEach((col) => {
+        if (row[col] === undefined || row[col] === '') return;
+        columns[col] = NUMBER_COLUMNS.includes(col) ? Number(row[col]) : row[col];
+      });
+      if (oldScoreScale && columns.score) columns.score *= 2;
+
       restoreEntry({
+        ...columns,
         sourceId,
         mediaType,
         title: row.title,
         altTitle: row.alt_title,
         author: row.author,
-        score: row.score ? Number(row.score) : null,
-        tags: row.tags,
-        readStatus: row.read_status,
         sourceUrl: row.source_url,
         localImagePath,
         syncStatus: localImagePath ? 'synced' : 'pending',
         createdAt: row.created_at,
-        malId: row.mal_id ? Number(row.mal_id) : null,
-        malData: row.mal_data || null,
+        malId: columns.mal_id || null,
+        malData: columns.mal_data || null,
       });
       restored++;
       if (onProgress) onProgress(processed, processed);

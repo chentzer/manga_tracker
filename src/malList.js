@@ -1,5 +1,7 @@
 // Export and import of MyAnimeList (MAL) lists, in the XML format MAL's
-// own "Export My List" produces (and its import page accepts).
+// own "Export My List" produces (and its import page accepts). The
+// format itself, and how it maps onto an entry's columns, is in
+// malFormat.js.
 //
 // Export: one file per type (animelist.xml / mangalist.xml) holding every
 // entry that has a MAL id — entries recorded by browsing get theirs from
@@ -11,20 +13,19 @@
 // already in the library, matched by MAL id, then by title. An imported
 // title has no cover or site page yet (source_id "mal-<id>", linking to
 // MyAnimeList); opening it on the site later turns it into a normal entry
-// (see adoptImportedEntry in db.js). Titles already in the library but
-// without a MAL id get it filled in.
+// (see adoptImportedEntry in db.js). A title already in the library but
+// without a MAL id gets it, plus any MAL details it doesn't have yet.
 //
-// Each imported entry keeps its MAL fields as JSON (mal_data), so an
-// export gives back exactly what came in — dates, 1-10 score, progress,
-// priority — except for what you changed in the app (status, tags, and
-// the score when you re-rated it).
+// MAL fields with no column of their own (my_id, storage, ...) are kept
+// as JSON in mal_data, so an export gives back exactly what came in.
 import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { ungzip } from 'pako';
-import { getAllEntries, getEntryByMalId, restoreEntry, setMalData, getSetting, setSetting } from './db';
+import { getAllEntries, getEntryByMalId, restoreEntry, updateEntryFields, getSetting, setSetting } from './db';
 import { MEDIA_TYPES } from './mediaTypes';
 import { isDriveConnected, uploadTextFileToDrive } from './GoogleDriveService';
+import { FORMATS, columnsFromMalItem, malItemFromEntry } from './malFormat';
 
 const IMPORTED_PREFIX = 'mal-';
 
@@ -32,124 +33,8 @@ export function isImportedSourceId(sourceId) {
   return typeof sourceId === 'string' && sourceId.startsWith(IMPORTED_PREFIX);
 }
 
-// Per-type differences in MAL's format. Fields are listed in the order
-// MAL writes them; `cdata` ones are wrapped in <![CDATA[...]]>.
-const FORMATS = {
-  anime: {
-    item: 'anime',
-    exportType: 1,
-    idField: 'series_animedb_id',
-    titleField: 'series_title',
-    progressField: 'my_watched_episodes',
-    totalField: 'series_episodes',
-    statuses: {
-      reading: 'Watching',
-      read: 'Completed',
-      on_hold: 'On-Hold',
-      dropped: 'Dropped',
-      want_to_read: 'Plan to Watch',
-    },
-    totals: {
-      reading: 'user_total_watching',
-      read: 'user_total_completed',
-      on_hold: 'user_total_onhold',
-      dropped: 'user_total_dropped',
-      want_to_read: 'user_total_plantowatch',
-    },
-    totalAll: 'user_total_anime',
-    fields: [
-      ['series_animedb_id', ''],
-      ['series_title', '', 'cdata'],
-      ['series_type', ''],
-      ['series_episodes', '0'],
-      ['my_id', '0'],
-      ['my_watched_episodes', '0'],
-      ['my_start_date', '0000-00-00'],
-      ['my_finish_date', '0000-00-00'],
-      ['my_rated', ''],
-      ['my_score', '0'],
-      ['my_storage', ''],
-      ['my_storage_value', '0.00'],
-      ['my_status', ''],
-      ['my_comments', '', 'cdata'],
-      ['my_times_watched', '0'],
-      ['my_rewatch_value', ''],
-      ['my_priority', 'LOW'],
-      ['my_tags', '', 'cdata'],
-      ['my_rewatching', '0'],
-      ['my_rewatching_ep', '0'],
-      ['my_discuss', '1'],
-      ['my_sns', 'default'],
-      ['update_on_import', '0'],
-    ],
-  },
-  manga: {
-    item: 'manga',
-    exportType: 2,
-    idField: 'manga_mangadb_id',
-    titleField: 'manga_title',
-    progressField: 'my_read_chapters',
-    totalField: 'manga_chapters',
-    statuses: {
-      reading: 'Reading',
-      read: 'Completed',
-      on_hold: 'On-Hold',
-      dropped: 'Dropped',
-      want_to_read: 'Plan to Read',
-    },
-    totals: {
-      reading: 'user_total_reading',
-      read: 'user_total_completed',
-      on_hold: 'user_total_onhold',
-      dropped: 'user_total_dropped',
-      want_to_read: 'user_total_plantoread',
-    },
-    totalAll: 'user_total_manga',
-    fields: [
-      ['manga_mangadb_id', ''],
-      ['manga_title', '', 'cdata'],
-      ['manga_volumes', '0'],
-      ['manga_chapters', '0'],
-      ['my_id', '0'],
-      ['my_read_volumes', '0'],
-      ['my_read_chapters', '0'],
-      ['my_start_date', '0000-00-00'],
-      ['my_finish_date', '0000-00-00'],
-      ['my_scanalation_group', '', 'cdata'],
-      ['my_score', '0'],
-      ['my_storage', ''],
-      ['my_retail_volumes', '0'],
-      ['my_status', ''],
-      ['my_comments', '', 'cdata'],
-      ['my_times_read', '0'],
-      ['my_tags', '', 'cdata'],
-      ['my_priority', 'Low'],
-      ['my_reread_value', ''],
-      ['my_rereading', 'NO'],
-      ['my_discuss', 'YES'],
-      ['my_sns', 'default'],
-      ['update_on_import', '0'],
-    ],
-  },
-};
-
 export function exportFileNameFor(mediaType) {
   return `${FORMATS[mediaType].item}list.xml`;
-}
-
-// ---------- Scores: app stars are 1-5, MAL scores 1-10 ----------
-
-function starsFromMalScore(malScore) {
-  const n = Number(malScore) || 0;
-  return n > 0 ? Math.max(1, Math.round(n / 2)) : null;
-}
-
-// Keeps the imported 1-10 score unless the stars were changed since.
-function malScoreFor(entry, malData) {
-  const stars = entry.score || null;
-  const original = Number(malData.my_score) || 0;
-  if (original > 0 && starsFromMalScore(original) === stars) return original;
-  return stars ? stars * 2 : 0;
 }
 
 // ---------- XML ----------
@@ -211,25 +96,8 @@ export function buildMalXml(mediaType, entries, user = {}) {
   const counts = { reading: 0, read: 0, on_hold: 0, dropped: 0, want_to_read: 0 };
 
   const items = entries.map((entry) => {
-    let malData = {};
-    try {
-      malData = entry.mal_data ? JSON.parse(entry.mal_data) : {};
-    } catch (e) {
-      malData = {};
-    }
-    const status = entry.read_status && format.statuses[entry.read_status] ? entry.read_status : null;
-    if (status) counts[status]++;
-
-    const values = {
-      ...malData,
-      [format.idField]: entry.mal_id,
-      [format.titleField]: malData[format.titleField] || entry.title || entry.alt_title || '',
-      my_score: malScoreFor(entry, malData),
-      // MAL needs a status; an unset one goes in as "plan to".
-      my_status: format.statuses[status || 'want_to_read'],
-      my_tags: entry.tags || '',
-    };
-
+    if (counts[entry.read_status] !== undefined) counts[entry.read_status]++;
+    const values = malItemFromEntry(mediaType, entry);
     const lines = format.fields.map(([name, fallback, kind]) => {
       const raw = values[name] !== undefined && values[name] !== null ? values[name] : fallback;
       const inner = kind === 'cdata' ? cdata(raw) : escapeXml(raw);
@@ -260,8 +128,8 @@ export function buildMalXml(mediaType, entries, user = {}) {
 
 // ---------- Export ----------
 
-// Builds the export for one type, offers it to the share sheet and
-// saves it to Drive (replacing the last export there) when connected.
+// Builds the export for one type, saves it to Drive (replacing the last
+// export there) when connected, and offers it to the share sheet.
 // Returns { exported, skipped, drive: 'saved' | 'not connected' | error }.
 export async function exportMalList(mediaType) {
   const all = getAllEntries(mediaType);
@@ -323,14 +191,22 @@ async function readPickedFile(uri) {
   return FileSystem.readAsStringAsync(uri);
 }
 
+// Only the columns an entry doesn't have a value for yet.
+function missingColumns(entry, columns) {
+  const result = {};
+  Object.entries(columns).forEach(([key, value]) => {
+    const current = entry[key];
+    if ((current === null || current === undefined || current === 0 || current === '') && value) {
+      result[key] = value;
+    }
+  });
+  return result;
+}
+
 // Adds the titles in a parsed MAL export that aren't in the library yet.
 // Returns { mediaType, added, linked, alreadyThere }.
 export function importParsedList({ mediaType, user, items }) {
   const format = FORMATS[mediaType];
-  const statusFromMal = {};
-  Object.entries(format.statuses).forEach(([key, label]) => {
-    statusFromMal[label.toLowerCase()] = key;
-  });
 
   const byTitle = new Map();
   getAllEntries(mediaType).forEach((e) => {
@@ -353,11 +229,17 @@ export function importParsedList({ mediaType, user, items }) {
     }
     const malData = JSON.stringify(item);
     const title = item[format.titleField] || '';
+    const columns = columnsFromMalItem(mediaType, item);
 
-    // Same title already recorded by browsing, but without its MAL id.
+    // Same title already recorded by browsing, but without its MAL id:
+    // give it the id and whatever MAL details it doesn't have yet.
     const sameTitle = byTitle.get(normalizeTitle(title));
     if (sameTitle && !sameTitle.mal_id) {
-      setMalData(sameTitle.source_id, mediaType, malId, malData);
+      updateEntryFields(sameTitle.source_id, mediaType, {
+        ...missingColumns(sameTitle, columns),
+        mal_id: malId,
+        mal_data: malData,
+      });
       sameTitle.mal_id = malId;
       linked++;
       return;
@@ -367,12 +249,10 @@ export function importParsedList({ mediaType, user, items }) {
       sourceId: `${IMPORTED_PREFIX}${malId}`,
       mediaType,
       title,
-      score: starsFromMalScore(item.my_score),
-      tags: item.my_tags || null,
-      readStatus: statusFromMal[(item.my_status || '').toLowerCase()] || null,
       sourceUrl: `https://myanimelist.net/${format.item}/${malId}`,
       malId,
       malData,
+      ...columns,
     });
     added++;
   });

@@ -12,14 +12,25 @@ import {
   ScrollView,
   Alert,
   TextInput,
+  Switch,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { getAllEntries, setScore, setTags, setReadStatus, parseTags, deleteEntry, clearAllEntries } from './db';
+import {
+  getAllEntries,
+  setScore,
+  setTags,
+  updateEntryFields,
+  parseTags,
+  deleteEntry,
+  clearAllEntries,
+} from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { exportMalList, pickAndImportMalList } from './malList';
+import { SCORE_LABELS, PRIORITIES, normalizeDate } from './malFormat';
 
-const STARS = [1, 2, 3, 4, 5];
+// MyAnimeList's 1-10 scale.
+const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 // Fallback for any media type that doesn't define its own readStatusLabels.
 const DEFAULT_READ_STATUS_LABELS = {
   reading: 'Reading',
@@ -43,12 +54,144 @@ function getReadStatusLabels(mediaType) {
   return MEDIA_TYPES[mediaType]?.readStatusLabels || DEFAULT_READ_STATUS_LABELS;
 }
 
-function StarRating({ score, onRate, size = 16 }) {
+// Today as 'YYYY-MM-DD', in local time.
+function todayString() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toCount(text) {
+  const n = parseInt(String(text).replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Words per type for the progress fields.
+function progressWords(mediaType) {
+  return mediaType === 'anime'
+    ? { unit: 'Episodes', short: 'ep', repeat: 'Times rewatched', repeating: 'Rewatching' }
+    : { unit: 'Chapters', short: 'ch', repeat: 'Times reread', repeating: 'Rereading' };
+}
+
+// "12/24 ep", "60 ch", or null when there's no progress yet.
+function progressText(entry) {
+  if (!entry.progress && !entry.total) return null;
+  const { short } = progressWords(entry.media_type);
+  return entry.total ? `${entry.progress || 0}/${entry.total} ${short}` : `${entry.progress} ${short}`;
+}
+
+// MyAnimeList's 1-10 score, with its wording for the chosen one.
+function ScorePicker({ score, onRate }) {
   return (
-    <View style={styles.stars}>
-      {STARS.map((n) => (
-        <TouchableOpacity key={n} onPress={() => onRate(score === n ? null : n)} hitSlop={4}>
-          <Text style={[styles.star, { fontSize: size }, n <= (score || 0) && styles.starFilled]}>★</Text>
+    <View>
+      <View style={styles.scoreRow}>
+        {SCORES.map((n) => (
+          <TouchableOpacity
+            key={n}
+            style={[styles.scoreChip, score === n && styles.scoreChipActive]}
+            onPress={() => onRate(score === n ? null : n)}
+          >
+            <Text style={score === n ? styles.scoreTextActive : styles.scoreText}>{n}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={styles.scoreLabel}>{score ? `${score} · ${SCORE_LABELS[score]}` : 'Not rated'}</Text>
+    </View>
+  );
+}
+
+// A text box that saves when you leave it (or press return). onCommit
+// can return false to reject the text, which puts the old value back.
+function EditableText({ value, onCommit, ...props }) {
+  const [text, setText] = useState(value ?? '');
+  useEffect(() => setText(value ?? ''), [value]);
+  const commit = () => {
+    if (text === (value ?? '')) return;
+    if (onCommit(text) === false) setText(value ?? '');
+  };
+  return <TextInput value={text} onChangeText={setText} onBlur={commit} onSubmitEditing={commit} {...props} />;
+}
+
+// − [count] + , optionally "of [total]".
+function CountField({ value, onChange, total, onTotalChange }) {
+  const count = value || 0;
+  const max = total > 0 ? total : Infinity;
+  return (
+    <View style={styles.countRow}>
+      <TouchableOpacity style={styles.stepButton} onPress={() => onChange(Math.max(0, count - 1))}>
+        <Text style={styles.stepButtonText}>−</Text>
+      </TouchableOpacity>
+      <EditableText
+        style={styles.countInput}
+        value={String(count)}
+        keyboardType="number-pad"
+        onCommit={(t) => onChange(Math.min(max, toCount(t)))}
+      />
+      <TouchableOpacity style={styles.stepButton} onPress={() => onChange(Math.min(max, count + 1))}>
+        <Text style={styles.stepButtonText}>+</Text>
+      </TouchableOpacity>
+      {onTotalChange ? (
+        <>
+          <Text style={styles.countOf}>of</Text>
+          <EditableText
+            style={styles.countInput}
+            value={total ? String(total) : ''}
+            placeholder="?"
+            keyboardType="number-pad"
+            onCommit={(t) => onTotalChange(toCount(t))}
+          />
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+// YYYY-MM-DD (MAL allows 00 for an unknown month or day), with Today and
+// clear buttons.
+function DateField({ value, onChange }) {
+  return (
+    <View style={styles.dateRow}>
+      <EditableText
+        style={styles.dateInput}
+        value={value || ''}
+        placeholder="YYYY-MM-DD"
+        keyboardType="numbers-and-punctuation"
+        maxLength={10}
+        onCommit={(t) => {
+          const date = normalizeDate(t);
+          if (t.trim() && !date) {
+            Alert.alert('Date not recognised', 'Use YYYY-MM-DD, e.g. 2026-10-16.');
+            return false;
+          }
+          onChange(date);
+          return true;
+        }}
+      />
+      <TouchableOpacity style={styles.dateButton} onPress={() => onChange(todayString())}>
+        <Text style={styles.dateButtonText}>Today</Text>
+      </TouchableOpacity>
+      {value ? (
+        <TouchableOpacity style={styles.dateButton} onPress={() => onChange(null)}>
+          <Text style={styles.dateButtonText}>✕</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
+function PriorityPicker({ value, onChange }) {
+  const current = PRIORITIES.includes(value) ? value : 'low';
+  return (
+    <View style={styles.readStatusRow}>
+      {PRIORITIES.map((p) => (
+        <TouchableOpacity
+          key={p}
+          style={[styles.readStatusChip, current === p && styles.readStatusChipActive]}
+          onPress={() => onChange(p)}
+        >
+          <Text style={current === p ? styles.readStatusTextActive : styles.readStatusText}>
+            {p.charAt(0).toUpperCase() + p.slice(1)}
+          </Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -134,16 +277,18 @@ function FullImageModal({ uri, visible, onClose }) {
   );
 }
 
-function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDelete }) {
+function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onUpdate, onDelete }) {
   const [fullImageVisible, setFullImageVisible] = useState(false);
 
   if (!entry) return null;
   const tags = parseTags(entry.tags);
+  const words = progressWords(entry.media_type);
+  const update = (fields) => onUpdate(entry, fields);
   return (
     <Modal visible={!!entry} animationType="slide" onRequestClose={onClose} transparent>
       <View style={styles.detailOverlay}>
         <View style={styles.detailCard}>
-          <ScrollView>
+          <ScrollView keyboardShouldPersistTaps="handled">
             {entry.local_image_path ? (
               <TouchableOpacity onPress={() => setFullImageVisible(true)} activeOpacity={0.9}>
                 <Image source={{ uri: entry.local_image_path }} style={styles.detailImage} />
@@ -157,7 +302,9 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDel
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Type</Text>
-              <Text style={styles.detailValue}>{entry.media_type}</Text>
+              <Text style={styles.detailValue}>
+                {entry.series_type ? `${entry.media_type} · ${entry.series_type}` : entry.media_type}
+              </Text>
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Code</Text>
@@ -180,9 +327,6 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDel
               </Text>
             </View>
 
-            <Text style={styles.detailLabel}>Rating</Text>
-            <StarRating score={entry.score} onRate={(score) => onRate(entry, score)} size={24} />
-
             <Text style={styles.detailLabel}>
               {entry.media_type === 'anime' ? 'Watch status' : 'Read status'}
             </Text>
@@ -192,8 +336,54 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onDel
               onChange={(status) => onSetReadStatus(entry, status)}
             />
 
+            <Text style={styles.detailLabel}>Score</Text>
+            <ScorePicker score={entry.score} onRate={(score) => onRate(entry, score)} />
+
+            <Text style={styles.detailLabel}>{words.unit}</Text>
+            <CountField
+              value={entry.progress}
+              onChange={(progress) => update({ progress })}
+              total={entry.total}
+              onTotalChange={(total) => update({ total })}
+            />
+            {entry.media_type === 'manga' ? (
+              <>
+                <Text style={styles.detailLabel}>Volumes</Text>
+                <CountField
+                  value={entry.progress_volumes}
+                  onChange={(progress_volumes) => update({ progress_volumes })}
+                  total={entry.total_volumes}
+                  onTotalChange={(total_volumes) => update({ total_volumes })}
+                />
+              </>
+            ) : null}
+
+            <Text style={styles.detailLabel}>Start date</Text>
+            <DateField value={entry.start_date} onChange={(start_date) => update({ start_date })} />
+            <Text style={styles.detailLabel}>Finish date</Text>
+            <DateField value={entry.finish_date} onChange={(finish_date) => update({ finish_date })} />
+
+            <Text style={styles.detailLabel}>{words.repeat}</Text>
+            <CountField value={entry.times_repeated} onChange={(times_repeated) => update({ times_repeated })} />
+            <View style={styles.switchRow}>
+              <Text style={styles.detailValue}>{words.repeating}</Text>
+              <Switch value={!!entry.repeating} onValueChange={(on) => update({ repeating: on ? 1 : 0 })} />
+            </View>
+
+            <Text style={styles.detailLabel}>Priority</Text>
+            <PriorityPicker value={entry.priority} onChange={(priority) => update({ priority })} />
+
             <Text style={styles.detailLabel}>Tags</Text>
             <TagEditor tags={tags} onChange={(newTags) => onSetTags(entry, newTags)} />
+
+            <Text style={styles.detailLabel}>Comments</Text>
+            <EditableText
+              style={styles.commentsInput}
+              value={entry.comments || ''}
+              placeholder="Notes"
+              multiline
+              onCommit={(t) => update({ comments: t.trim() || null })}
+            />
 
             {entry.source_url ? (
               <TouchableOpacity
@@ -233,11 +423,12 @@ const SORTS = [
   { key: 'rating', label: 'Top Rated' },
 ];
 const RATING_FILTERS = [
-  { key: null, label: 'Any rating' },
-  { key: 4, label: '★4+' },
-  { key: 3, label: '★3+' },
-  { key: 2, label: '★2+' },
-  { key: 1, label: '★1+' },
+  { key: null, label: 'Any score' },
+  { key: 9, label: '★9+' },
+  { key: 8, label: '★8+' },
+  { key: 7, label: '★7+' },
+  { key: 6, label: '★6+' },
+  { key: 5, label: '★5+' },
 ];
 const READ_STATUS_FILTERS = [
   { key: null, label: 'Any status' },
@@ -404,9 +595,27 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     [load, backupSilently]
   );
 
+  // Like MyAnimeList: starting fills in the start date, completing fills
+  // in the finish date and sets progress to the full count (when known).
   const handleSetReadStatus = useCallback(
     (item, status) => {
-      setReadStatus(item.source_id, item.media_type, status);
+      const fields = { read_status: status };
+      if (status === 'reading' && !item.start_date) fields.start_date = todayString();
+      if (status === 'read') {
+        if (!item.finish_date) fields.finish_date = todayString();
+        if (item.total) fields.progress = item.total;
+        if (item.total_volumes) fields.progress_volumes = item.total_volumes;
+      }
+      updateEntryFields(item.source_id, item.media_type, fields);
+      load();
+      backupSilently();
+    },
+    [load, backupSilently]
+  );
+
+  const handleUpdate = useCallback(
+    (item, fields) => {
+      updateEntryFields(item.source_id, item.media_type, fields);
       load();
       backupSilently();
     },
@@ -596,7 +805,12 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         ) : null}
       </View>
 
-      <View style={styles.filterBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.statusFilterBar}
+        contentContainerStyle={styles.statusFilterBarContent}
+      >
         {RATING_FILTERS.map((r) => (
           <TouchableOpacity
             key={r.key ?? 'any'}
@@ -606,7 +820,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
             <Text style={minRating === r.key ? styles.filterTextActive : styles.filterText}>{r.label}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       <ScrollView
         horizontal
@@ -668,7 +882,10 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
                 {item.title || item.source_id}
               </Text>
               {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
-              <StarRating score={item.score} onRate={(score) => rate(item, score)} />
+              <View style={styles.metaRow}>
+                {item.score ? <Text style={styles.scoreBadge}>★ {item.score}</Text> : null}
+                {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
+              </View>
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
                 {READ_STATUS_ICONS[item.read_status] ? (
@@ -696,6 +913,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         onRate={rate}
         onSetTags={handleSetTags}
         onSetReadStatus={handleSetReadStatus}
+        onUpdate={handleUpdate}
         onDelete={handleDeleteEntry}
       />
 
@@ -847,9 +1065,66 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: '600' },
   author: { fontSize: 13, color: '#666', marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
-  stars: { flexDirection: 'row', marginTop: 4 },
-  star: { fontSize: 16, color: '#ccc', marginRight: 2 },
-  starFilled: { color: '#f5a623' },
+  scoreBadge: { fontSize: 13, color: '#f5a623', fontWeight: '700' },
+  progressBadge: { fontSize: 12, color: '#555' },
+  scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  scoreChip: {
+    width: 34,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  scoreChipActive: { backgroundColor: '#f5a623' },
+  scoreText: { color: '#333', fontSize: 14 },
+  scoreTextActive: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  scoreLabel: { fontSize: 13, color: '#555', marginTop: 6 },
+  countRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  stepButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepButtonText: { fontSize: 18, color: '#0f3460', fontWeight: '700' },
+  countInput: {
+    minWidth: 56,
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  countOf: { fontSize: 13, color: '#888' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dateInput: {
+    width: 120,
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+  },
+  dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e3ecfa' },
+  dateButtonText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  commentsInput: {
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
   typeBadge: {
     fontSize: 11,
     textTransform: 'uppercase',
