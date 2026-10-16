@@ -26,7 +26,7 @@ import {
   markSynced,
   markSyncFailed,
 } from './db';
-import { isImportedSourceId } from './malList';
+import { isImportedSourceId, refreshFromAniList } from './malList';
 import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
@@ -579,38 +579,138 @@ export default function MediaWebView({
     );
   }, []);
 
-  // Opening an episode/chapter page (extractProgress in mediaTypes.js)
-  // marks the series as Reading/Watching (filling an empty start date)
-  // and records the episode/chapter as your progress. Progress only moves
-  // forward, so going back to an earlier episode doesn't lower it.
-  // Completed series are left alone.
-  const applyProgress = useCallback(
+  // Opens a page in this tab and runs its check script once there (the
+  // same as a "Watch next" request from the Library).
+  const openInThisTab = useCallback((request, expect) => {
+    pendingOpenCheck.current = request.checkJs ? { js: request.checkJs, expect } : null;
+    webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(request.url)}; true;`);
+  }, []);
+
+  // Questions already asked on this visit ("<type>:<id>:<what>"), so a
+  // page reported more than once doesn't ask twice.
+  const askedRef = useRef(new Set());
+
+  // Records `number` as how far you are: the rewatch/reread position while
+  // repeating a completed series, otherwise its progress (setting it to
+  // Reading/Watching and filling an empty start date). Only moves forward.
+  const recordProgress = useCallback(
     (entry, number, url) => {
-      if (!entry || !number) return;
-      if (entry.read_status === 'read') {
-        logDebug(`${entry.source_id} is completed — progress left as it is.`);
-        return;
-      }
-      const current = entry.progress || 0;
+      const repeating = entry.read_status === 'read' && !!entry.repeating;
+      const current = (repeating ? entry.repeat_progress : entry.progress) || 0;
       const fields = {};
-      if (entry.read_status !== 'reading') {
+      if (!repeating && entry.read_status !== 'reading') {
         fields.read_status = 'reading';
         if (!entry.start_date) fields.start_date = todayString();
       }
-      if (number > current) fields.progress = number;
+      if (number > current) fields[repeating ? 'repeat_progress' : 'progress'] = number;
       if (number >= current && url !== entry.last_progress_url) fields.last_progress_url = url;
       if (Object.keys(fields).length === 0) return;
 
+      const unit = config.key === 'anime' ? 'episode' : 'chapter';
+      // The last episode/chapter of a rewatch/reread finishes it.
+      const finishesRepeat = repeating && entry.total > 0 && number >= entry.total;
+      if (finishesRepeat) {
+        fields.repeating = 0;
+        fields.repeat_progress = 0;
+        fields.times_repeated = (entry.times_repeated || 0) + 1;
+      }
       updateEntryFields(entry.source_id, entry.media_type, fields);
       logDebug(
-        `${entry.source_id}: ${fields.read_status ? 'now Reading/Watching, ' : ''}at ${number}${
-          fields.progress ? '' : ` (progress stays ${current})`
-        }.`
+        `${entry.source_id}: ${fields.read_status ? 'now Reading/Watching, ' : ''}${
+          repeating ? 'repeat ' : ''
+        }at ${unit} ${number}${number > current ? '' : ` (stays ${current})`}.`
       );
       maybeBackupLibraryToDrive();
-      if (config.promptForVolumes && fields.progress) promptVolumes(entry, number);
+
+      if (finishesRepeat) {
+        const verb = config.key === 'anime' ? 'rewatching' : 'rereading';
+        Alert.alert(
+          `Finished ${verb}`,
+          `"${entry.title || entry.source_id}": ${verb} counted. Times ${
+            config.key === 'anime' ? 'rewatched' : 'reread'
+          }: ${fields.times_repeated}.`
+        );
+      } else if (!repeating && config.promptForVolumes && fields.progress) {
+        promptVolumes(entry, number);
+      }
     },
     [config, logDebug, promptVolumes]
+  );
+
+  // Opening an episode/chapter page (extractProgress in mediaTypes.js):
+  // - a completed series asks whether you're starting a rewatch/reread
+  //   ("Just looking" stops asking about that series for an hour);
+  // - more than one ahead of your record (stopped at 4, opened 7) asks
+  //   first: go to the next one (5), record this one, or keep the record;
+  // - otherwise it's recorded (recordProgress). `fresh` is for a series
+  //   recorded just now, which has no record to be ahead of.
+  const applyProgress = useCallback(
+    (entry, number, url, { fresh = false } = {}) => {
+      if (!entry || !number) return;
+      const key = `${entry.media_type}:${entry.source_id}`;
+      const title = entry.title || entry.source_id;
+      const unit = config.key === 'anime' ? 'episode' : 'chapter';
+      const verb = config.key === 'anime' ? 'rewatching' : 'rereading';
+
+      if (entry.read_status === 'read' && !entry.repeating) {
+        const snoozeKey = `repeatSnooze:${key}`;
+        if (askedRef.current.has(`${key}:repeat`)) return;
+        if (Date.now() < Number(getSetting(snoozeKey, '0'))) return;
+        askedRef.current.add(`${key}:repeat`);
+        Alert.alert(`Start ${verb}?`, `You've completed "${title}". Start ${verb} it from ${unit} ${number}?`, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Just looking',
+            onPress: () => setSetting(snoozeKey, String(Date.now() + 60 * 60 * 1000)),
+          },
+          {
+            text: `Start ${verb}`,
+            onPress: () => {
+              updateEntryFields(entry.source_id, entry.media_type, { repeating: 1, repeat_progress: 0 });
+              recordProgress({ ...entry, repeating: 1, repeat_progress: 0 }, number, url);
+            },
+          },
+        ]);
+        return;
+      }
+
+      const repeating = entry.read_status === 'read' && !!entry.repeating;
+      const current = (repeating ? entry.repeat_progress : entry.progress) || 0;
+      // During a rewatch that hasn't got going yet, any start is fine.
+      const ahead = !fresh && number > current + 1 && !(repeating && current === 0);
+      if (ahead) {
+        const asked = `${key}:${number}`;
+        if (askedRef.current.has(asked)) return;
+        askedRef.current.add(asked);
+        const nextOne = current + 1;
+        Alert.alert(
+          'Ahead of your record',
+          `${
+            current === 0
+              ? `Your record says you haven't started "${title}"`
+              : `Your record for "${title}" says you stopped at ${unit} ${current}${
+                  repeating ? ` (this ${verb.replace('ing', '')})` : ''
+                }`
+          }, but this is ${unit} ${number}.`,
+          [
+            { text: `Keep ${current}`, style: 'cancel' },
+            {
+              text: `Go to ${unit} ${nextOne}`,
+              onPress: () => {
+                const target = repeating
+                  ? { ...entry, progress: current, last_progress_url: entry.last_progress_url }
+                  : entry;
+                openInThisTab(config.openNext(target, nextOne), entry.source_id);
+              },
+            },
+            { text: `Record ${number}`, onPress: () => recordProgress(entry, number, url) },
+          ]
+        );
+        return;
+      }
+      recordProgress(entry, number, url);
+    },
+    [config, recordProgress, openInThisTab]
   );
 
   const checkUrlAndExtract = useCallback(
@@ -867,6 +967,7 @@ export default function MediaWebView({
       if (existing) {
         if (!existing.mal_id && payload.malId) {
           setMalId(sourceId, config.key, payload.malId);
+          refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
           logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
           maybeBackupLibraryToDrive();
         }
@@ -915,17 +1016,24 @@ export default function MediaWebView({
           sourceUrl: pageUrl,
           localImagePath: localPath,
         };
-        if (imported && isImportedSourceId(imported.source_id)) {
+        const adopted = !!(imported && isImportedSourceId(imported.source_id));
+        if (adopted) {
           adoptImportedEntry(imported.source_id, config.key, details);
           logDebug(`Linked ${sourceId} to "${imported.title}" from your imported MyAnimeList list.`);
         } else {
           insertEntry({ ...details, mediaType: config.key, malId: payload.malId });
         }
+        // Its total episodes/chapters (and genres) from AniList, if known.
+        if (payload.malId) refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
         // Recorded from an episode page: that's progress too.
         const resolvedPage = resolveSource(config, pageUrl);
         const extractProgress = resolvedPage && (resolvedPage.source.extractProgress || config.extractProgress);
         if (extractProgress) {
-          applyProgress(getEntry(sourceId, config.key), extractProgress(resolvedPage.match, pageUrl), pageUrl);
+          // A series new to the library has no record to be ahead of; one
+          // imported from MAL does.
+          applyProgress(getEntry(sourceId, config.key), extractProgress(resolvedPage.match, pageUrl), pageUrl, {
+            fresh: !adopted,
+          });
         }
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`

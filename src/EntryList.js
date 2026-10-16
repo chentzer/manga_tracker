@@ -26,8 +26,8 @@ import {
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
-import { exportMalList, pickAndImportMalList, isImportedSourceId } from './malList';
-import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
+import { exportMalList, pickAndImportMalList, isImportedSourceId, MAL_LISTS } from './malList';
+import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString, malTypeOf } from './malFormat';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -62,8 +62,8 @@ function toCount(text) {
 // Words per type for the progress fields.
 function progressWords(mediaType) {
   return mediaType === 'anime'
-    ? { unit: 'Episodes', short: 'ep', repeat: 'Times rewatched', repeating: 'Rewatching' }
-    : { unit: 'Chapters', short: 'ch', repeat: 'Times reread', repeating: 'Rereading' };
+    ? { unit: 'Episodes', short: 'ep', repeat: 'Times rewatched', repeating: 'Rewatching', again: 'Rewatch' }
+    : { unit: 'Chapters', short: 'ch', repeat: 'Times reread', repeating: 'Rereading', again: 'Reread' };
 }
 
 // "12/24 ep", "60 ch", or null when there's no progress yet.
@@ -344,6 +344,7 @@ function DetailModal({
   onUpdate,
   onResolveConflict,
   onOpenNext,
+  onSetRepeating,
   onPickAgain,
   onDelete,
 }) {
@@ -437,8 +438,20 @@ function DetailModal({
             <CountField value={entry.times_repeated} onChange={(times_repeated) => update({ times_repeated })} />
             <View style={styles.switchRow}>
               <Text style={styles.detailValue}>{words.repeating}</Text>
-              <Switch value={!!entry.repeating} onValueChange={(on) => update({ repeating: on ? 1 : 0 })} />
+              <Switch value={!!entry.repeating} onValueChange={(on) => onSetRepeating(entry, on)} />
             </View>
+            {entry.repeating ? (
+              <>
+                <Text style={styles.detailLabel}>
+                  {words.again}: {words.unit.toLowerCase()} so far
+                </Text>
+                <CountField
+                  value={entry.repeat_progress}
+                  total={entry.total}
+                  onChange={(repeat_progress) => update({ repeat_progress })}
+                />
+              </>
+            ) : null}
 
             <Text style={styles.detailLabel}>Priority</Text>
             <PriorityPicker value={entry.priority} onChange={(priority) => update({ priority })} />
@@ -470,7 +483,11 @@ function DetailModal({
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailNextButton} onPress={() => onOpenNext(entry)}>
               <Text style={styles.detailNextButtonText}>
-                ▶ {entry.media_type === 'anime' ? 'Watch' : 'Read'} {words.short} {(entry.progress || 0) + 1}
+                {entry.read_status === 'read' && !entry.repeating
+                  ? '✓ Completed'
+                  : entry.repeating
+                    ? `▶ ${words.again} ${words.short} ${(entry.repeat_progress || 0) + 1}`
+                    : `▶ ${entry.media_type === 'anime' ? 'Watch' : 'Read'} ${words.short} ${(entry.progress || 0) + 1}`}
               </Text>
             </TouchableOpacity>
             {onPickAgain ? (
@@ -790,10 +807,17 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     (item) => {
       const config = MEDIA_TYPES[item.media_type];
       const title = item.title || item.alt_title || item.source_id;
-      const n = (item.progress || 0) + 1;
       const unit = item.media_type === 'anime' ? 'episode' : 'chapter';
+      const repeating = item.read_status === 'read' && !!item.repeating;
+      if (item.read_status === 'read' && !repeating) {
+        const done = item.total ? ` (${item.progress || 0}/${item.total} ${unit}s)` : '';
+        Alert.alert('Completed', `"${title}" is completed${done}.`);
+        return;
+      }
+      // During a rewatch/reread, the next one after its own position.
+      const n = ((repeating ? item.repeat_progress : item.progress) || 0) + 1;
       if (item.total && n > item.total) {
-        Alert.alert(`No next ${unit}`, `"${title}" has ${item.total} ${unit}s and you're at ${item.progress}.`);
+        Alert.alert(`No next ${unit}`, `"${title}" has ${item.total} ${unit}s and you're at ${n - 1}.`);
         return;
       }
       if (isImportedSourceId(item.source_id)) {
@@ -817,6 +841,31 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
       onOpenInTab?.(item.media_type, { ...config.openNext(item, n), expect: item.source_id });
     },
     [onOpenInTab]
+  );
+
+  // The Rewatching/Rereading switch. Turning it off yourself asks whether
+  // that counts as a finished rewatch/reread (it's counted on its own when
+  // you open the last episode/chapter and the total is known).
+  const handleSetRepeating = useCallback(
+    (item, on) => {
+      if (on) {
+        handleUpdate(item, { repeating: 1, repeat_progress: 0 });
+        return;
+      }
+      const noun = item.media_type === 'anime' ? 'rewatch' : 'reread';
+      const stop = (counted) =>
+        handleUpdate(item, {
+          repeating: 0,
+          repeat_progress: 0,
+          ...(counted ? { times_repeated: (item.times_repeated || 0) + 1 } : {}),
+        });
+      Alert.alert(`Finished this ${noun}?`, `Count it in times ${noun === 'rewatch' ? 'rewatched' : 'reread'}?`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'No, just stop', onPress: () => stop(false) },
+        { text: 'Yes, count it', onPress: () => stop(true) },
+      ]);
+    },
+    [handleUpdate]
   );
 
   // 🎲 Random: its window, its choices, and what this round has shown.
@@ -899,11 +948,12 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   // one type: the selected type chip, or it asks when "All" is selected.
   const [busy, setBusy] = useState(false);
 
-  const runExport = useCallback(async (mediaType) => {
+  const runExport = useCallback(async (malType) => {
     setBusy(true);
     try {
-      const result = await exportMalList(mediaType);
-      const lines = [`${result.exported} ${MEDIA_TYPES[mediaType].label} entries exported.`];
+      const result = await exportMalList(malType);
+      const listLabel = MAL_LISTS.find((l) => l.key === malType).label;
+      const lines = [`${result.exported} ${listLabel} entries exported.`];
       if (result.hentai > 0) lines.push(`${result.hentai} hentai titles left out.`);
       if (result.skipped > 0) {
         lines.push(
@@ -927,11 +977,11 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   const handleExport = useCallback(() => {
     if (filter) {
-      runExport(filter);
+      runExport(malTypeOf(filter));
       return;
     }
-    Alert.alert('Export which list?', "Exports in MyAnimeList's list format.", [
-      ...MEDIA_TYPE_LIST.map((m) => ({ text: m.label, onPress: () => runExport(m.key) })),
+    Alert.alert('Export which list?', "Exports in MyAnimeList's list format. Manga includes manhwa.", [
+      ...MAL_LISTS.map((l) => ({ text: l.label, onPress: () => runExport(l.key) })),
       { text: 'Cancel', style: 'cancel' },
     ]);
   }, [filter, runExport]);
@@ -943,7 +993,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
       if (!result) return; // picker cancelled
       load();
       backupSilently();
-      const label = MEDIA_TYPES[result.mediaType].label;
+      const label = MAL_LISTS.find((l) => l.key === result.mediaType).label;
       const lines = [`${result.added} ${label} titles added.`];
       if (result.linked > 0) {
         lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
@@ -1177,6 +1227,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         onUpdate={handleUpdate}
         onResolveConflict={handleResolveConflict}
         onOpenNext={handleOpenNext}
+        onSetRepeating={handleSetRepeating}
         onPickAgain={randomOpened ? pickRandomNow : null}
         onDelete={handleDeleteEntry}
       />

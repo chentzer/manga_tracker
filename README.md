@@ -210,8 +210,12 @@ finish date and sets progress to the total when the total is known.
   record by browsing get it from the page's link to `myanimelist.net`
   (see `extractMetadataJs` in `mediaTypes.js`). Entries recorded before
   this existed pick it up the next time you open them in their tab.
+- **Two lists, like MAL.** MAL has an anime list and a manga list; manhwa
+  (and any other non-anime type) goes on the manga list — exported with
+  manga, and matched against on import (new titles from a manga list are
+  added as Manga).
 - **Export** writes one list, `mangalist.xml` or `animelist.xml` — the
-  type chip that's selected, or it asks which when "All" is selected. It
+  selected type chip's list, or it asks which when "All" is selected. It
   opens the share sheet (save it to Files, send it, ...) and, when Drive
   is connected, saves it to the `MangaTracker` folder on Drive,
   replacing the previous export there. Entries without a MAL id are left
@@ -219,10 +223,16 @@ finish date and sets progress to the total when the total is known.
   the last list you imported.
 - **Hentai is left out of exports** (ecchi stays). Genres come from
   AniList's API (`graphql.anilist.co`), looked up by MAL id, 50 titles
-  per request, the first time an entry is exported, and kept on the
-  entry (`genres`, `is_adult`). A title counts as hentai when AniList
-  marks it adult or lists the Hentai genre. If AniList can't be reached,
-  the export stops rather than risk including one.
+  per request, and kept on the entry (`genres`, `is_adult`). A title
+  counts as hentai when AniList marks it adult or lists the Hentai
+  genre. If AniList can't be reached, the export stops rather than risk
+  including one.
+- **Totals from AniList.** The same lookup fills in total episodes
+  (anime) or chapters and volumes (manga) where an entry has none yet —
+  when a title first gets its MAL id while browsing, and before each
+  export. A total you set, or one from MAL, is never replaced. Series
+  still airing or publishing have no total yet; they're asked about
+  again at most once a day (`anilist_checked`).
 - **Import** takes a MAL export (`.xml`, or the `.xml.gz` MAL gives you)
   and adds every title that isn't in the library yet, matched by MAL id
   and then by title. A title that's already there gets the MAL details it
@@ -257,13 +267,28 @@ finish date and sets progress to the total when the total is known.
   reader pages) sets the series to Reading/Watching, fills an empty start
   date with today, and sets episodes/chapters to that number. Progress
   only moves forward, so opening an earlier episode again doesn't lower
-  it. Completed series aren't changed.
+  it.
+- **Ahead of your record.** Opening an episode more than one past your
+  record (it says 4, you open 7) asks first: **Go to episode 5** (the
+  next one after your record), **Record 7**, or **Keep 4**. A series
+  recorded for the first time from that page isn't asked about.
+- **Rewatching / rereading.** Opening an episode of a Completed series
+  asks whether you're starting a rewatch (**Just looking** stops asking
+  about that series for an hour). While rewatching, the status stays
+  Completed (as on MAL), the Rewatching switch is on, and a separate
+  rewatch position (`repeat_progress`; MAL's `my_rewatching_ep` for
+  anime) moves forward as you watch, so your progress stays at the full
+  count. Opening the last episode (when the total is known) finishes it:
+  times rewatched goes up by one and the switch turns off. Turning the
+  switch off yourself asks whether to count it as a finished rewatch.
 - **Volumes (manga).** The manga site's pages don't show volume numbers,
   so after each chapter update a box says volumes read wasn't changed,
   with **Edit** (opens the entry in the Library) and **Snooze 1 hour**
   (no more of these boxes for an hour). Set by `promptForVolumes`.
 - **▶ Watch ep N / Read ch N** in the detail sheet opens the episode or
-  chapter after your progress in its tab (`openNext` in `mediaTypes.js`).
+  chapter after your progress (during a rewatch, after the rewatch
+  position: **▶ Rewatch ep N**) in its tab (`openNext` in `mediaTypes.js`).
+  On a Completed series it just says it's completed.
   Anime opens episode N directly and then checks the page's episode list;
   manga reopens the last chapter page you read and presses its Next
   button (or, with no last chapter, opens chapter N from the series

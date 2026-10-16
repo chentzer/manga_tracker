@@ -96,6 +96,11 @@ export function initDb() {
     // last_progress_url: the last episode/chapter page you opened, for
     // "Watch next" / "Read next".
     'last_progress_url TEXT',
+    // repeat_progress: how far the current rewatch/reread is.
+    'repeat_progress INTEGER',
+    // anilist_checked: the day totals/genres were last looked up on
+    // AniList (malList.js), so unknown totals are asked about once a day.
+    'anilist_checked TEXT',
   ].forEach((column) => {
     try {
       db.execSync(`ALTER TABLE entries ADD COLUMN ${column};`);
@@ -219,6 +224,8 @@ export const EDITABLE_COLUMNS = [
   'is_adult',
   'mal_conflicts',
   'last_progress_url',
+  'repeat_progress',
+  'anilist_checked',
 ];
 
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.

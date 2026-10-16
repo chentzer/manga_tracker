@@ -49,6 +49,8 @@ const COLUMNS = [
   'is_adult',
   'mal_conflicts',
   'last_progress_url',
+  'repeat_progress',
+  'anilist_checked',
 ];
 
 // Number columns: a CSV gives back strings.
@@ -62,6 +64,7 @@ const NUMBER_COLUMNS = [
   'times_repeated',
   'repeating',
   'is_adult',
+  'repeat_progress',
 ];
 
 // Each media type gets its own backup file (e.g. "manga-backup.csv",

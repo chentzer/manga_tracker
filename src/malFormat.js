@@ -13,6 +13,8 @@
 //   total_volumes    the series' volume count (manga only)
 //   times_repeated   times rewatched / reread
 //   repeating        1 while rewatching / rereading, else 0
+//   repeat_progress  how far the current rewatch / reread is (MAL keeps
+//                    this for anime only, as my_rewatching_ep)
 //   priority         'low' | 'medium' | 'high'
 //   comments         free text
 //   series_type      'TV', 'Movie', 'OVA', ... (anime only, from MAL)
@@ -34,6 +36,12 @@ export const SCORE_LABELS = {
 export const PRIORITIES = ['low', 'medium', 'high'];
 
 const NO_DATE = '0000-00-00';
+
+// MAL has two lists, anime and manga; every other type (e.g. manhwa)
+// belongs on the manga list.
+export function malTypeOf(mediaType) {
+  return mediaType === 'anime' ? 'anime' : 'manga';
+}
 
 // Per-type differences in MAL's format. `fields` are in the order MAL
 // writes them; `cdata` ones are wrapped in <![CDATA[...]]>.
@@ -162,13 +170,13 @@ export function normalizeDate(value) {
 
 export function statusFromMal(mediaType, malStatus) {
   const wanted = (malStatus || '').toLowerCase();
-  const match = Object.entries(FORMATS[mediaType].statuses).find(([, label]) => label.toLowerCase() === wanted);
+  const match = Object.entries(FORMATS[malTypeOf(mediaType)].statuses).find(([, label]) => label.toLowerCase() === wanted);
   return match ? match[0] : null;
 }
 
 // The entry columns an item from a MAL export fills in.
 export function columnsFromMalItem(mediaType, item) {
-  const f = FORMATS[mediaType];
+  const f = FORMATS[malTypeOf(mediaType)];
   const priority = (item.my_priority || '').toLowerCase();
   return {
     score: toInt(item.my_score) || null,
@@ -184,6 +192,7 @@ export function columnsFromMalItem(mediaType, item) {
     priority: PRIORITIES.includes(priority) ? priority : 'low',
     comments: item.my_comments || null,
     series_type: mediaType === 'anime' ? item.series_type || null : null,
+    repeat_progress: mediaType === 'anime' ? toInt(item.my_rewatching_ep) : 0,
     tags: item.my_tags || null,
   };
 }
@@ -191,7 +200,7 @@ export function columnsFromMalItem(mediaType, item) {
 // The MAL fields for one entry: its mal_data (whatever came in from an
 // import), overridden by the entry's own columns.
 export function malItemFromEntry(mediaType, entry) {
-  const f = FORMATS[mediaType];
+  const f = FORMATS[malTypeOf(mediaType)];
   let malData = {};
   try {
     malData = entry.mal_data ? JSON.parse(entry.mal_data) : {};
@@ -218,7 +227,10 @@ export function malItemFromEntry(mediaType, entry) {
   };
   if (f.volumesField) values[f.volumesField] = entry.progress_volumes || 0;
   if (f.totalVolumesField) values[f.totalVolumesField] = entry.total_volumes || 0;
-  if (mediaType === 'anime') values.series_type = entry.series_type || malData.series_type || '';
+  if (mediaType === 'anime') {
+    values.series_type = entry.series_type || malData.series_type || '';
+    values.my_rewatching_ep = entry.repeating ? entry.repeat_progress || 0 : 0;
+  }
   return values;
 }
 
