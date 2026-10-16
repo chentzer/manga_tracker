@@ -559,6 +559,12 @@ so nothing renders blank.
   plus **+ Add more** (search the type) and **Remove this from group**.
   The Library row shows the group's name. Stored as `group_name` /
   `group_order`, both in the Drive backup.
+- **Hold to save a picture** (`src/imageHold.js`) — on any browsing tab,
+  hold a finger on a picture for about half a second (without moving) and
+  the app asks to save it to your photo gallery. It finds the picture under
+  the finger even behind a see-through layer (a full-screen viewer), and
+  also takes a video's poster or a background picture; small icons are
+  skipped. Saved as `<code>_<time>` on a title's page, else `<site>_<time>`.
 - **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
   lists of items (text or links, which open with a tap). The built-in
   **Inbox** is for jotting things down, and is where text and links
