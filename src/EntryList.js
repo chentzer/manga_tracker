@@ -1054,7 +1054,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   return (
     <View style={styles.container}>
-      <View style={styles.filterBar}>
+      <View style={[styles.filterBar, styles.filterBarWrap]}>
         {FILTERS.map((f) => (
           <TouchableOpacity
             key={f.key ?? 'all'}
