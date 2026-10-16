@@ -807,6 +807,9 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     (item) => {
       const config = MEDIA_TYPES[item.media_type];
       const title = item.title || item.alt_title || item.source_id;
+      // Sites mostly list English titles, which imported titles keep as
+      // their alternate title.
+      const searchTitle = item.alt_title || item.title || item.source_id;
       const unit = item.media_type === 'anime' ? 'episode' : 'chapter';
       const repeating = item.read_status === 'read' && !!item.repeating;
       if (item.read_status === 'read' && !repeating) {
@@ -830,7 +833,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
               text: 'Search',
               onPress: () => {
                 setSelectedKey(null);
-                onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(title) });
+                onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
               },
             },
           ]
@@ -995,6 +998,10 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
       backupSilently();
       const label = MAL_LISTS.find((l) => l.key === result.mediaType).label;
       const lines = [`${result.added} ${label} titles added.`];
+      if (result.manhwa > 0) lines.push(`${result.manhwa} Korean titles are under Manhwa.`);
+      if (result.aniListFailed) {
+        lines.push("Couldn't reach AniList, so manhwa couldn't be told apart: everything went to Manga.");
+      }
       if (result.linked > 0) {
         lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
       }

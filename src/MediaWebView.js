@@ -26,7 +26,7 @@ import {
   markSynced,
   markSyncFailed,
 } from './db';
-import { isImportedSourceId, refreshFromAniList } from './malList';
+import { isImportedSourceId, refreshFromAniList, findImportedByTitle } from './malList';
 import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
@@ -1007,7 +1007,13 @@ export default function MediaWebView({
         // A title imported from a MyAnimeList list (no cover, no site
         // link yet) becomes this entry, keeping its status, score and
         // tags, rather than being recorded a second time.
-        const imported = payload.malId ? getEntryByMalId(payload.malId, config.key) : null;
+        // Found by MAL id, or — on sites without MAL links — by title
+        // (imported titles carry AniList's English title too).
+        const byMalId = payload.malId ? getEntryByMalId(payload.malId, config.key) : null;
+        const imported =
+          byMalId && isImportedSourceId(byMalId.source_id)
+            ? byMalId
+            : findImportedByTitle(config.key, [payload.title, payload.altTitle]);
         const details = {
           sourceId,
           title: payload.title,

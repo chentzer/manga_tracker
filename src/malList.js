@@ -20,7 +20,11 @@
 //
 // MAL has two lists, anime and manga. Manga's holds every type that isn't
 // anime (manga, manhwa, ...): its export includes them all, and its
-// import matches against them all (new titles are added as manga).
+// import matches against them all. New titles from it are sorted by
+// AniList's country of origin: Korean ones go to Manhwa, the rest to
+// Manga. Imported titles also get AniList's English title as their
+// alternate title, so opening them on a site that has no MAL links (the
+// Manhwa sites) can still find them by name (findImportedByTitle).
 //
 // Hentai is left out of exports (ecchi stays). Genres, and the total
 // episode/chapter/volume counts when they aren't known yet, come from
@@ -32,7 +36,16 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { ungzip } from 'pako';
-import { getAllEntries, getEntryByMalId, restoreEntry, updateEntryFields, getSetting, setSetting } from './db';
+import {
+  getAllEntries,
+  getEntryByMalId,
+  restoreEntry,
+  updateEntryFields,
+  setEntryType,
+  setAltTitle,
+  getSetting,
+  setSetting,
+} from './db';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
 import { isDriveConnected, uploadTextFileToDrive } from './GoogleDriveService';
 import {
@@ -271,7 +284,7 @@ export async function exportMalList(malType) {
 
 // Lowercase, without spaces and ASCII punctuation, so "Kaguya-sama: Love
 // is War" matches "Kaguya-sama Love Is War".
-function normalizeTitle(title) {
+export function normalizeTitle(title) {
   return (title || '').toLowerCase().replace(/[\s!-/:-@[-`{-~]+/g, '');
 }
 
@@ -290,6 +303,53 @@ async function readPickedFile(uri) {
     return ungzip(bytes, { to: 'string' });
   }
   return FileSystem.readAsStringAsync(uri);
+}
+
+// ---------- Sorting imports (AniList) ----------
+
+const ANILIST_INFO_QUERY = `query ($ids: [Int], $type: MediaType) {
+  Page(perPage: 50) { media(idMal_in: $ids, type: $type) { idMal countryOfOrigin title { english } } }
+}`;
+
+// Map of MAL id → { country, english } from AniList, 50 per request.
+// Throws if AniList can't be reached.
+export async function lookUpOnAniList(malType, malIds) {
+  const info = new Map();
+  for (let i = 0; i < malIds.length; i += 50) {
+    const res = await fetch(ANILIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        query: ANILIST_INFO_QUERY,
+        variables: { ids: malIds.slice(i, i + 50), type: malType === 'anime' ? 'ANIME' : 'MANGA' },
+      }),
+    });
+    if (!res.ok) throw new Error(`AniList lookup failed (${res.status}).`);
+    const json = await res.json();
+    (json.data?.Page?.media || []).forEach((m) => {
+      info.set(m.idMal, { country: m.countryOfOrigin, english: m.title?.english || null });
+    });
+  }
+  return info;
+}
+
+// Which of the app's types an imported title belongs in: Korean titles
+// on the manga list go to Manhwa (when the app has that type).
+function typeForImport(malType, details) {
+  const hasManhwa = MEDIA_TYPE_LIST.some((m) => m.key === 'manhwa');
+  return malType === 'manga' && hasManhwa && details && details.country === 'KR' ? 'manhwa' : malType;
+}
+
+// An imported title (not opened on a site yet) of this type whose title or
+// alternate title matches one of `titles`, or null.
+export function findImportedByTitle(mediaType, titles) {
+  const keys = titles.map(normalizeTitle).filter(Boolean);
+  if (keys.length === 0) return null;
+  return (
+    getAllEntries(mediaType).find(
+      (e) => isImportedSourceId(e.source_id) && [e.title, e.alt_title].some((t) => keys.includes(normalizeTitle(t)))
+    ) || null
+  );
 }
 
 // Brings a MAL item into an entry that's already in the library: fills
@@ -318,9 +378,11 @@ function mergeIntoEntry(entry, item, malId) {
 }
 
 // Adds the titles in a parsed MAL export that aren't in the library yet,
-// and compares the ones that are. Returns { mediaType, added, linked,
-// alreadyThere, differing }.
-export function importParsedList({ mediaType, user, items }) {
+// and compares the ones that are. `aniList` (from lookUpOnAniList) sorts
+// new titles into Manga/Manhwa and gives English titles; imported titles
+// already in Manga that turn out to be Korean move to Manhwa. Returns {
+// mediaType, added, linked, alreadyThere, differing, manhwa }.
+export function importParsedList({ mediaType, user, items }, aniList = new Map()) {
   const format = FORMATS[mediaType];
 
   const listTypes = typesOnMalList(mediaType);
@@ -337,16 +399,27 @@ export function importParsedList({ mediaType, user, items }) {
   let linked = 0;
   let alreadyThere = 0;
   let differing = 0;
+  let manhwa = 0;
 
   items.forEach((item) => {
     const malId = Number(item[format.idField]);
     if (!malId) return;
     const title = item[format.titleField] || '';
 
+    const details = aniList.get(malId);
     const sameId = byId(malId);
     if (sameId) {
       alreadyThere++;
       if (mergeIntoEntry(sameId, item, malId)) differing++;
+      // Imported earlier, before titles were sorted: move it if it's manhwa.
+      const type = typeForImport(mediaType, details);
+      if (isImportedSourceId(sameId.source_id) && sameId.media_type !== type) {
+        setEntryType(sameId.source_id, sameId.media_type, type);
+        if (!sameId.alt_title && details && details.english && details.english !== sameId.title) {
+          setAltTitle(sameId.source_id, type, details.english);
+        }
+        manhwa++;
+      }
       return;
     }
 
@@ -362,10 +435,14 @@ export function importParsedList({ mediaType, user, items }) {
     const malData = JSON.stringify(item);
     const columns = columnsFromMalItem(mediaType, item);
 
+    const type = typeForImport(mediaType, details);
+    if (type !== mediaType) manhwa++;
+    const english = details && details.english;
     restoreEntry({
       sourceId: `${IMPORTED_PREFIX}${malId}`,
-      mediaType,
+      mediaType: type,
       title,
+      altTitle: english && normalizeTitle(english) !== normalizeTitle(title) ? english : null,
       sourceUrl: `https://myanimelist.net/${format.item}/${malId}`,
       malId,
       malData,
@@ -381,7 +458,7 @@ export function importParsedList({ mediaType, user, items }) {
     );
   }
 
-  return { mediaType, added, linked, alreadyThere, differing };
+  return { mediaType, added, linked, alreadyThere, differing, manhwa };
 }
 
 // Lets you pick a MAL export file and imports it. Returns null if the
@@ -394,5 +471,19 @@ export async function pickAndImportMalList() {
   });
   if (picked.canceled || !picked.assets || picked.assets.length === 0) return null;
   const text = await readPickedFile(picked.assets[0].uri);
-  return importParsedList(parseMalXml(text));
+  const parsed = parseMalXml(text);
+  const format = FORMATS[parsed.mediaType];
+  // Sorting into Manga/Manhwa and English titles need AniList; without it
+  // the import still runs (everything from the manga list goes to Manga).
+  let aniList = new Map();
+  let aniListFailed = false;
+  try {
+    aniList = await lookUpOnAniList(
+      parsed.mediaType,
+      parsed.items.map((item) => Number(item[format.idField])).filter(Boolean)
+    );
+  } catch (e) {
+    aniListFailed = true;
+  }
+  return { ...importParsedList(parsed, aniList), aniListFailed };
 }

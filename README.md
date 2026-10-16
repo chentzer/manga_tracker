@@ -210,10 +210,18 @@ finish date and sets progress to the total when the total is known.
   record by browsing get it from the page's link to `myanimelist.net`
   (see `extractMetadataJs` in `mediaTypes.js`). Entries recorded before
   this existed pick it up the next time you open them in their tab.
-- **Two lists, like MAL.** MAL has an anime list and a manga list; manhwa
-  (and any other non-anime type) goes on the manga list — exported with
-  manga, and matched against on import (new titles from a manga list are
-  added as Manga).
+- **Two lists, like MAL.** MAL has an anime list and a manga list. In the
+  app, Manhwa keeps its own tab and Library section; MAL only sees it as
+  part of the manga list: **Export → Manga** includes your manhwa, and
+  importing a manga list matches against Manga and Manhwa entries alike.
+  New titles from a manga list are sorted by AniList's country of origin
+  (looked up by MAL id): Korean ones go to Manhwa, the rest to Manga.
+  Titles imported before this sorting existed move to Manhwa on your
+  next import, if they haven't been opened on a site yet. Imported
+  titles also keep AniList's English title as their alternate title, so
+  opening one on a site without MAL links (the Manhwa sites) finds it by
+  name instead of adding it twice. Without AniList (offline), the import
+  still runs and everything from the manga list goes to Manga.
 - **Export** writes one list, `mangalist.xml` or `animelist.xml` — the
   selected type chip's list, or it asks which when "All" is selected. It
   opens the share sheet (save it to Files, send it, ...) and, when Drive

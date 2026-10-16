@@ -404,6 +404,24 @@ export function getPendingSyncEntries() {
   return db.getAllSync("SELECT * FROM entries WHERE sync_status != 'synced'");
 }
 
+export function setAltTitle(sourceId, mediaType, altTitle) {
+  db.runSync('UPDATE entries SET alt_title = ? WHERE source_id = ? AND media_type = ?', [
+    altTitle,
+    sourceId,
+    mediaType,
+  ]);
+}
+
+// Moves an entry to another type (e.g. an imported title that turns out
+// to be manhwa).
+export function setEntryType(sourceId, fromType, toType) {
+  db.runSync('UPDATE entries SET media_type = ? WHERE source_id = ? AND media_type = ?', [
+    toType,
+    sourceId,
+    fromType,
+  ]);
+}
+
 export function deleteEntry(sourceId, mediaType) {
   db.runSync('DELETE FROM entries WHERE source_id = ? AND media_type = ?', [sourceId, mediaType]);
 }
