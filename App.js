@@ -17,11 +17,22 @@ import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
 import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup } from './src/backup';
+import {
+  DATA_SAVER_DEFAULTS,
+  dataSaverSetting,
+  driveSyncAllowed,
+  onUnmetered,
+  startNetworkWatch,
+  takeDriveSyncDeferred,
+} from './src/dataSaver';
 import { MEDIA_TYPE_LIST } from './src/mediaTypes';
 import AppLock, { useAppLockSetting } from './src/AppLock';
 
 // Tabs = one per media type (from config, so this never needs manual
 // updates when a type is added) + a unified library at the end.
+// Browsing tabs (everything but the Library), for Data saver's tab loading.
+const SITE_TAB_KEYS = MEDIA_TYPE_LIST.map((m) => m.key);
+
 const TABS = [...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label })), { key: 'library', label: 'Library' }];
 
 export default function App() {
@@ -57,6 +68,25 @@ const BUTTON_SETTINGS = [
     setting: 'showSavePageImageButton',
     label: 'Save Page Image',
     hint: 'Save the page on screen to the gallery (Manga).',
+  },
+];
+
+// Settings → Data saver (src/dataSaver.js).
+const DATA_SAVER_SETTINGS = [
+  {
+    key: 'lazyTabs',
+    label: 'Load tabs only when opened',
+    hint: 'A tab loads the first time you open it, instead of every tab loading when the app starts.',
+  },
+  {
+    key: 'unloadBackgroundTabs',
+    label: 'Unload background tabs',
+    hint: 'Only the current and the last-used tab stay loaded. Others reopen on the same page, back at the top.',
+  },
+  {
+    key: 'driveWifiOnly',
+    label: 'Drive sync on Wi-Fi only',
+    hint: 'Automatic backups and cover uploads wait for Wi-Fi, then catch up. Backup Now still works anytime.',
   },
 ];
 
@@ -108,6 +138,39 @@ function AppContent() {
     },
     [scheduleTabBarHide, setTabBarHiddenAnimated]
   );
+  // Settings → Data saver (src/dataSaver.js). AppLock has already run
+  // initDb by the time this renders, so the settings can be read here.
+  const [dataSaver, setDataSaver] = useState(() =>
+    Object.fromEntries(Object.keys(DATA_SAVER_DEFAULTS).map((key) => [key, dataSaverSetting(key)]))
+  );
+  // Browsing tabs whose page is loaded, most recently used first. With
+  // "Load tabs only when opened" a tab joins on its first visit; with
+  // "Unload background tabs" only the first two stay. Each tab reports its
+  // page (onPageChange) so an unloaded one reopens where it was.
+  const [loadedTabs, setLoadedTabs] = useState(() => (dataSaver.lazyTabs ? [tab] : SITE_TAB_KEYS));
+  const loadedTabsRef = useRef(loadedTabs);
+  const lastUrls = useRef({});
+  useEffect(() => {
+    const current = loadedTabsRef.current;
+    let next = SITE_TAB_KEYS.includes(tab) ? [tab, ...current.filter((k) => k !== tab)] : [...current];
+    if (!dataSaver.lazyTabs) next = [...next, ...SITE_TAB_KEYS.filter((k) => !next.includes(k))];
+    if (dataSaver.unloadBackgroundTabs) next = next.slice(0, 2);
+    if (next.length === current.length && next.every((k, i) => k === current[i])) return;
+    loadedTabsRef.current = next;
+    setLoadedTabs(next);
+  }, [tab, dataSaver.lazyTabs, dataSaver.unloadBackgroundTabs]);
+
+  // Wi-Fi vs mobile data, for Data saver.
+  useEffect(() => startNetworkWatch(), []);
+  // Drive sync held back for Wi-Fi runs as soon as the phone is on Wi-Fi
+  // again, or the setting is turned off.
+  const catchUpDriveSync = useCallback(async () => {
+    if (!driveSyncAllowed() || !takeDriveSyncDeferred()) return;
+    await maybeBackupLibraryToDrive();
+    await uploadPendingImages();
+  }, []);
+  useEffect(() => onUnmetered(catchUpDriveSync), [catchUpDriveSync]);
+
   const [isSignedInToGoogle, setIsSignedInToGoogle] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
@@ -139,13 +202,23 @@ function AppContent() {
     // ask to reconnect Drive on every single launch, which is what was
     // happening before.
     restoreGoogleSession().then((restored) => {
-      if (restored) setIsSignedInToGoogle(true);
+      if (restored) {
+        setIsSignedInToGoogle(true);
+        catchUpDriveSync();
+      }
     });
   }, []);
 
   const toggleDebugTools = (value) => {
     setShowDebugTools(value);
     setSetting('showDebugTools', value ? '1' : '0');
+  };
+
+  const toggleDataSaver = (key, value) => {
+    setDataSaver((current) => ({ ...current, [key]: value }));
+    setSetting(key, value ? '1' : '0');
+    // Sync that was waiting for Wi-Fi may go now.
+    if (key === 'driveWifiOnly' && !value) catchUpDriveSync();
   };
 
   const toggleButton = (button, value) => {
@@ -167,9 +240,12 @@ function AppContent() {
       // was completely empty, which still left a gap the moment even
       // one local entry existed but Drive had more — restoring first
       // closes that gap entirely rather than special-casing around it.
+      // force: connecting is your own action, so it runs even when Data
+      // saver holds automatic sync for Wi-Fi.
       const restoreResult = await restoreFromDriveBackup();
-      await maybeBackupLibraryToDrive();
-      const uploaded = await uploadPendingImages(); // catch up any images saved before connecting
+      await maybeBackupLibraryToDrive({ force: true });
+      const uploaded = await uploadPendingImages({ force: true }); // catch up any images saved before connecting
+      takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
 
       const parts = ['Google Drive sync is now enabled.'];
       if (restoreResult.restored > 0) {
@@ -193,8 +269,10 @@ function AppContent() {
       Alert.alert('Not connected', 'Connect Google Drive first.');
       return;
     }
-    await maybeBackupLibraryToDrive();
-    const uploaded = await uploadPendingImages();
+    // force: runs even when Data saver holds automatic sync for Wi-Fi.
+    await maybeBackupLibraryToDrive({ force: true });
+    const uploaded = await uploadPendingImages({ force: true });
+    takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
     Alert.alert(
       'Backed up',
       `Your library data has been saved to Drive as library-backup.csv${
@@ -289,14 +367,22 @@ function AppContent() {
             key={mediaConfig.key}
             style={[styles.tabPane, { display: tab === mediaConfig.key ? 'flex' : 'none' }]}
           >
-            <MediaWebView
-              config={mediaConfig}
-              isSignedInToGoogle={isSignedInToGoogle}
-              showDebugTools={showDebugTools}
-              onViewInLibrary={handleViewInLibrary}
-              buttons={buttons}
-              onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
-            />
+            {/* Not loaded yet, or unloaded by Data saver: nothing here
+                until the tab is opened (loadedTabs). */}
+            {loadedTabs.includes(mediaConfig.key) ? (
+              <MediaWebView
+                config={mediaConfig}
+                isSignedInToGoogle={isSignedInToGoogle}
+                showDebugTools={showDebugTools}
+                onViewInLibrary={handleViewInLibrary}
+                buttons={buttons}
+                onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
+                initialUrl={lastUrls.current[mediaConfig.key] || null}
+                onPageChange={(url) => {
+                  lastUrls.current[mediaConfig.key] = url;
+                }}
+              />
+            ) : null}
           </View>
         ))}
         <View style={[styles.tabPane, { display: tab === 'library' ? 'flex' : 'none' }]}>
@@ -352,6 +438,20 @@ function AppContent() {
                   <Text style={styles.settingsHint}>{button.hint}</Text>
                 </View>
                 <Switch value={buttons[button.key]} onValueChange={(value) => toggleButton(button, value)} />
+              </View>
+            ))}
+
+            <Text style={styles.settingsSectionTitle}>Data saver</Text>
+            {DATA_SAVER_SETTINGS.map((item, i) => (
+              <View
+                key={item.key}
+                style={[styles.settingsRow, i < DATA_SAVER_SETTINGS.length - 1 && styles.settingsRowGap]}
+              >
+                <View style={styles.settingsRowText}>
+                  <Text style={styles.settingsLabel}>{item.label}</Text>
+                  <Text style={styles.settingsHint}>{item.hint}</Text>
+                </View>
+                <Switch value={dataSaver[item.key]} onValueChange={(value) => toggleDataSaver(item.key, value)} />
               </View>
             ))}
             <TouchableOpacity style={styles.settingsCloseButton} onPress={() => setSettingsVisible(false)}>
