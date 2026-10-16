@@ -18,6 +18,8 @@ import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
 import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup, countPendingImages } from './src/backup';
 import SyncStatusPill from './src/SyncStatusPill';
+import Notepad from './src/Notepad';
+import { syncNotepadToDrive } from './src/notepadSync';
 import { beginSync } from './src/syncStatus';
 import { exportMalList, pickAndImportMalList, MAL_LISTS } from './src/malList';
 import {
@@ -177,6 +179,7 @@ function AppContent() {
   const catchUpDriveSync = useCallback(async () => {
     if (!driveSyncAllowed() || !takeDriveSyncDeferred()) return;
     await maybeBackupLibraryToDrive();
+    await syncNotepadToDrive();
     await uploadPendingImages();
   }, []);
   useEffect(() => onUnmetered(catchUpDriveSync), [catchUpDriveSync]);
@@ -185,6 +188,8 @@ function AppContent() {
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  // The Notepad (src/Notepad.js), opened from the 📝 button on the Library.
+  const [notepadVisible, setNotepadVisible] = useState(false);
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
   const [buttons, setButtons] = useState({ codeSearch: true, siteMenu: true, reverseSearch: true, savePageImage: true });
@@ -230,6 +235,7 @@ function AppContent() {
     restoreGoogleSession().then((restored) => {
       if (restored) {
         setIsSignedInToGoogle(true);
+        syncNotepadToDrive(); // picks up note names added on other devices
         catchUpDriveSync();
       }
     });
@@ -274,6 +280,7 @@ function AppContent() {
       const restoreResult = await restoreFromDriveBackup();
       if (restoreResult.restored > 0) reloadLibrary();
       await maybeBackupLibraryToDrive({ force: true });
+      await syncNotepadToDrive({ force: true }); // push any notes written before connecting
       const uploaded = await uploadPendingImages({ force: true }); // catch up any images saved before connecting
       takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
 
@@ -308,6 +315,7 @@ function AppContent() {
     let uploaded = 0;
     try {
       await maybeBackupLibraryToDrive({ force: true });
+      await syncNotepadToDrive({ force: true });
       uploaded = await uploadPendingImages({ force: true, job: syncJob });
       syncJob.end();
     } catch (err) {
@@ -524,8 +532,15 @@ function AppContent() {
             onFocusHandled={() => setLibraryFocusKey(null)}
             onOpenInTab={handleOpenInTab}
           />
+          {tab === 'library' ? (
+            <TouchableOpacity style={styles.notepadFab} onPress={() => setNotepadVisible(true)}>
+              <Text style={styles.notepadFabIcon}>📝</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
+
+      <Notepad visible={notepadVisible} onClose={() => setNotepadVisible(false)} />
 
       <Modal
         visible={settingsVisible}
@@ -662,6 +677,20 @@ const styles = StyleSheet.create({
   tabInactive: { color: '#888' },
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
+  // The Notepad button, bottom right on the Library.
+  notepadFab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#16213e',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  notepadFabIcon: { fontSize: 22 },
   settingsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

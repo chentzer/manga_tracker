@@ -560,6 +560,15 @@ so nothing renders blank.
   plus **+ Add more** (search the type) and **Remove this from group**.
   The Library row shows the group's name. Stored as `group_name` /
   `group_order`, both in the Drive backup.
+- **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
+  lists of items (text or links, which open with a tap). The built-in
+  **Inbox** is for jotting things down; **Move** files an item into a named
+  note, made with **＋ New**. Stored in SQLite (`notes`, `notebooks`).
+  `src/notepadSync.js` syncs with Drive (`notepad.json`, plus a readable
+  `Notepad.txt`, in the MangaTracker folder): note NAMES are shared by
+  every device (creating or deleting one does it everywhere), but each
+  device only ever sees its own items. Deleting an item removes it from
+  Drive too; deleting a whole note keeps it and its items in Drive.
 - `src/SyncStatusPill.js` / `src/syncStatus.js` — the pill beside the
   Settings button. While a backup, restore or MAL import runs it shows
   **Backup**, **Restore** or **Import**, filling from the left as it goes (full = done); then

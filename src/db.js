@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import * as Crypto from 'expo-crypto';
 import { columnsFromMalItem } from './malFormat';
 
 const db = SQLite.openDatabaseSync('manga.db');
@@ -150,6 +151,70 @@ export function initDb() {
       value TEXT
     );
   `);
+  // Notepad: only ever holds notes written on THIS device.
+  // Drive keeps a merged copy of every device's notes (see notepadSync.js),
+  // but nothing is ever restored from Drive into this table — each
+  // device only sees what it added itself.
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  // Named notes ("Grocery list", ...). Each item in `notes` belongs to
+  // one via notebook_id; NULL means the built-in Inbox, for jotting
+  // things down quickly (items get moved into a named note later).
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS notebooks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  try {
+    db.execSync('ALTER TABLE notes ADD COLUMN notebook_id INTEGER;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+  // uid: a stable id per item, so the Drive sync can tell "the same
+  // item, now moved to another note" apart from "a new item", and remove
+  // exactly the items deleted one by one. Backfilled for older items.
+  try {
+    db.execSync('ALTER TABLE notes ADD COLUMN uid TEXT;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+  for (const row of db.getAllSync('SELECT id FROM notes WHERE uid IS NULL')) {
+    db.runSync('UPDATE notes SET uid = ? WHERE id = ?', [Crypto.randomUUID(), row.id]);
+  }
+  // updated_at (ISO): when this note was created here, or the time
+  // another device created it if it was picked up from Drive. Compared
+  // against deletions from other devices to decide which happened last.
+  try {
+    db.execSync('ALTER TABLE notebooks ADD COLUMN updated_at TEXT;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+  // Notes deleted on this device, remembered until the next successful
+  // Drive sync tells the other devices to delete them too. Keyed by
+  // lowercase title, since note names are unique case-insensitively.
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS notebook_tombstones (
+      title_key TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      deleted_at TEXT NOT NULL
+    );
+  `);
+  // Drive deletion rule: deleting ONE item on the phone removes it from
+  // Drive; deleting a whole note keeps it and its items in Drive. This
+  // table remembers single deletes until the next successful Drive sync
+  // has removed them there. Whole-note deletes never write to it.
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS note_item_tombstones (
+      uid TEXT PRIMARY KEY
+    );
+  `);
   // App lock (AppLock.js): off on a fresh install. Builds before this
   // setting existed always locked, so an update from one of those keeps
   // the lock on. Once set, it's only ever changed from Settings.
@@ -160,6 +225,117 @@ export function initDb() {
 
 function hasColumn(name) {
   return db.getAllSync('PRAGMA table_info(entries)').some((c) => c.name === name);
+}
+
+export const INBOX_TITLE = 'Inbox';
+
+// notebookId null/undefined = Inbox.
+export function addNote(content, notebookId = null) {
+  db.runSync('INSERT INTO notes (content, notebook_id, uid) VALUES (?, ?, ?)', [
+    content,
+    notebookId ?? null,
+    Crypto.randomUUID(),
+  ]);
+}
+
+// One note's items, newest first, for display.
+export function getNotes(notebookId = null) {
+  if (notebookId == null) {
+    return db.getAllSync('SELECT * FROM notes WHERE notebook_id IS NULL ORDER BY id DESC');
+  }
+  return db.getAllSync('SELECT * FROM notes WHERE notebook_id = ? ORDER BY id DESC', [notebookId]);
+}
+
+// Deleting a single item: it also leaves Drive at the next sync.
+export function deleteNote(id) {
+  const row = db.getFirstSync('SELECT uid FROM notes WHERE id = ?', [id]);
+  db.runSync('DELETE FROM notes WHERE id = ?', [id]);
+  if (row?.uid) {
+    db.runSync('INSERT OR IGNORE INTO note_item_tombstones (uid) VALUES (?)', [row.uid]);
+  }
+}
+
+export function getNoteItemTombstones() {
+  return db.getAllSync('SELECT uid FROM note_item_tombstones').map((r) => r.uid);
+}
+
+// Called after a successful Drive sync has removed these from Drive.
+export function clearNoteItemTombstones(uids) {
+  for (const uid of uids) {
+    db.runSync('DELETE FROM note_item_tombstones WHERE uid = ?', [uid]);
+  }
+}
+
+export function moveNote(id, notebookId) {
+  db.runSync('UPDATE notes SET notebook_id = ? WHERE id = ?', [notebookId ?? null, id]);
+}
+
+export function getNotebooks() {
+  return db.getAllSync('SELECT * FROM notebooks ORDER BY title COLLATE NOCASE');
+}
+
+// Item counts keyed by notebook id, with the Inbox under 'inbox'.
+export function getNoteCounts() {
+  const counts = { inbox: 0 };
+  for (const row of db.getAllSync('SELECT notebook_id, COUNT(*) AS n FROM notes GROUP BY notebook_id')) {
+    counts[row.notebook_id == null ? 'inbox' : row.notebook_id] = row.n;
+  }
+  return counts;
+}
+
+// Throws with a user-facing message on an empty, reserved, or
+// duplicate (case-insensitive) title. Returns the new notebook's id.
+// updatedAt is only passed when creating a note picked up from another
+// device via Drive (its original creation time); otherwise it's now.
+export function createNotebook(title, updatedAt = null) {
+  const clean = title.trim();
+  if (!clean) throw new Error('Give the note a name.');
+  if (clean.toLowerCase() === INBOX_TITLE.toLowerCase()) {
+    throw new Error(`"${INBOX_TITLE}" is the built-in note.`);
+  }
+  if (db.getFirstSync('SELECT id FROM notebooks WHERE title = ? COLLATE NOCASE', [clean])) {
+    throw new Error(`A note called "${clean}" already exists.`);
+  }
+  // Re-creating a note deleted earlier here cancels that pending delete.
+  db.runSync('DELETE FROM notebook_tombstones WHERE title_key = ?', [clean.toLowerCase()]);
+  return db.runSync('INSERT INTO notebooks (title, updated_at) VALUES (?, ?)', [
+    clean,
+    updatedAt || new Date().toISOString(),
+  ]).lastInsertRowId;
+}
+
+// keepItems: true moves its items to the Inbox first; false deletes them
+// from this device only — deliberately no item tombstones, so Drive
+// keeps the whole note and its items either way.
+// fromSync: true when applying a delete made on another device — no
+// tombstone, since that device already told Drive.
+export function deleteNotebook(id, keepItems, fromSync = false) {
+  const book = db.getFirstSync('SELECT title FROM notebooks WHERE id = ?', [id]);
+  if (keepItems) {
+    db.runSync('UPDATE notes SET notebook_id = NULL WHERE notebook_id = ?', [id]);
+  } else {
+    db.runSync('DELETE FROM notes WHERE notebook_id = ?', [id]);
+  }
+  db.runSync('DELETE FROM notebooks WHERE id = ?', [id]);
+  if (book && !fromSync) {
+    db.runSync(
+      `INSERT INTO notebook_tombstones (title_key, title, deleted_at) VALUES (?, ?, ?)
+       ON CONFLICT(title_key) DO UPDATE SET title = excluded.title, deleted_at = excluded.deleted_at`,
+      [book.title.toLowerCase(), book.title, new Date().toISOString()]
+    );
+  }
+}
+
+export function getNotebookTombstones() {
+  return db.getAllSync('SELECT * FROM notebook_tombstones');
+}
+
+// Called after a successful Drive sync has recorded these deletes.
+// Only clears ones not re-deleted since (deleted_at unchanged).
+export function clearNotebookTombstones(tombstones) {
+  for (const t of tombstones) {
+    db.runSync('DELETE FROM notebook_tombstones WHERE title_key = ? AND deleted_at = ?', [t.title_key, t.deleted_at]);
+  }
 }
 
 // Values are always stored/read as strings — callers compare/convert as
