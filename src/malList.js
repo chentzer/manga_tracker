@@ -13,8 +13,13 @@
 // already in the library, matched by MAL id, then by title. An imported
 // title has no cover or site page yet (source_id "mal-<id>", linking to
 // MyAnimeList); opening it on the site later turns it into a normal entry
-// (see adoptImportedEntry in db.js). A title already in the library but
-// without a MAL id gets it, plus any MAL details it doesn't have yet.
+// (see adoptImportedEntry in db.js). A title already in the library gets
+// the MAL details it doesn't have yet; where both have a value and they
+// differ, the MAL value is kept in mal_conflicts for you to settle in the
+// detail sheet (nothing in the app is overwritten).
+//
+// Hentai is left out of exports (ecchi stays): genres come from AniList,
+// looked up by MAL id and cached on the entry (genres, is_adult).
 //
 // MAL fields with no column of their own (my_id, storage, ...) are kept
 // as JSON in mal_data, so an export gives back exactly what came in.
@@ -25,7 +30,7 @@ import { ungzip } from 'pako';
 import { getAllEntries, getEntryByMalId, restoreEntry, updateEntryFields, getSetting, setSetting } from './db';
 import { MEDIA_TYPES } from './mediaTypes';
 import { isDriveConnected, uploadTextFileToDrive } from './GoogleDriveService';
-import { FORMATS, columnsFromMalItem, malItemFromEntry } from './malFormat';
+import { FORMATS, columnsFromMalItem, malItemFromEntry, compareWithEntry } from './malFormat';
 
 const IMPORTED_PREFIX = 'mal-';
 
@@ -126,14 +131,56 @@ export function buildMalXml(mediaType, entries, user = {}) {
   );
 }
 
+// ---------- Genres (AniList) ----------
+
+const ANILIST_URL = 'https://graphql.anilist.co';
+const ANILIST_QUERY = `query ($ids: [Int], $type: MediaType) {
+  Page(perPage: 50) { media(idMal_in: $ids, type: $type) { idMal isAdult genres } }
+}`;
+
+export function isHentai(entry) {
+  return entry.is_adult === 1 || /(^|,)\s*hentai\s*(,|$)/i.test(entry.genres || '');
+}
+
+// Looks up genres for entries with a MAL id that haven't been checked yet
+// (genres is null), 50 per request, and saves them on the entries. A title
+// AniList doesn't know gets genres '' so it isn't asked about again.
+// Throws if AniList can't be reached.
+export async function fetchMissingGenres(mediaType, entries) {
+  const unchecked = entries.filter((e) => e.mal_id && e.genres === null);
+  for (let i = 0; i < unchecked.length; i += 50) {
+    const batch = unchecked.slice(i, i + 50);
+    const res = await fetch(ANILIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        query: ANILIST_QUERY,
+        variables: { ids: batch.map((e) => e.mal_id), type: mediaType === 'anime' ? 'ANIME' : 'MANGA' },
+      }),
+    });
+    if (!res.ok) throw new Error(`Couldn't look up genres on AniList (${res.status}).`);
+    const json = await res.json();
+    const found = new Map((json.data?.Page?.media || []).map((m) => [m.idMal, m]));
+    batch.forEach((e) => {
+      const m = found.get(e.mal_id);
+      e.genres = m ? (m.genres || []).join(',') : '';
+      e.is_adult = m && m.isAdult ? 1 : 0;
+      updateEntryFields(e.source_id, mediaType, { genres: e.genres, is_adult: e.is_adult });
+    });
+  }
+}
+
 // ---------- Export ----------
 
 // Builds the export for one type, saves it to Drive (replacing the last
-// export there) when connected, and offers it to the share sheet.
-// Returns { exported, skipped, drive: 'saved' | 'not connected' | error }.
+// export there) when connected, and offers it to the share sheet. Hentai
+// is left out. Returns { exported, skipped, hentai, drive: 'saved' |
+// 'not connected' | error }.
 export async function exportMalList(mediaType) {
   const all = getAllEntries(mediaType);
-  const withId = all.filter((e) => e.mal_id);
+  const linked = all.filter((e) => e.mal_id);
+  await fetchMissingGenres(mediaType, linked);
+  const withId = linked.filter((e) => !isHentai(e));
   let user = {};
   try {
     user = JSON.parse(getSetting(`malUser_${mediaType}`, '{}')) || {};
@@ -163,7 +210,12 @@ export async function exportMalList(mediaType) {
     });
   }
 
-  return { exported: withId.length, skipped: all.length - withId.length, drive };
+  return {
+    exported: withId.length,
+    skipped: all.length - linked.length,
+    hentai: linked.length - withId.length,
+    drive,
+  };
 }
 
 // ---------- Import ----------
@@ -191,20 +243,34 @@ async function readPickedFile(uri) {
   return FileSystem.readAsStringAsync(uri);
 }
 
-// Only the columns an entry doesn't have a value for yet.
-function missingColumns(entry, columns) {
-  const result = {};
-  Object.entries(columns).forEach(([key, value]) => {
-    const current = entry[key];
-    if ((current === null || current === undefined || current === 0 || current === '') && value) {
-      result[key] = value;
-    }
+// Brings a MAL item into an entry that's already in the library: fills
+// in what it doesn't have and records what differs (merged with any
+// differences still unsettled). Returns true if anything differs.
+function mergeIntoEntry(entry, mediaType, item, malId) {
+  const columns = columnsFromMalItem(mediaType, item);
+  const { fill, conflicts } = compareWithEntry(entry, columns);
+  let previous = {};
+  try {
+    previous = entry.mal_conflicts ? JSON.parse(entry.mal_conflicts) : {};
+  } catch (e) {
+    previous = {};
+  }
+  const merged = { ...previous, ...conflicts };
+  const hasConflicts = Object.keys(merged).length > 0;
+  updateEntryFields(entry.source_id, mediaType, {
+    ...fill,
+    // Anime type isn't something you'd set yourself; MAL's is used.
+    ...(columns.series_type ? { series_type: columns.series_type } : {}),
+    mal_id: malId,
+    mal_data: JSON.stringify(item),
+    mal_conflicts: hasConflicts ? JSON.stringify(merged) : null,
   });
-  return result;
+  return Object.keys(conflicts).length > 0;
 }
 
-// Adds the titles in a parsed MAL export that aren't in the library yet.
-// Returns { mediaType, added, linked, alreadyThere }.
+// Adds the titles in a parsed MAL export that aren't in the library yet,
+// and compares the ones that are. Returns { mediaType, added, linked,
+// alreadyThere, differing }.
 export function importParsedList({ mediaType, user, items }) {
   const format = FORMATS[mediaType];
 
@@ -219,31 +285,31 @@ export function importParsedList({ mediaType, user, items }) {
   let added = 0;
   let linked = 0;
   let alreadyThere = 0;
+  let differing = 0;
 
   items.forEach((item) => {
     const malId = Number(item[format.idField]);
     if (!malId) return;
-    if (getEntryByMalId(malId, mediaType)) {
+    const title = item[format.titleField] || '';
+
+    const sameId = getEntryByMalId(malId, mediaType);
+    if (sameId) {
       alreadyThere++;
+      if (mergeIntoEntry(sameId, mediaType, item, malId)) differing++;
       return;
     }
-    const malData = JSON.stringify(item);
-    const title = item[format.titleField] || '';
-    const columns = columnsFromMalItem(mediaType, item);
 
-    // Same title already recorded by browsing, but without its MAL id:
-    // give it the id and whatever MAL details it doesn't have yet.
+    // Same title already recorded by browsing, but without its MAL id.
     const sameTitle = byTitle.get(normalizeTitle(title));
     if (sameTitle && !sameTitle.mal_id) {
-      updateEntryFields(sameTitle.source_id, mediaType, {
-        ...missingColumns(sameTitle, columns),
-        mal_id: malId,
-        mal_data: malData,
-      });
+      if (mergeIntoEntry(sameTitle, mediaType, item, malId)) differing++;
       sameTitle.mal_id = malId;
       linked++;
       return;
     }
+
+    const malData = JSON.stringify(item);
+    const columns = columnsFromMalItem(mediaType, item);
 
     restoreEntry({
       sourceId: `${IMPORTED_PREFIX}${malId}`,
@@ -264,7 +330,7 @@ export function importParsedList({ mediaType, user, items }) {
     );
   }
 
-  return { mediaType, added, linked, alreadyThere };
+  return { mediaType, added, linked, alreadyThere, differing };
 }
 
 // Lets you pick a MAL export file and imports it. Returns null if the

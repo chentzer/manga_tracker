@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   getAllEntries,
-  setScore,
+  getEntry,
   setTags,
   updateEntryFields,
   parseTags,
@@ -26,8 +26,8 @@ import {
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
-import { exportMalList, pickAndImportMalList } from './malList';
-import { SCORE_LABELS, PRIORITIES, normalizeDate } from './malFormat';
+import { exportMalList, pickAndImportMalList, isImportedSourceId } from './malList';
+import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -52,13 +52,6 @@ const READ_STATUS_ICONS = Object.fromEntries(READ_STATUSES.map((s) => [s.key, s.
 
 function getReadStatusLabels(mediaType) {
   return MEDIA_TYPES[mediaType]?.readStatusLabels || DEFAULT_READ_STATUS_LABELS;
-}
-
-// Today as 'YYYY-MM-DD', in local time.
-function todayString() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function toCount(text) {
@@ -277,7 +270,83 @@ function FullImageModal({ uri, visible, onClose }) {
   );
 }
 
-function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onUpdate, onDelete }) {
+// { column: value from your MAL list } where an import disagreed with the
+// app (malList.js), or {}.
+function conflictsOf(entry) {
+  try {
+    return entry && entry.mal_conflicts ? JSON.parse(entry.mal_conflicts) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+// `fields` plus mal_conflicts without the columns being set: changing a
+// detail yourself settles its difference with MAL.
+function settlingConflicts(entry, fields) {
+  const conflicts = conflictsOf(entry);
+  const keys = Object.keys(fields).filter((k) => k in conflicts);
+  if (keys.length === 0) return fields;
+  keys.forEach((k) => delete conflicts[k]);
+  return { ...fields, mal_conflicts: Object.keys(conflicts).length ? JSON.stringify(conflicts) : null };
+}
+
+// How a value reads in the "differs from MAL" list.
+function describeValue(entry, key, value) {
+  if (value === null || value === undefined || value === '' || value === 0) return '—';
+  if (key === 'read_status') {
+    const status = READ_STATUSES.find((s) => s.key === value);
+    return status ? `${status.icon} ${getReadStatusLabels(entry.media_type)[status.label]}` : String(value);
+  }
+  if (key === 'score') return `${value} · ${SCORE_LABELS[value] || ''}`;
+  if (key === 'repeating') return value ? 'Yes' : 'No';
+  if (key === 'priority') return value.charAt(0).toUpperCase() + value.slice(1);
+  return String(value);
+}
+
+// Details where your imported MAL list disagrees with the app: pick
+// either side per detail, or change it yourself further down (that
+// settles it too).
+function ConflictReview({ entry, onResolve }) {
+  const conflicts = conflictsOf(entry);
+  const fields = CONFLICT_FIELDS.filter((f) => f.key in conflicts);
+  if (fields.length === 0) return null;
+  return (
+    <View style={styles.conflictBox}>
+      <Text style={styles.conflictTitle}>⚠ Differs from your MyAnimeList list</Text>
+      <Text style={styles.conflictHint}>
+        Choose which to keep, or change it yourself below.
+      </Text>
+      {fields.map(({ key, label }) => (
+        <View key={key} style={styles.conflictRow}>
+          <Text style={styles.conflictLabel}>{label}</Text>
+          <View style={styles.conflictChoices}>
+            <TouchableOpacity style={styles.conflictChoice} onPress={() => onResolve(key, false)}>
+              <Text style={styles.conflictWhich}>App</Text>
+              <Text style={styles.conflictValue}>{describeValue(entry, key, entry[key])}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.conflictChoice} onPress={() => onResolve(key, true)}>
+              <Text style={styles.conflictWhich}>MyAnimeList</Text>
+              <Text style={styles.conflictValue}>{describeValue(entry, key, conflicts[key])}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function DetailModal({
+  entry,
+  onClose,
+  onRate,
+  onSetTags,
+  onSetReadStatus,
+  onUpdate,
+  onResolveConflict,
+  onOpenNext,
+  onPickAgain,
+  onDelete,
+}) {
   const [fullImageVisible, setFullImageVisible] = useState(false);
 
   if (!entry) return null;
@@ -289,6 +358,7 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onUpd
       <View style={styles.detailOverlay}>
         <View style={styles.detailCard}>
           <ScrollView keyboardShouldPersistTaps="handled">
+            <ConflictReview entry={entry} onResolve={(key, useMal) => onResolveConflict(entry, key, useMal)} />
             {entry.local_image_path ? (
               <TouchableOpacity onPress={() => setFullImageVisible(true)} activeOpacity={0.9}>
                 <Image source={{ uri: entry.local_image_path }} style={styles.detailImage} />
@@ -398,6 +468,18 @@ function DetailModal({ entry, onClose, onRate, onSetTags, onSetReadStatus, onUpd
           </ScrollView>
 
           <View style={styles.detailFooterRow}>
+            <TouchableOpacity style={styles.detailNextButton} onPress={() => onOpenNext(entry)}>
+              <Text style={styles.detailNextButtonText}>
+                ▶ {entry.media_type === 'anime' ? 'Watch' : 'Read'} {words.short} {(entry.progress || 0) + 1}
+              </Text>
+            </TouchableOpacity>
+            {onPickAgain ? (
+              <TouchableOpacity style={styles.detailNextButton} onPress={onPickAgain}>
+                <Text style={styles.detailNextButtonText}>🎲 Again</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailDeleteButton} onPress={() => onDelete(entry)}>
               <Text style={styles.detailDeleteButtonText}>Delete</Text>
             </TouchableOpacity>
@@ -439,7 +521,66 @@ const READ_STATUS_FILTERS = [
   { key: 'want_to_read', label: '📌 Want to Read/Watch' },
 ];
 
-export default function EntryList({ active = true, focusKey = null, onFocusHandled }) {
+// The 🎲 Random button: picks one entry matching the chosen types and
+// statuses (none chosen in a row = any), skipping ones already picked
+// this round until every match has been shown.
+const RANDOM_STATUS_CHOICES = [
+  { key: 'want_to_read', label: '📌 Plan to Read/Watch' },
+  { key: 'reading', label: '▶️ Reading/Watching' },
+];
+const DEFAULT_RANDOM_CHOICE = { types: [], statuses: ['want_to_read', 'reading'] };
+
+function toggled(list, value) {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+}
+
+function RandomModal({ visible, choice, onChange, onPick, onClose }) {
+  const chip = (active, label, onPress) => (
+    <TouchableOpacity
+      key={label}
+      style={[styles.filterChip, active && styles.filterChipActive]}
+      onPress={onPress}
+    >
+      <Text style={active ? styles.filterTextActive : styles.filterText}>{label}</Text>
+    </TouchableOpacity>
+  );
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.randomCard}>
+          <Text style={styles.detailTitle}>🎲 Random</Text>
+          <Text style={styles.randomHint}>Choose any number in each row — none means any.</Text>
+          <Text style={styles.detailLabel}>Type</Text>
+          <View style={styles.readStatusRow}>
+            {MEDIA_TYPE_LIST.map((m) =>
+              chip(choice.types.includes(m.key), m.label, () =>
+                onChange({ ...choice, types: toggled(choice.types, m.key) })
+              )
+            )}
+          </View>
+          <Text style={styles.detailLabel}>Status</Text>
+          <View style={styles.readStatusRow}>
+            {RANDOM_STATUS_CHOICES.map((s) =>
+              chip(choice.statuses.includes(s.key), s.label, () =>
+                onChange({ ...choice, statuses: toggled(choice.statuses, s.key) })
+              )
+            )}
+          </View>
+          <View style={styles.detailFooterRow}>
+            <TouchableOpacity style={styles.detailDeleteButton} onPress={onClose}>
+              <Text style={styles.detailDeleteButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onPick}>
+              <Text style={styles.detailCloseButtonText}>Pick</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+export default function EntryList({ active = true, focusKey = null, onFocusHandled, onOpenInTab }) {
   const [entries, setEntries] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(null); // null = all types
@@ -450,6 +591,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   const [readStatusFilter, setReadStatusFilter] = useState(null);
   const [tagFilters, setTagFilters] = useState([]); // array of selected tag strings (AND logic)
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
+  const [conflictsOnly, setConflictsOnly] = useState(false); // "⚠ to review" chip
 
   const load = useCallback(() => {
     setEntries(getAllEntries(filter));
@@ -504,6 +646,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     }
     if (minRating !== null && (e.score || 0) < minRating) return false;
     if (readStatusFilter !== null && e.read_status !== readStatusFilter) return false;
+    if (conflictsOnly && !e.mal_conflicts) return false;
     if (tagFilters.length > 0) {
       const entryTags = parseTags(e.tags).map((t) => t.toLowerCase());
       const hasAllSelected = tagFilters.every((t) => entryTags.includes(t.toLowerCase()));
@@ -579,7 +722,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   const rate = useCallback(
     (item, score) => {
-      setScore(item.source_id, item.media_type, score);
+      updateEntryFields(item.source_id, item.media_type, settlingConflicts(item, { score }));
       load(); // refresh so the tapped star reflects immediately
       backupSilently();
     },
@@ -589,6 +732,10 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
   const handleSetTags = useCallback(
     (item, newTags) => {
       setTags(item.source_id, item.media_type, newTags);
+      const settled = settlingConflicts(item, { tags: null });
+      if ('mal_conflicts' in settled) {
+        updateEntryFields(item.source_id, item.media_type, { mal_conflicts: settled.mal_conflicts });
+      }
       load();
       backupSilently();
     },
@@ -606,7 +753,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         if (item.total) fields.progress = item.total;
         if (item.total_volumes) fields.progress_volumes = item.total_volumes;
       }
-      updateEntryFields(item.source_id, item.media_type, fields);
+      updateEntryFields(item.source_id, item.media_type, settlingConflicts(item, fields));
       load();
       backupSilently();
     },
@@ -615,12 +762,102 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   const handleUpdate = useCallback(
     (item, fields) => {
+      updateEntryFields(item.source_id, item.media_type, settlingConflicts(item, fields));
+      load();
+      backupSilently();
+    },
+    [load, backupSilently]
+  );
+
+  // Settles one "differs from MAL" detail: takes MAL's value, or keeps the
+  // app's.
+  const handleResolveConflict = useCallback(
+    (item, key, useMal) => {
+      const malValue = conflictsOf(item)[key];
+      const fields = settlingConflicts(item, { [key]: malValue });
+      if (!useMal) delete fields[key];
       updateEntryFields(item.source_id, item.media_type, fields);
       load();
       backupSilently();
     },
     [load, backupSilently]
   );
+
+  // "▶ Watch ep N" / "▶ Read ch N": opens the episode/chapter after your
+  // progress in its tab (openNext in mediaTypes.js; the tab says if it
+  // doesn't exist yet).
+  const handleOpenNext = useCallback(
+    (item) => {
+      const config = MEDIA_TYPES[item.media_type];
+      const title = item.title || item.alt_title || item.source_id;
+      const n = (item.progress || 0) + 1;
+      const unit = item.media_type === 'anime' ? 'episode' : 'chapter';
+      if (item.total && n > item.total) {
+        Alert.alert(`No next ${unit}`, `"${title}" has ${item.total} ${unit}s and you're at ${item.progress}.`);
+        return;
+      }
+      if (isImportedSourceId(item.source_id)) {
+        Alert.alert(
+          'Not opened on the site yet',
+          `"${title}" came from your MyAnimeList list, so its page on the site isn't known yet. Search for it, open it once, and this button will work.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Search',
+              onPress: () => {
+                setSelectedKey(null);
+                onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(title) });
+              },
+            },
+          ]
+        );
+        return;
+      }
+      setSelectedKey(null);
+      onOpenInTab?.(item.media_type, { ...config.openNext(item, n), expect: item.source_id });
+    },
+    [onOpenInTab]
+  );
+
+  // 🎲 Random: its window, its choices, and what this round has shown.
+  const [randomVisible, setRandomVisible] = useState(false);
+  const [randomChoice, setRandomChoice] = useState(DEFAULT_RANDOM_CHOICE);
+  const randomShown = useRef(new Set());
+  const [randomOpened, setRandomOpened] = useState(false);
+
+  const pickRandomNow = useCallback(() => {
+    const pool = getAllEntries(null).filter(
+      (e) =>
+        (randomChoice.types.length === 0 || randomChoice.types.includes(e.media_type)) &&
+        (randomChoice.statuses.length === 0 || randomChoice.statuses.includes(e.read_status))
+    );
+    if (pool.length === 0) {
+      Alert.alert('Nothing to pick', 'No entries match those choices.');
+      return;
+    }
+    const keyOf = (e) => `${e.media_type}:${e.source_id}`;
+    let options = pool.filter((e) => !randomShown.current.has(keyOf(e)));
+    if (options.length === 0) {
+      // Every match has been shown: start over, avoiding the one on screen.
+      randomShown.current = new Set();
+      options = pool.length > 1 ? pool.filter((e) => keyOf(e) !== selectedKey) : pool;
+    }
+    const pick = options[Math.floor(Math.random() * options.length)];
+    randomShown.current.add(keyOf(pick));
+    setRandomVisible(false);
+    setRandomOpened(true);
+    setSelectedKey(keyOf(pick));
+  }, [randomChoice, selectedKey]);
+
+  const openRandom = useCallback(() => {
+    randomShown.current = new Set();
+    setRandomVisible(true);
+  }, []);
+
+  // "Again" is only offered on details opened by Random.
+  useEffect(() => {
+    if (!selectedKey) setRandomOpened(false);
+  }, [selectedKey]);
 
   const handleDeleteEntry = useCallback(
     (item) => {
@@ -650,9 +887,13 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 
   // Looked up by key rather than kept as a snapshot object, so the modal
   // reflects rating changes made while it's open instead of going stale.
+  // Random can pick outside the current type filter, so fall back to the
+  // database.
   const selectedEntry = selectedKey
-    ? entries.find((e) => `${e.media_type}:${e.source_id}` === selectedKey) || null
+    ? entries.find((e) => `${e.media_type}:${e.source_id}` === selectedKey) ||
+      getEntry(selectedKey.slice(selectedKey.indexOf(':') + 1), selectedKey.split(':')[0])
     : null;
+  const conflictCount = entries.filter((e) => e.mal_conflicts).length;
 
   // Export/Import of MyAnimeList lists (see malList.js). Export works on
   // one type: the selected type chip, or it asks when "All" is selected.
@@ -663,6 +904,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
     try {
       const result = await exportMalList(mediaType);
       const lines = [`${result.exported} ${MEDIA_TYPES[mediaType].label} entries exported.`];
+      if (result.hentai > 0) lines.push(`${result.hentai} hentai titles left out.`);
       if (result.skipped > 0) {
         lines.push(
           `${result.skipped} left out: no MyAnimeList id yet. Open them once in their tab to pick it up.`
@@ -707,6 +949,11 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
       }
       if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
+      if (result.differing > 0) {
+        lines.push(
+          `${result.differing} differ from what's in the app — tap "⚠ To review" to go through them. Nothing in the app was overwritten.`
+        );
+      }
       if (result.added > 0) {
         lines.push('Added titles have no cover yet; open one in its tab to fill it in.');
       }
@@ -772,7 +1019,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         </TouchableOpacity>
       </View>
 
-      <View style={styles.filterBar}>
+      <View style={[styles.filterBar, styles.filterBarWrap]}>
         {SORTS.map((s) => (
           <TouchableOpacity
             key={s.key}
@@ -782,6 +1029,19 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
             <Text style={sort === s.key ? styles.filterTextActive : styles.filterText}>{s.label}</Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity style={styles.filterChip} onPress={openRandom}>
+          <Text style={styles.filterText}>🎲 Random</Text>
+        </TouchableOpacity>
+        {conflictCount > 0 || conflictsOnly ? (
+          <TouchableOpacity
+            style={[styles.filterChip, styles.reviewChip, conflictsOnly && styles.filterChipActive]}
+            onPress={() => setConflictsOnly((v) => !v)}
+          >
+            <Text style={conflictsOnly ? styles.filterTextActive : styles.reviewChipText}>
+              ⚠ To review ({conflictCount})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         {entries.length > 0 ? (
           <TouchableOpacity style={styles.clearAllChip} onPress={handleClearAll}>
             <Text style={styles.clearAllText}>Clear All</Text>
@@ -885,6 +1145,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
               <View style={styles.metaRow}>
                 {item.score ? <Text style={styles.scoreBadge}>★ {item.score}</Text> : null}
                 {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
+                {item.mal_conflicts ? <Text style={styles.conflictBadge}>⚠ differs from MAL</Text> : null}
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
@@ -914,7 +1175,18 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
         onSetTags={handleSetTags}
         onSetReadStatus={handleSetReadStatus}
         onUpdate={handleUpdate}
+        onResolveConflict={handleResolveConflict}
+        onOpenNext={handleOpenNext}
+        onPickAgain={randomOpened ? pickRandomNow : null}
         onDelete={handleDeleteEntry}
+      />
+
+      <RandomModal
+        visible={randomVisible}
+        choice={randomChoice}
+        onChange={setRandomChoice}
+        onPick={pickRandomNow}
+        onClose={() => setRandomVisible(false)}
       />
 
       <Modal
@@ -970,6 +1242,7 @@ export default function EntryList({ active = true, focusKey = null, onFocusHandl
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   filterBar: { flexDirection: 'row', padding: 10, gap: 8 },
+  filterBarWrap: { flexWrap: 'wrap' },
   filterChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1066,6 +1339,46 @@ const styles = StyleSheet.create({
   author: { fontSize: 13, color: '#666', marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
   scoreBadge: { fontSize: 13, color: '#f5a623', fontWeight: '700' },
+  conflictBadge: { fontSize: 12, color: '#b9770e' },
+  reviewChip: { backgroundColor: '#fdf2d8' },
+  reviewChipText: { color: '#b9770e', fontSize: 13, fontWeight: '600' },
+  conflictBox: {
+    backgroundColor: '#fdf6e3',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  conflictTitle: { fontSize: 14, fontWeight: '700', color: '#b9770e' },
+  conflictHint: { fontSize: 12, color: '#8a6d3b', marginTop: 2, marginBottom: 6 },
+  conflictRow: { marginTop: 6 },
+  conflictLabel: { fontSize: 12, color: '#888', marginBottom: 4 },
+  conflictChoices: { flexDirection: 'row', gap: 6 },
+  conflictChoice: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f0d9a8',
+    padding: 8,
+  },
+  conflictWhich: { fontSize: 11, color: '#888' },
+  conflictValue: { fontSize: 13, color: '#333', marginTop: 2 },
+  detailNextButton: {
+    flex: 1,
+    backgroundColor: '#e3ecfa',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  detailNextButtonText: { color: '#0f3460', fontSize: 14, fontWeight: '700' },
+  randomCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 32,
+  },
+  randomHint: { fontSize: 12, color: '#888', marginTop: 4 },
   progressBadge: { fontSize: 12, color: '#555' },
   scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   scoreChip: {

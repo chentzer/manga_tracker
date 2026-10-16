@@ -85,6 +85,17 @@ export function initDb() {
     'priority TEXT',
     'comments TEXT',
     'series_type TEXT',
+    // genres: comma-separated, from AniList by MAL id (malList.js), with
+    // is_adult (1 for hentai) — used to leave hentai out of exports.
+    'genres TEXT',
+    'is_adult INTEGER',
+    // mal_conflicts: JSON { column: value in your MAL list } for details
+    // where an imported list disagrees with the app, until you settle
+    // them in the detail sheet.
+    'mal_conflicts TEXT',
+    // last_progress_url: the last episode/chapter page you opened, for
+    // "Watch next" / "Read next".
+    'last_progress_url TEXT',
   ].forEach((column) => {
     try {
       db.execSync(`ALTER TABLE entries ADD COLUMN ${column};`);
@@ -204,6 +215,10 @@ export const EDITABLE_COLUMNS = [
   'series_type',
   'mal_id',
   'mal_data',
+  'genres',
+  'is_adult',
+  'mal_conflicts',
+  'last_progress_url',
 ];
 
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.
@@ -250,13 +265,12 @@ export function adoptImportedEntry(oldSourceId, mediaType, { sourceId, title, al
 export function insertEntry({ sourceId, mediaType, title, altTitle, author, sourceUrl, localImagePath, malId }) {
   // INSERT OR IGNORE closes the race between an entryExists() check and
   // this write (e.g. two rapid navigations to the same item).
-  // read_status defaults to 'read' (not left unset) — you're actively
-  // viewing the page as it's being saved, so "already read/watched" is
-  // the sensible default rather than making every new entry start as
-  // an unset/"want to" item you'd have to manually mark.
+  // read_status starts as 'want_to_read' (MAL's "Plan to Read/Watch"):
+  // opening a series page doesn't mean you've read it. Opening one of
+  // its episodes/chapters moves it to 'reading' (MediaWebView.js).
   db.runSync(
     `INSERT OR IGNORE INTO entries (source_id, media_type, title, alt_title, author, source_url, local_image_path, read_status, mal_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'read', ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'want_to_read', ?)`,
     [sourceId, mediaType, title ?? null, altTitle ?? null, author ?? null, sourceUrl ?? null, localImagePath, malId ?? null]
   );
 }

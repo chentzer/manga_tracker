@@ -221,3 +221,67 @@ export function malItemFromEntry(mediaType, entry) {
   if (mediaType === 'anime') values.series_type = entry.series_type || malData.series_type || '';
   return values;
 }
+
+// Details compared when an imported MAL list meets a title already in the
+// library. Labels are for the detail sheet's "differs from MAL" list.
+export const CONFLICT_FIELDS = [
+  { key: 'read_status', label: 'Status' },
+  { key: 'score', label: 'Score' },
+  { key: 'progress', label: 'Episodes / chapters' },
+  { key: 'total', label: 'Total episodes / chapters' },
+  { key: 'progress_volumes', label: 'Volumes' },
+  { key: 'total_volumes', label: 'Total volumes' },
+  { key: 'start_date', label: 'Start date' },
+  { key: 'finish_date', label: 'Finish date' },
+  { key: 'times_repeated', label: 'Times rewatched / reread' },
+  { key: 'repeating', label: 'Rewatching / rereading' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'tags', label: 'Tags' },
+  { key: 'comments', label: 'Comments' },
+];
+
+// A value that counts as "not set": nothing, 0, '', or the defaults
+// (low priority, not rewatching).
+function isUnset(key, value) {
+  if (value === null || value === undefined || value === '' || value === 0) return true;
+  if (key === 'priority' && value === 'low') return true;
+  return false;
+}
+
+function comparable(key, value) {
+  if (key === 'tags') {
+    return String(value)
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join(',');
+  }
+  return String(value).trim();
+}
+
+// Splits an imported item's columns against an existing entry:
+//   fill:      details the entry doesn't have yet (safe to set)
+//   conflicts: { column: MAL value } where both have a value and differ
+export function compareWithEntry(entry, columns) {
+  const fill = {};
+  const conflicts = {};
+  CONFLICT_FIELDS.forEach(({ key }) => {
+    const mine = entry[key];
+    const theirs = columns[key];
+    if (isUnset(key, theirs)) return;
+    if (isUnset(key, mine)) {
+      fill[key] = theirs;
+    } else if (comparable(key, mine) !== comparable(key, theirs)) {
+      conflicts[key] = theirs;
+    }
+  });
+  return { fill, conflicts };
+}
+
+// Today as 'YYYY-MM-DD', in local time.
+export function todayString() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}

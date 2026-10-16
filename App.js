@@ -191,6 +191,18 @@ function AppContent() {
     setTab('library');
   };
 
+  // "Watch next" / "Read next" from the Library: switches to that type's
+  // tab and has it open the page ({ url, checkJs, expect } — see openNext
+  // in mediaTypes.js). Cleared once the tab has taken it.
+  const [openRequests, setOpenRequests] = useState({});
+  const handleOpenInTab = useCallback((mediaType, request) => {
+    setOpenRequests((prev) => ({ ...prev, [mediaType]: { ...request, id: Date.now() } }));
+    setTab(mediaType);
+  }, []);
+  const clearOpenRequest = useCallback((mediaType) => {
+    setOpenRequests((prev) => (prev[mediaType] ? { ...prev, [mediaType]: null } : prev));
+  }, []);
+
   useEffect(() => {
     initDb();
     setShowDebugTools(getSetting('showDebugTools', '0') === '1');
@@ -381,6 +393,8 @@ function AppContent() {
                 onPageChange={(url) => {
                   lastUrls.current[mediaConfig.key] = url;
                 }}
+                openRequest={openRequests[mediaConfig.key] || null}
+                onOpenHandled={() => clearOpenRequest(mediaConfig.key)}
               />
             ) : null}
           </View>
@@ -390,6 +404,7 @@ function AppContent() {
             active={tab === 'library'}
             focusKey={libraryFocusKey}
             onFocusHandled={() => setLibraryFocusKey(null)}
+            onOpenInTab={handleOpenInTab}
           />
           {tab === 'library' ? (
             <TouchableOpacity style={styles.settingsFab} onPress={() => setSettingsVisible(true)}>

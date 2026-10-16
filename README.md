@@ -144,7 +144,8 @@ Two separate things sync to Drive once connected, both automatic:
   `sync_status`, `created_at`, `mal_id`, `mal_data` and the MyAnimeList
   fields (`start_date`, `finish_date`, `progress`, `progress_volumes`,
   `total`, `total_volumes`, `times_repeated`, `repeating`, `priority`,
-  `comments`, `series_type`), written to a separate CSV file **per
+  `comments`, `series_type`), `genres`, `is_adult`, `mal_conflicts` and
+  `last_progress_url`, written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
   `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
   so each type's data stays easy to open/browse individually. Each file
@@ -203,10 +204,21 @@ finish date and sets progress to the total when the total is known.
   replacing the previous export there. Entries without a MAL id are left
   out (the summary says how many). The file's user name and id come from
   the last list you imported.
+- **Hentai is left out of exports** (ecchi stays). Genres come from
+  AniList's API (`graphql.anilist.co`), looked up by MAL id, 50 titles
+  per request, the first time an entry is exported, and kept on the
+  entry (`genres`, `is_adult`). A title counts as hentai when AniList
+  marks it adult or lists the Hentai genre. If AniList can't be reached,
+  the export stops rather than risk including one.
 - **Import** takes a MAL export (`.xml`, or the `.xml.gz` MAL gives you)
   and adds every title that isn't in the library yet, matched by MAL id
-  and then by title. A title that's already there (recorded by browsing)
-  but has no MAL id just gets it filled in. Added titles have no cover
+  and then by title. A title that's already there gets the MAL details it
+  doesn't have yet. **Where both have a value and they differ** (status,
+  score, progress, dates, ...), nothing in the app is overwritten: the
+  entry gets a ⚠ badge, the **⚠ To review** chip lists them, and its
+  detail sheet shows each difference with the app's and MAL's value
+  side by side — tap the one to keep, or change the detail yourself
+  further down (that settles it too). Added titles have no cover
   or site page yet: their code is `mal-<id>` and their link goes to
   MyAnimeList. The first time you open that title on the site, the
   entry becomes a normal one (site code, link, cover and author) and
@@ -222,6 +234,34 @@ finish date and sets progress to the total when the total is known.
   existing scores are doubled (★4 → 8), entries imported from MAL get
   their exact MAL score back (unless re-rated in the app since), and a
   Drive backup from before the change is doubled when restored.
+
+## Progress while browsing, Watch next and Random
+
+- **Opening a series page** records it as Plan to Read/Watch (it used to
+  be Read/Watched).
+- **Opening an episode or chapter** (`extractProgress` in
+  `mediaTypes.js`: `?ep=N` on anime episode pages, `-chapter-N` on manga
+  reader pages) sets the series to Reading/Watching, fills an empty start
+  date with today, and sets episodes/chapters to that number. Progress
+  only moves forward, so opening an earlier episode again doesn't lower
+  it. Completed series aren't changed.
+- **Volumes (manga).** The manga site's pages don't show volume numbers,
+  so after each chapter update a box says volumes read wasn't changed,
+  with **Edit** (opens the entry in the Library) and **Snooze 1 hour**
+  (no more of these boxes for an hour). Set by `promptForVolumes`.
+- **▶ Watch ep N / Read ch N** in the detail sheet opens the episode or
+  chapter after your progress in its tab (`openNext` in `mediaTypes.js`).
+  Anime opens episode N directly and then checks the page's episode list;
+  manga reopens the last chapter page you read and presses its Next
+  button (or, with no last chapter, opens chapter N from the series
+  page's list). If it doesn't exist yet, a box says so (e.g. "Episode 5
+  isn't out yet — episode 4 is the latest"). Titles imported from MAL
+  that haven't been opened on the site offer a site search instead.
+- **🎲 Random** (next to the sort chips) picks one entry by type (Manga /
+  Anime) and status (Plan to Read/Watch, Reading/Watching — both on by
+  default; none chosen in a row means any) and opens its details, where
+  ▶ Watch/Read takes you to the next episode/chapter and **🎲 Again**
+  picks another. Picks don't repeat until every match has been shown.
 
 ## Name vs. dedup key
 
@@ -484,10 +524,9 @@ so nothing renders blank.
   editor (add/remove free-text tags), a tappable link to the original
   page URL, and a **Delete** button that removes just that one entry and
   its local thumbnail after a confirmation prompt (Google Drive is left
-  untouched). New entries default to `read_status: 'read'` rather than
-  unset, since you're actively viewing the page as it's being saved —
-  "already read/watched" is the sensible default over making every new
-  entry start as something you'd have to manually mark. Tags are stored
+  untouched). New entries start as Plan to Read/Watch and move to
+  Reading/Watching when you open an episode or chapter (see "Progress
+  while browsing" above). Tags are stored
   as a simple comma-separated field rather
   than a separate table — fine at personal-library scale, and the
   distinct-tag list for the filter row is just computed from whatever's

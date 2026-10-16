@@ -20,10 +20,14 @@ import {
   insertEntry,
   adoptImportedEntry,
   setMalId,
+  updateEntryFields,
+  getSetting,
+  setSetting,
   markSynced,
   markSyncFailed,
 } from './db';
 import { isImportedSourceId } from './malList';
+import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
@@ -346,14 +350,27 @@ export default function MediaWebView({
   onTabBarActivity,
   initialUrl = null,
   onPageChange,
+  openRequest = null,
+  onOpenHandled,
 }) {
   const webviewRef = useRef(null);
+  // "Watch next" / "Read next" from the Library (App.js passes it as
+  // openRequest: { id, url, checkJs, expect }): the page to open, and a
+  // script to run once it has loaded — on the page whose URL contains
+  // `expect` — that moves on to the wanted episode/chapter or reports it
+  // doesn't exist yet (see openNext in mediaTypes.js).
+  const handledOpenId = useRef(openRequest ? openRequest.id : null);
+  const pendingOpenCheck = useRef(
+    openRequest?.checkJs ? { js: openRequest.checkJs, expect: openRequest.expect } : null
+  );
+  const viewInLibraryRef = useRef(onViewInLibrary);
+  viewInLibraryRef.current = onViewInLibrary;
   // The Reverse button's search window (ReverseSearch.js).
   const [reverseVisible, setReverseVisible] = useState(false);
   // First page: initialUrl (the page this tab was on before Data saver
   // unloaded it — App.js) or the type's start page. Fixed at mount; a new
   // source would reload the page.
-  const [startSource] = useState(() => ({ uri: initialUrl || config.startUrl }));
+  const [startSource] = useState(() => ({ uri: openRequest?.url || initialUrl || config.startUrl }));
   // Latest onPageChange, for the navigation handler below.
   const pageChangeRef = useRef(onPageChange);
   pageChangeRef.current = onPageChange;
@@ -496,6 +513,65 @@ export default function MediaWebView({
     }
   }, [searchQuery, config, logDebug]);
 
+  // After a chapter update on a site whose pages don't show volume
+  // numbers (promptForVolumes in mediaTypes.js): says volumes read wasn't
+  // changed, unless snoozed for the hour.
+  const promptVolumes = useCallback((entry, chapter) => {
+    if (Date.now() < Number(getSetting('volumePromptSnoozedUntil', '0'))) return;
+    const volumes = entry.total_volumes
+      ? `${entry.progress_volumes || 0} of ${entry.total_volumes}`
+      : `${entry.progress_volumes || 0}`;
+    Alert.alert(
+      'Volumes read not updated',
+      `"${entry.title || entry.source_id}" is now at chapter ${chapter}. This site doesn't show volume numbers, so volumes read (${volumes}) wasn't changed. Update it in the Library if needed.`,
+      [
+        {
+          text: 'Snooze 1 hour',
+          onPress: () => setSetting('volumePromptSnoozedUntil', String(Date.now() + 60 * 60 * 1000)),
+        },
+        {
+          text: 'Edit',
+          onPress: () => viewInLibraryRef.current?.(`${entry.media_type}:${entry.source_id}`),
+        },
+        { text: 'OK', style: 'cancel' },
+      ]
+    );
+  }, []);
+
+  // Opening an episode/chapter page (extractProgress in mediaTypes.js)
+  // marks the series as Reading/Watching (filling an empty start date)
+  // and records the episode/chapter as your progress. Progress only moves
+  // forward, so going back to an earlier episode doesn't lower it.
+  // Completed series are left alone.
+  const applyProgress = useCallback(
+    (entry, number, url) => {
+      if (!entry || !number) return;
+      if (entry.read_status === 'read') {
+        logDebug(`${entry.source_id} is completed — progress left as it is.`);
+        return;
+      }
+      const current = entry.progress || 0;
+      const fields = {};
+      if (entry.read_status !== 'reading') {
+        fields.read_status = 'reading';
+        if (!entry.start_date) fields.start_date = todayString();
+      }
+      if (number > current) fields.progress = number;
+      if (number >= current && url !== entry.last_progress_url) fields.last_progress_url = url;
+      if (Object.keys(fields).length === 0) return;
+
+      updateEntryFields(entry.source_id, entry.media_type, fields);
+      logDebug(
+        `${entry.source_id}: ${fields.read_status ? 'now Reading/Watching, ' : ''}at ${number}${
+          fields.progress ? '' : ` (progress stays ${current})`
+        }.`
+      );
+      maybeBackupLibraryToDrive();
+      if (config.promptForVolumes && fields.progress) promptVolumes(entry, number);
+    },
+    [config, logDebug, promptVolumes]
+  );
+
   const checkUrlAndExtract = useCallback(
     (url) => {
       // Logged unconditionally (not just on a match) so the actual URL
@@ -537,6 +613,8 @@ export default function MediaWebView({
       // their MyAnimeList id (recorded before it was read): the page is
       // read again just to fill that in.
       const existing = getEntry(sourceId, config.key);
+      const extractProgress = source.extractProgress || config.extractProgress;
+      if (existing && extractProgress) applyProgress(existing, extractProgress(match, url), url);
       if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
         setCurrentEntryKey(`${config.key}:${sourceId}`);
@@ -559,7 +637,7 @@ export default function MediaWebView({
         webviewRef.current?.injectJavaScript(source.extractMetadataJs);
       }, 400);
     },
-    [config, logDebug]
+    [config, logDebug, applyProgress]
   );
 
   const handleNavigationStateChange = useCallback(
@@ -575,9 +653,29 @@ export default function MediaWebView({
       // thumbnail. Only extract once loading has actually finished.
       if (navState.loading) return;
       checkUrlAndExtract(navState.url);
+      const pending = pendingOpenCheck.current;
+      if (pending && navState.url.includes(pending.expect)) {
+        pendingOpenCheck.current = null;
+        setTimeout(() => webviewRef.current?.injectJavaScript(pending.js), 500);
+      }
     },
     [checkUrlAndExtract]
   );
+
+  // A new "Watch next" / "Read next" request while this tab is open (one
+  // that arrived with the tab was opened as its first page, above).
+  // App.js clears it once taken, so a reload of the tab doesn't repeat it.
+  useEffect(() => {
+    if (!openRequest) return;
+    if (handledOpenId.current !== openRequest.id) {
+      handledOpenId.current = openRequest.id;
+      pendingOpenCheck.current = openRequest.checkJs
+        ? { js: openRequest.checkJs, expect: openRequest.expect }
+        : null;
+      webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(openRequest.url)}; true;`);
+    }
+    onOpenHandled?.();
+  }, [openRequest, onOpenHandled]);
 
   // Blocks navigation to any domain other than the site's own (or, for
   // a multi-source type, any of its sources' domains) — this is what
@@ -656,6 +754,11 @@ export default function MediaWebView({
       // Scrolling / pull-at-top, for the auto-hiding tab row (App.js).
       if (payload.type === 'tabBar') {
         tabBarActivityRef.current?.(payload.kind);
+        return;
+      }
+
+      if (payload.type === 'episodeMissing') {
+        Alert.alert(config.key === 'anime' ? 'No next episode' : 'No next chapter', payload.message);
         return;
       }
 
@@ -777,6 +880,12 @@ export default function MediaWebView({
         } else {
           insertEntry({ ...details, mediaType: config.key, malId: payload.malId });
         }
+        // Recorded from an episode page: that's progress too.
+        const resolvedPage = resolveSource(config, pageUrl);
+        const extractProgress = resolvedPage && (resolvedPage.source.extractProgress || config.extractProgress);
+        if (extractProgress) {
+          applyProgress(getEntry(sourceId, config.key), extractProgress(resolvedPage.match, pageUrl), pageUrl);
+        }
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`
         );
@@ -817,7 +926,7 @@ export default function MediaWebView({
         inFlightSourceIds.current.delete(sourceId);
       }
     },
-    [config, isSignedInToGoogle, checkUrlAndExtract, logDebug]
+    [config, isSignedInToGoogle, checkUrlAndExtract, logDebug, applyProgress]
   );
 
   // A reverse search site may download a lot in the page (models, search

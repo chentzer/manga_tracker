@@ -24,6 +24,99 @@ const extra = Constants.expoConfig?.extra || {};
 const MANGA_SITE_URL = extra.mangaSiteUrl || 'https://your-manga-site.example.com';
 const ANIME_SITE_URL = extra.animeSiteUrl || 'https://your-anime-site.example.com';
 
+// Scripts for "Watch next" / "Read next" (EntryList.js → MediaWebView.js).
+// Each runs on the page that was opened and either moves on to the wanted
+// episode/chapter or reports { type: 'episodeMissing', message } back to
+// the app, which shows it. They wait for single-page-app content to
+// render first. (No backslashes: these are template strings.)
+
+// On a reader page: clicks its "Next chapter" button, or reports that
+// there's no next chapter when the button is disabled.
+function clickNextChapterJs(n) {
+  return `
+    (function() {
+      var tries = 0;
+      function report(message) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'episodeMissing', message: message }));
+      }
+      function go() {
+        var candidates = [].slice.call(document.querySelectorAll('button, a'));
+        var next = candidates.filter(function (b) {
+          var label = (b.getAttribute('aria-label') || b.textContent || '').trim();
+          return /^next( chapter)?$/i.test(label) || /^next[^a-z]*ch/i.test(label);
+        })[0];
+        if (!next) {
+          if (++tries < 25) { setTimeout(go, 400); return; }
+          report("Couldn't find a Next chapter button on this page.");
+          return;
+        }
+        if (next.disabled || next.getAttribute('aria-disabled') === 'true') {
+          report('Chapter ${n} isn' + "'" + 't out yet — chapter ${n - 1} is the latest.');
+          return;
+        }
+        next.click();
+      }
+      go();
+    })();
+    true;
+  `;
+}
+
+// On a series page: opens the chapter-N link from its chapter list, or
+// reports that it isn't listed on this page.
+function openChapterFromListJs(n) {
+  return `
+    (function() {
+      var tries = 0;
+      var wanted = new RegExp('-chapter-${n}($|[^0-9.])');
+      function go() {
+        var links = [].slice.call(document.querySelectorAll('a[href*="-chapter-"]'));
+        var link = links.filter(function (a) { return wanted.test(a.getAttribute('href')); })[0];
+        if (link) { location.href = link.href; return; }
+        if (++tries < 25) { setTimeout(go, 400); return; }
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'episodeMissing',
+          message: links.length
+            ? 'Chapter ${n} isn' + "'" + 't in the list on this page — pick it from the chapter list.'
+            : "Couldn't find a chapter list on this page.",
+        }));
+      }
+      go();
+    })();
+    true;
+  `;
+}
+
+// On an episode page: checks episode N is in the episode list (items
+// labelled "EP <number>"), or reports the latest one.
+function checkEpisodeJs(n) {
+  return `
+    (function() {
+      var tries = 0;
+      function check() {
+        var nums = [];
+        [].slice.call(document.querySelectorAll('img[alt], button, [class*="pisode"]')).forEach(function (el) {
+          var m = (el.getAttribute('alt') || el.textContent || '').trim().match(/^EP *([0-9]+)/i);
+          if (m) nums.push(Number(m[1]));
+        });
+        if (!nums.length) {
+          if (++tries < 25) setTimeout(check, 400);
+          return;
+        }
+        var latest = Math.max.apply(null, nums);
+        if (${n} > latest) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'episodeMissing',
+            message: 'Episode ${n} isn' + "'" + 't out yet — episode ' + latest + ' is the latest.',
+          }));
+        }
+      }
+      check();
+    })();
+    true;
+  `;
+}
+
 export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
@@ -71,6 +164,23 @@ export const MEDIA_TYPES = {
     // page, in which case the caller falls back to just the code.
     extractPageNumber: (match) => (match[2] ? `ch${match[2]}` : null),
     extractId: (match) => match[1],
+    // The chapter a reader page is on (whole chapters: 60.5 counts as 60),
+    // or null on the series page. Opening a chapter sets the entry to
+    // Reading and its chapters read (MediaWebView.js).
+    extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+    // This site's pages don't show volume numbers, so volumes read can't be
+    // kept up to date: after a chapter update the app says so, with a
+    // 1-hour snooze (MediaWebView.js).
+    promptForVolumes: true,
+    // "Read next" (Library): chapter `n` comes after the last chapter page
+    // you opened, via its Next button; without one (e.g. imported from
+    // MAL), from the series page's chapter list.
+    openNext: (entry, n) =>
+      entry.last_progress_url
+        ? { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) }
+        : { url: `${MANGA_SITE_URL}/title/${entry.source_id}`, checkJs: openChapterFromListJs(n) },
+    // For titles not opened on the site yet (imported from MAL).
+    buildSearchUrl: (title) => `${MANGA_SITE_URL}/browse?q=${encodeURIComponent(title)}`,
     // If your site shows popup/redirect ads, uncomment this to block
     // any navigation attempt to a domain other than the one above —
     // stops window.open popups, redirects, and hijacks regardless of
@@ -197,6 +307,20 @@ export const MEDIA_TYPES = {
     extractId: (match) => match[1],
     // Reverse of urlRegex/extractId, for a series id typed in manually.
     buildUrlFromId: (id) => `${ANIME_SITE_URL}/watch/${id}`,
+    // The episode an episode page is on (?ep=N), or null on the series
+    // page. Opening an episode sets the entry to Watching and its
+    // episodes watched (MediaWebView.js).
+    extractProgress: (match, url) => {
+      const ep = /\/watch\//.test(url) && url.match(/[?&]ep=(\d+)/);
+      return ep ? Number(ep[1]) : null;
+    },
+    // "Watch next" (Library): opens episode `n` and checks it exists.
+    openNext: (entry, n) => ({
+      url: `${ANIME_SITE_URL}/watch/${entry.source_id}?ep=${n}`,
+      checkJs: checkEpisodeJs(n),
+    }),
+    // For titles not opened on the site yet (imported from MAL).
+    buildSearchUrl: (title) => `${ANIME_SITE_URL}/search?query=${encodeURIComponent(title)}`,
     // If your site sometimes shows a "Continue"/age-gate/ad interstitial
     // before the real page loads, uncomment this and set it to the
     // button's exact visible text — it gets auto-clicked the moment it
