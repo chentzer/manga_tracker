@@ -362,7 +362,7 @@ function getTabSites(config) {
       homeUrl: i === 0 ? config.startUrl : `https://${s.domain}/`,
     }));
   }
-  const mainName = config.titleSearch?.[0]?.name;
+  const mainName = config.siteName || config.titleSearch?.[0]?.name;
   if (!config.extraSources || !mainName) return [];
   return [
     { name: mainName, domain: getHostname(config.startUrl), homeUrl: config.startUrl },
@@ -496,6 +496,9 @@ const MediaWebView = forwardRef(function MediaWebView({
   const tabBarActivityRef = useRef(onTabBarActivity);
   tabBarActivityRef.current = onTabBarActivity;
   const pendingSourceId = useRef(null);
+  // Set while waiting for a page that has to name its own series
+  // (seriesFromPage), with pendingSourceId null meanwhile.
+  const pendingFromPage = useRef(false);
   const pendingPageUrl = useRef(null);
   const currentUrlRef = useRef(null); // updated on every navigation, unlike pendingPageUrl
   // Tracks sourceIds currently being extracted/downloaded/uploaded, not
@@ -737,6 +740,23 @@ const MediaWebView = forwardRef(function MediaWebView({
       const { source, match } = resolved;
 
       const sourceId = source.extractId(match);
+      // A page whose address doesn't name its series (seriesFromPage in
+      // mediaTypes.js, e.g. a chapter page): its script reports the series
+      // and the chapter, handled with the details below.
+      if (!sourceId) {
+        setCurrentEntryKey(null);
+        if (!source.seriesFromPage || inFlightSourceIds.current.has(url)) return;
+        inFlightSourceIds.current.add(url);
+        pendingSourceId.current = null;
+        pendingPageUrl.current = url;
+        pendingFromPage.current = true;
+        logDebug('Matched a page without its series in the address — asking the page…');
+        setTimeout(() => {
+          webviewRef.current?.injectJavaScript(source.extractMetadataJs);
+        }, 400);
+        return;
+      }
+      pendingFromPage.current = false;
       // Already recorded entries are skipped, except ones still missing
       // their MyAnimeList id (recorded before it was read): the page is
       // read again just to fill that in.
@@ -951,7 +971,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         if (!ext) throw new Error("that isn't a picture the gallery can hold");
 
         const resolved = pageUrl ? resolveSource(config, pageUrl) : null;
-        const label = resolved ? resolved.source.extractId(resolved.match) : getHostname(pageUrl) || 'picture';
+        const label = (resolved && resolved.source.extractId(resolved.match)) || getHostname(pageUrl) || 'picture';
         const base = `${label}_${timeStamp()}`.replace(/[^A-Za-z0-9_.-]+/g, '_');
         finalPath = `${FileSystem.cacheDirectory}${base}.${ext}`;
         await FileSystem.moveAsync({ from: tempPath, to: finalPath });
@@ -1068,7 +1088,7 @@ const MediaWebView = forwardRef(function MediaWebView({
             const { source, match } = resolved;
             const code = source.extractId(match);
             const pageNumber = source.extractPageNumber ? source.extractPageNumber(match) : null;
-            fileNameBase = pageNumber ? `${code} -- ${pageNumber}` : code;
+            if (code) fileNameBase = pageNumber ? `${code} -- ${pageNumber}` : code;
           }
           fileNameBase = safeFileName(fileNameBase);
 
@@ -1089,10 +1109,31 @@ const MediaWebView = forwardRef(function MediaWebView({
         return;
       }
 
-      const sourceId = pendingSourceId.current;
-      if (!sourceId) return;
-
+      let sourceId = pendingSourceId.current;
       const pageUrl = pendingPageUrl.current;
+
+      // The answer from a page without its series in the address: the
+      // series (sourceId) and chapter (progress) come from the page.
+      if (!sourceId && pendingFromPage.current && pageUrl) {
+        pendingFromPage.current = false;
+        inFlightSourceIds.current.delete(pageUrl);
+        if (!payload.sourceId) {
+          logDebug(`Not recording from this page: ${payload.skip || 'no series found'}.`);
+          pendingPageUrl.current = null;
+          return;
+        }
+        sourceId = String(payload.sourceId);
+        const known = getEntry(sourceId, config.key);
+        setCurrentEntryKey(known ? `${config.key}:${sourceId}` : null);
+        if (known && payload.progress) applyProgress(known, payload.progress, pageUrl);
+        if (inFlightSourceIds.current.has(sourceId)) {
+          pendingPageUrl.current = null;
+          return;
+        }
+        inFlightSourceIds.current.add(sourceId);
+        pendingSourceId.current = sourceId;
+      }
+      if (!sourceId) return;
 
       // Re-check right before writing, closing the gap between the
       // nav-state check and this async step. An existing entry only gets
@@ -1153,7 +1194,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           title: payload.title,
           altTitle: payload.altTitle,
           author: payload.author,
-          sourceUrl: pageUrl,
+          sourceUrl: payload.sourceUrl || pageUrl,
           localImagePath: localPath,
         };
         const adopted = !!(imported && isImportedSourceId(imported.source_id));
@@ -1172,12 +1213,11 @@ const MediaWebView = forwardRef(function MediaWebView({
         // Recorded from an episode page: that's progress too.
         const resolvedPage = resolveSource(config, pageUrl);
         const extractProgress = resolvedPage && (resolvedPage.source.extractProgress || config.extractProgress);
-        if (extractProgress) {
+        const pageProgress = payload.progress || (extractProgress ? extractProgress(resolvedPage.match, pageUrl) : null);
+        if (pageProgress) {
           // A series new to the library has no record to be ahead of; one
           // imported from MAL does.
-          applyProgress(getEntry(sourceId, config.key), extractProgress(resolvedPage.match, pageUrl), pageUrl, {
-            fresh: !adopted,
-          });
+          applyProgress(getEntry(sourceId, config.key), pageProgress, pageUrl, { fresh: !adopted });
         }
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`

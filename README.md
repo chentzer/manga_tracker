@@ -54,14 +54,20 @@ adapt to whatever you actually use:
 
 1. **Your sites, in `.env`** — copy `.env.example` to `.env` (git-ignored,
    never committed) and set `MANGA_SITE_URL` and `ANIME_SITE_URL` to the
-   sites each tab should open, without a trailing slash. `app.config.js`
+   sites each tab should open, without a trailing slash. The Manga tab
+   has a second site too, `MANGA_SITE_2_URL`, in its ▾ site list. `app.config.js`
    passes them to `mediaTypes.js`; without them the tabs open the
    placeholder `*.example.com` domains. Restart `expo start` after
    changing `.env`.
 2. **`urlRegex`** for each type — the examples match:
-   - manga: `/title/<id>-<slug>` (series page) or
-     `/title/<id>-<slug>/<chapterId>-chapter-<n>` (reader page), so every
-     chapter of a series is one entry
+   - manga, first site: `/manga/<id>` (series page) or `/chapter/<id>`
+     (reader page, with the chapter's own id). A chapter's address doesn't
+     say which series it's from, so its script finds the series from the
+     page's link back to it and the chapter number from the page title,
+     and reports both (`seriesFromPage`); either way every chapter of a
+     series is one entry
+   - manga, second site (`extraSources`): `/title/<id>-<slug>` (series
+     page) or `/title/<id>-<slug>/<chapterId>-chapter-<n>` (reader page)
    - anime: `/watch/<id>/...` (episode page) or `/info/<id>/...` (series
      page) in the path, so every episode of a series is one entry
    Confirm these against your real site's actual URL structure and adjust
@@ -71,9 +77,12 @@ adapt to whatever you actually use:
    selectors (the page's `<h1>`, a "poster" image, `og:` meta tags, links
    into the site's author search) that suit many sites; if yours differs,
    inspect the real page (right-click the element → Inspect) and swap in
-   the right selector. Manga only records from the series page: reader
-   pages don't show the cover or author, so its script posts
-   `{ skip: '…' }` there and nothing is saved from that page.
+   the right selector. The first manga site's script fetches the series
+   page (server-rendered) from either kind of page: title in `<h1>`, the
+   cover `<img>` whose alt is the title, author/artist search links and
+   the MyAnimeList link. The second site only records from the series
+   page: its reader pages don't show the cover or author, so its script
+   posts `{ skip: '…' }` there and nothing is saved from that page.
 4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
    The ▾ site list at the top of the tab switches between them. The first
    is expected to be a Next.js comics site (series at `/series/<id>`,
@@ -523,7 +532,7 @@ so nothing renders blank.
   every backup on Connect (see "What gets backed up" above). The
   Library reloads afterwards (`reloadKey`), even if it's the open tab.
 - **Site list** (`getTabSites()` in `MediaWebView.js`) — tabs with more
-  than one site (Manhwa) have a ▾ button at the top left of the tab,
+  than one site (Manga, Manhwa) have a ▾ button at the top left of the tab,
   named after the site you're on, opening a menu of the tab's sites.
   Picking one opens its home page.
 - **Groups (Manga, Anime)** — `groupField` in mediaTypes.js,
@@ -638,7 +647,9 @@ so nothing renders blank.
   client-side over the already-loaded list, so toggling any of them is
   instant. Each row shows its score (★ 8) and progress (12/24 ep).
   Tapping a row opens a detail sheet showing the full title, author,
-  media type, code, MyAnimeList id, date added, sync status, the
+  media type, code, links to the title's page on the site (opens in its
+  tab) and on MyAnimeList (opens in the phone's browser), date added,
+  sync status, the
   MyAnimeList fields (score 1–10, progress, dates, rewatches, priority,
   comments — see "MyAnimeList export / import"), a status toggle with
   MyAnimeList's five statuses (labeled per
@@ -646,8 +657,7 @@ so nothing renders blank.
   manga, "Watching"/"Watched"/"Want to Watch" for anime, via each type's
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to
   unset), a tag
-  editor (add/remove free-text tags), a tappable link to the original
-  page URL, and a **Delete** button that removes just that one entry and
+  editor (add/remove free-text tags), and a **Delete** button that removes just that one entry and
   its local thumbnail after a confirmation prompt (Google Drive is left
   untouched). New entries start as Plan to Read/Watch and move to
   Reading/Watching when you open an episode or chapter (see "Progress

@@ -27,7 +27,7 @@ import {
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId } from './malList';
-import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
+import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString, malTypeOf } from './malFormat';
 import { groupKey, groupOrder, guessGroup } from './groups';
 import {
   buildArtistList,
@@ -576,6 +576,11 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
   );
 }
 
+// An entry's page on MyAnimeList (anime or manga list, by its MAL id).
+function malUrlOf(entry) {
+  return `https://myanimelist.net/${malTypeOf(entry.media_type)}/${entry.mal_id}`;
+}
+
 function DetailModal({
   entry,
   onClose,
@@ -585,6 +590,7 @@ function DetailModal({
   onUpdate,
   onResolveConflict,
   onOpenNext,
+  onOpenUrl,
   onSetRepeating,
   onPickAgain,
   onToggleFavorite,
@@ -637,10 +643,27 @@ function DetailModal({
               <Text style={styles.detailLabel}>Code</Text>
               <Text style={styles.detailValue}>{entry.source_id}</Text>
             </View>
+            {entry.source_url && !isImportedSourceId(entry.source_id) ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Site</Text>
+                <TouchableOpacity style={styles.detailLinkWrap} onPress={() => onOpenUrl(entry)}>
+                  <Text style={styles.detailLink} numberOfLines={1}>
+                    {entry.source_url.replace(/^https?:\/\/(www\.)?/i, '')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {entry.mal_id ? (
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>MyAnimeList</Text>
-                <Text style={styles.detailValue}>{entry.mal_id}</Text>
+                <TouchableOpacity
+                  style={styles.detailLinkWrap}
+                  onPress={() => Linking.openURL(malUrlOf(entry))}
+                >
+                  <Text style={styles.detailLink} numberOfLines={1}>
+                    {malUrlOf(entry).replace(/^https:\/\//, '')}
+                  </Text>
+                </TouchableOpacity>
               </View>
             ) : null}
             <View style={styles.detailRow}>
@@ -734,17 +757,6 @@ function DetailModal({
               multiline
               onCommit={(t) => update({ comments: t.trim() || null })}
             />
-
-            {entry.source_url ? (
-              <TouchableOpacity
-                style={styles.detailUrlButton}
-                onPress={() => Linking.openURL(entry.source_url)}
-              >
-                <Text style={styles.detailUrlText} numberOfLines={1}>
-                  {entry.source_url}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
           </ScrollView>
 
           {onPickAgain ? (
@@ -1870,6 +1882,10 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onUpdate={handleUpdate}
         onResolveConflict={handleResolveConflict}
         onOpenNext={handleOpenNext}
+        onOpenUrl={(item) => {
+          setSelectedKey(null);
+          onOpenInTab?.(item.media_type, { url: item.source_url });
+        }}
         onSetRepeating={handleSetRepeating}
         onPickAgain={randomOpened === 'entry' ? pickRandomNow : null}
         onToggleFavorite={handleToggleFavorite}
@@ -2270,6 +2286,9 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   detailUrlText: { color: '#0f3460', fontSize: 13 },
+  // Site / MyAnimeList rows: the link takes the rest of the row.
+  detailLinkWrap: { flex: 1, marginLeft: 16, alignItems: 'flex-end', justifyContent: 'center' },
+  detailLink: { fontSize: 14, color: '#0f3460', textDecorationLine: 'underline' },
   detailFooterRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   detailDeleteButton: {
     backgroundColor: '#fde2e2',
