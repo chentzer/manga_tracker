@@ -311,11 +311,18 @@ finish date and sets progress to the total when the total is known.
   page's list). If it doesn't exist yet, a box says so (e.g. "Episode 5
   isn't out yet — episode 4 is the latest"). Titles imported from MAL
   that haven't been opened on the site offer a site search instead.
-- **🎲 Random** (next to the sort chips) picks one entry by type (Manga /
-  Anime) and status (Plan to Read/Watch, Reading/Watching — both on by
-  default; none chosen in a row means any) and opens its details, where
-  ▶ Watch/Read takes you to the next episode/chapter and **🎲 Again**
-  picks another. Picks don't repeat until every match has been shown.
+- **🎲 Random** (the button at the top of the Library) picks one entry by
+  category (Manga / Manhwa / Anime), status (Read/Watched, Want to
+  Read/Watch, Reading/Watching) and rating (♥ Favourite, ★10 … ★6, ★1–5,
+  No score). Each row takes any number of choices, and **Any** (none
+  chosen) is where every row starts each time the window opens. It opens
+  the pick's details, where ▶ Watch/Read takes you to the next
+  episode/chapter and **🎲 Pick again** picks another. Picks don't repeat
+  until every match has been shown.
+- **♥ Favourites** — the ♥ button in an entry's details marks it as a
+  favourite (♥ on its Library row; stored as `favorite`, backed up with
+  the rest). The Filters' score row has **♥ Favourites** to show only
+  those.
 
 ## Name vs. dedup key
 
@@ -366,9 +373,12 @@ so nothing renders blank.
   and the debug log bar; both are hidden by default to keep the normal
   UI clean, and reappear instantly with no rebuild needed once the
   Settings toggle is flipped. The Android hardware
-  back button navigates the webview's own history (previous page,
-  previous search) instead of closing the app — only intercepted when
-  there's actually somewhere to go back to. Every URL checked is logged
+  back button navigates the open tab's own history (previous page,
+  previous search); once there's nowhere left to go back to (or on the
+  Library), it asks **Exit app?** instead of closing the app outright.
+  App.js owns the one back handler and calls the open tab's
+  `goBackIfPossible()` (exposed via ref), since every loaded tab's
+  webview stays mounted. Every URL checked is logged
   as "Checking URL: ..." regardless of whether it matches anything —
   useful for finding a distinctive marker in an interstitial's real URL
   (see `interstitialKeywords` below), since this webview has no visible
@@ -567,7 +577,9 @@ so nothing renders blank.
   re-trigger later (e.g. if you switch away and back to Library without
   it changing again). Otherwise: unified library view with
   filter chips (All / Manga
-  / Anime), a Newest/Top Rated sort toggle, a **Filter by Artist**
+  / Anime). Everything below them folds away into one **⚙︎ Filters** bar
+  (tap to open; it lists what's on, e.g. "⚙︎ Filters · ♥ · #action", and
+  ✕ clears it all): a Newest/Top Rated sort toggle, a **Filter by Artist**
   button that opens a modal listing every distinct artist across the
   whole library — grouped under a header per media type (only types
   with at least one saved artist show up), sorted alphabetically, tap a

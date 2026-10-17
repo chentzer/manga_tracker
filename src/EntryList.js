@@ -577,6 +577,7 @@ function DetailModal({
   onOpenNext,
   onSetRepeating,
   onPickAgain,
+  onToggleFavorite,
   onDelete,
   groupMembers = [],
   sameTypeEntries = [],
@@ -606,6 +607,15 @@ function DetailModal({
             <Text style={styles.detailTitle}>{entry.title || entry.source_id}</Text>
             {entry.alt_title ? <Text style={styles.detailAltTitle}>{entry.alt_title}</Text> : null}
             {entry.author ? <Text style={styles.detailAuthor}>{entry.author}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.heartButton, entry.favorite ? styles.heartButtonActive : null]}
+              onPress={() => onToggleFavorite(entry)}
+            >
+              <Text style={[styles.heartButtonText, entry.favorite ? styles.heartButtonTextActive : null]}>
+                {entry.favorite ? '♥ Favourite' : '♡ Add to Favourites'}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Type</Text>
@@ -727,6 +737,11 @@ function DetailModal({
             ) : null}
           </ScrollView>
 
+          {onPickAgain ? (
+            <TouchableOpacity style={styles.pickAgainButton} onPress={onPickAgain}>
+              <Text style={styles.pickAgainButtonText}>🎲 Pick again</Text>
+            </TouchableOpacity>
+          ) : null}
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailNextButton} onPress={() => onOpenNext(entry)}>
               <Text style={styles.detailNextButtonText}>
@@ -737,11 +752,6 @@ function DetailModal({
                     : `▶ ${entry.media_type === 'anime' ? 'Watch' : 'Read'} ${words.short} ${(entry.progress || 0) + 1}`}
               </Text>
             </TouchableOpacity>
-            {onPickAgain ? (
-              <TouchableOpacity style={styles.detailNextButton} onPress={onPickAgain}>
-                <Text style={styles.detailNextButtonText}>🎲 Again</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailDeleteButton} onPress={() => onDelete(entry)}>
@@ -768,8 +778,10 @@ const SORTS = [
   { key: 'newest', label: 'Newest' },
   { key: 'rating', label: 'Top Rated' },
 ];
+// key: a minimum score, or 'favorite' for ♥ favourites only.
 const RATING_FILTERS = [
   { key: null, label: 'Any score' },
+  { key: 'favorite', label: '♥ Favourites' },
   { key: 9, label: '★9+' },
   { key: 8, label: '★8+' },
   { key: 7, label: '★7+' },
@@ -785,14 +797,35 @@ const READ_STATUS_FILTERS = [
   { key: 'want_to_read', label: '📌 Want to Read/Watch' },
 ];
 
-// The 🎲 Random button: picks one entry matching the chosen types and
-// statuses (none chosen in a row = any), skipping ones already picked
-// this round until every match has been shown.
+// The 🎲 Random button's choices. Each row allows several choices at once
+// (e.g. Manga + Anime); a row with nothing chosen means "any".
 const RANDOM_STATUS_CHOICES = [
-  { key: 'want_to_read', label: '📌 Plan to Read/Watch' },
+  { key: 'read', label: '📖 Read/Watched' },
+  { key: 'want_to_read', label: '📌 Want to Read/Watch' },
   { key: 'reading', label: '▶️ Reading/Watching' },
 ];
-const DEFAULT_RANDOM_CHOICE = { types: [], statuses: ['want_to_read', 'reading'] };
+// 'favorite': ♥ favourite entries; 'low': scored 1–5; 0: no score.
+const RANDOM_RATING_CHOICES = [
+  { key: 'favorite', label: '♥ Favourite' },
+  { key: 10, label: '★10' },
+  { key: 9, label: '★9' },
+  { key: 8, label: '★8' },
+  { key: 7, label: '★7' },
+  { key: 6, label: '★6' },
+  { key: 'low', label: '★1–5' },
+  { key: 0, label: 'No score' },
+];
+const EMPTY_RANDOM_CHOICE = { types: [], statuses: [], ratings: [] };
+
+// Whether an entry matches the Random window's rating row (any of the
+// chosen ones; none chosen = any).
+function matchesRandomRating(entry, ratings) {
+  if (ratings.length === 0) return true;
+  const score = entry.score || 0;
+  return ratings.some((r) =>
+    r === 'favorite' ? !!entry.favorite : r === 'low' ? score >= 1 && score <= 5 : score === r
+  );
+}
 
 function toggled(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -808,34 +841,53 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
       <Text style={active ? styles.filterTextActive : styles.filterText}>{label}</Text>
     </TouchableOpacity>
   );
+  // "Any" chip for a row: on when nothing in the row is chosen; tapping it
+  // clears the row.
+  const anyChip = (list, clear) => chip(list.length === 0, 'Any', clear);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.detailOverlay}>
         <View style={styles.randomCard}>
-          <Text style={styles.detailTitle}>🎲 Random</Text>
-          <Text style={styles.randomHint}>Choose any number in each row — none means any.</Text>
-          <Text style={styles.detailLabel}>Type</Text>
-          <View style={styles.readStatusRow}>
-            {MEDIA_TYPE_LIST.map((m) =>
-              chip(choice.types.includes(m.key), m.label, () =>
-                onChange({ ...choice, types: toggled(choice.types, m.key) })
-              )
-            )}
-          </View>
-          <Text style={styles.detailLabel}>Status</Text>
-          <View style={styles.readStatusRow}>
-            {RANDOM_STATUS_CHOICES.map((s) =>
-              chip(choice.statuses.includes(s.key), s.label, () =>
-                onChange({ ...choice, statuses: toggled(choice.statuses, s.key) })
-              )
-            )}
-          </View>
+          <ScrollView>
+            <Text style={styles.detailTitle}>🎲 Random</Text>
+            <Text style={styles.randomHint}>Choose any number in each row — none means any.</Text>
+
+            <Text style={styles.detailLabel}>Category</Text>
+            <View style={styles.readStatusRow}>
+              {anyChip(choice.types, () => onChange({ ...choice, types: [] }))}
+              {MEDIA_TYPE_LIST.map((m) =>
+                chip(choice.types.includes(m.key), m.label, () =>
+                  onChange({ ...choice, types: toggled(choice.types, m.key) })
+                )
+              )}
+            </View>
+
+            <Text style={styles.detailLabel}>Status</Text>
+            <View style={styles.readStatusRow}>
+              {anyChip(choice.statuses, () => onChange({ ...choice, statuses: [] }))}
+              {RANDOM_STATUS_CHOICES.map((r) =>
+                chip(choice.statuses.includes(r.key), r.label, () =>
+                  onChange({ ...choice, statuses: toggled(choice.statuses, r.key) })
+                )
+              )}
+            </View>
+
+            <Text style={styles.detailLabel}>Rating</Text>
+            <View style={styles.readStatusRow}>
+              {anyChip(choice.ratings, () => onChange({ ...choice, ratings: [] }))}
+              {RANDOM_RATING_CHOICES.map((r) =>
+                chip(choice.ratings.includes(r.key), r.label, () =>
+                  onChange({ ...choice, ratings: toggled(choice.ratings, r.key) })
+                )
+              )}
+            </View>
+          </ScrollView>
           <View style={styles.detailFooterRow}>
-            <TouchableOpacity style={styles.detailDeleteButton} onPress={onClose}>
-              <Text style={styles.detailDeleteButtonText}>Cancel</Text>
+            <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onClose}>
+              <Text style={styles.detailCloseButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onPick}>
-              <Text style={styles.detailCloseButtonText}>Pick</Text>
+            <TouchableOpacity style={[styles.detailCloseButtonFlex, styles.randomPickButton]} onPress={onPick}>
+              <Text style={styles.detailCloseButtonText}>🎲 Pick</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -914,7 +966,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       const needle = artistFilter.trim().toLowerCase();
       if (!e.author || !e.author.toLowerCase().includes(needle)) return false;
     }
-    if (minRating !== null && (e.score || 0) < minRating) return false;
+    if (minRating === 'favorite') {
+      if (!e.favorite) return false;
+    } else if (minRating !== null && (e.score || 0) < minRating) return false;
     if (readStatusFilter !== null && e.read_status !== readStatusFilter) return false;
     if (conflictsOnly && !e.mal_conflicts) return false;
     if (tagFilters.length > 0) {
@@ -1146,7 +1200,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
   // 🎲 Random: its window, its choices, and what this round has shown.
   const [randomVisible, setRandomVisible] = useState(false);
-  const [randomChoice, setRandomChoice] = useState(DEFAULT_RANDOM_CHOICE);
+  const [randomChoice, setRandomChoice] = useState(EMPTY_RANDOM_CHOICE);
   const randomShown = useRef(new Set());
   const [randomOpened, setRandomOpened] = useState(false);
 
@@ -1154,10 +1208,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     const pool = getAllEntries(null).filter(
       (e) =>
         (randomChoice.types.length === 0 || randomChoice.types.includes(e.media_type)) &&
-        (randomChoice.statuses.length === 0 || randomChoice.statuses.includes(e.read_status))
+        (randomChoice.statuses.length === 0 || randomChoice.statuses.includes(e.read_status)) &&
+        matchesRandomRating(e, randomChoice.ratings)
     );
     if (pool.length === 0) {
-      Alert.alert('Nothing to pick', 'No entries match those choices.');
+      Alert.alert('Nothing to pick', 'Nothing in your Library matches those choices.');
       return;
     }
     const keyOf = (e) => `${e.media_type}:${e.source_id}`;
@@ -1174,12 +1229,42 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     setSelectedKey(keyOf(pick));
   }, [randomChoice, selectedKey]);
 
+  // Each press of 🎲 Random starts a new round with fresh choices.
   const openRandom = useCallback(() => {
     randomShown.current = new Set();
+    setRandomChoice(EMPTY_RANDOM_CHOICE);
     setRandomVisible(true);
   }, []);
 
-  // "Again" is only offered on details opened by Random.
+  // ♥ in an entry's details.
+  const handleToggleFavorite = useCallback(
+    (item) => {
+      updateEntryFields(item.source_id, item.media_type, { favorite: item.favorite ? 0 : 1 });
+      load();
+      backupSilently();
+    },
+    [load, backupSilently]
+  );
+
+  // The filter section folds away into one bar: what's on, plus ✕ to
+  // clear it all.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterSummary = [
+    ...(artistFilter ? [`🎭 ${artistFilter}`] : []),
+    ...(minRating === 'favorite' ? ['♥'] : minRating ? [`★${minRating}+`] : []),
+    ...(readStatusFilter ? [READ_STATUS_ICONS[readStatusFilter] || '📌'] : []),
+    ...(conflictsOnly ? ['⚠'] : []),
+    ...tagFilters.map((t) => `#${t}`),
+  ];
+  const clearFilters = () => {
+    setArtistFilter('');
+    setMinRating(null);
+    setReadStatusFilter(null);
+    setConflictsOnly(false);
+    setTagFilters([]);
+  };
+
+  // "Pick again" is only offered on details opened by Random.
   useEffect(() => {
     if (!selectedKey) setRandomOpened(false);
   }, [selectedKey]);
@@ -1266,6 +1351,10 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
   return (
     <View style={styles.container}>
+      <TouchableOpacity style={styles.randomTopButton} onPress={openRandom}>
+        <Text style={styles.randomTopButtonText}>🎲 Random</Text>
+      </TouchableOpacity>
+
       <View style={[styles.filterBar, styles.filterBarWrap]}>
         {FILTERS.map((f) => (
           <TouchableOpacity
@@ -1278,6 +1367,23 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         ))}
       </View>
 
+      {/* Filters fold away into one bar (summary of what's on + Clear), so
+          the list keeps the screen; tap the bar to show them all. */}
+      <View style={styles.filterToggleRow}>
+        <TouchableOpacity style={styles.filterToggle} onPress={() => setFiltersOpen((o) => !o)}>
+          <Text style={styles.filterToggleText} numberOfLines={1}>
+            ⚙︎ Filters{activeFilterSummary.length ? ` · ${activeFilterSummary.join(' · ')}` : ''}
+          </Text>
+          <Text style={styles.filterToggleArrow}>{filtersOpen ? '▴' : '▾'}</Text>
+        </TouchableOpacity>
+        {activeFilterSummary.length ? (
+          <TouchableOpacity style={styles.artistFilterClearButton} onPress={clearFilters}>
+            <Text style={styles.artistFilterClear}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {filtersOpen ? (
+      <View style={styles.filterPanel}>
       <View style={[styles.filterBar, styles.filterBarWrap]}>
         {SORTS.map((s) => (
           <TouchableOpacity
@@ -1288,9 +1394,6 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             <Text style={sort === s.key ? styles.filterTextActive : styles.filterText}>{s.label}</Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity style={styles.filterChip} onPress={openRandom}>
-          <Text style={styles.filterText}>🎲 Random</Text>
-        </TouchableOpacity>
         {conflictCount > 0 || conflictsOnly ? (
           <TouchableOpacity
             style={[styles.filterChip, styles.reviewChip, conflictsOnly && styles.filterChipActive]}
@@ -1380,6 +1483,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           ))}
         </ScrollView>
       ) : null}
+      </View>
+      ) : null}
 
       <FlatList
         style={styles.list}
@@ -1413,6 +1518,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
+                {item.favorite ? <Text style={styles.heartBadge}>♥</Text> : null}
                 {READ_STATUS_ICONS[item.read_status] ? (
                   <Text style={styles.readStatusBadge}>{READ_STATUS_ICONS[item.read_status]}</Text>
                 ) : null}
@@ -1443,6 +1549,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onOpenNext={handleOpenNext}
         onSetRepeating={handleSetRepeating}
         onPickAgain={randomOpened ? pickRandomNow : null}
+        onToggleFavorite={handleToggleFavorite}
         onDelete={handleDeleteEntry}
         groupMembers={groupMembers}
         sameTypeEntries={sameTypeEntries}
@@ -1639,8 +1746,52 @@ const styles = StyleSheet.create({
     padding: 16,
     marginHorizontal: 16,
     marginBottom: 32,
+    maxHeight: '85%',
   },
   randomHint: { fontSize: 12, color: '#888', marginTop: 4 },
+  randomPickButton: { backgroundColor: '#e94560' },
+  randomTopButton: {
+    marginHorizontal: 10,
+    marginTop: 8,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#e94560',
+  },
+  randomTopButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pickAgainButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#e8edf5',
+  },
+  pickAgainButtonText: { color: '#0f3460', fontWeight: '700', fontSize: 15 },
+  filterToggleRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 6 },
+  filterToggle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  filterToggleText: { flex: 1, color: '#333', fontSize: 13, fontWeight: '600' },
+  filterToggleArrow: { color: '#666', fontSize: 14, marginLeft: 8 },
+  filterPanel: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
+  heartBadge: { fontSize: 14, color: '#e94560' },
+  heartButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e94560',
+  },
+  heartButtonActive: { backgroundColor: '#e94560' },
+  heartButtonText: { color: '#e94560', fontWeight: '700', fontSize: 15 },
+  heartButtonTextActive: { color: '#fff' },
   progressBadge: { fontSize: 12, color: '#555' },
   scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   scoreChip: {

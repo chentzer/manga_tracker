@@ -6,6 +6,7 @@ import {
   StyleSheet,
   StatusBar,
   Alert,
+  BackHandler,
   Modal,
   Switch,
   ScrollView,
@@ -131,6 +132,27 @@ function AppContent({ notepadRefreshKey }) {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  // Each browsing tab's MediaWebView, for the back button below.
+  const webviewRefs = useRef({});
+
+  // The app's only hardwareBackPress listener. Lets the open tab's webview
+  // go back in its own history first; once it has nowhere left to go (or
+  // the Library is showing), asks before closing instead of letting
+  // Android close the app outright. Pop-ups (Settings, details, ...) close
+  // themselves on back before this is reached.
+  useEffect(() => {
+    const onBackPress = () => {
+      const webview = webviewRefs.current[tab];
+      if (webview && webview.goBackIfPossible()) return true;
+      Alert.alert('Exit app?', 'Are you sure you want to exit?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
+      ]);
+      return true;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [tab]);
 
   // The tab row hides on browsing tabs once the page has sat still (no
   // scrolling) for TAB_BAR_HIDE_MS — taps on the page don't count. Pulling
@@ -532,6 +554,9 @@ function AppContent({ notepadRefreshKey }) {
                 until the tab is opened (loadedTabs). */}
             {loadedTabs.includes(mediaConfig.key) ? (
               <MediaWebView
+                ref={(r) => {
+                  webviewRefs.current[mediaConfig.key] = r;
+                }}
                 config={mediaConfig}
                 isSignedInToGoogle={isSignedInToGoogle}
                 showDebugTools={showDebugTools}

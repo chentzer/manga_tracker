@@ -106,6 +106,8 @@ export function initDb() {
     // there (types with groupField; src/groups.js).
     'group_name TEXT',
     'group_order INTEGER',
+    // favorite: 1 = marked as a favourite (♥) in the Library, 0 = not.
+    'favorite INTEGER DEFAULT 0',
   ].forEach((column) => {
     try {
       db.execSync(`ALTER TABLE entries ADD COLUMN ${column};`);
@@ -409,6 +411,7 @@ export const EDITABLE_COLUMNS = [
   'anilist_checked',
   'group_name',
   'group_order',
+  'favorite',
 ];
 
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.

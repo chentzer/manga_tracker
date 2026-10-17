@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useEffect } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useCallback, useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,7 +7,6 @@ import {
   Text,
   Modal,
   ScrollView,
-  BackHandler,
   Alert,
   Platform,
   ToastAndroid,
@@ -387,7 +386,14 @@ function getDomainButtonMap(config) {
 // Renders a webview for ONE media type, driven entirely by its config
 // (see src/mediaTypes.js). Adding a new trackable type never touches
 // this file — just add an entry to MEDIA_TYPES.
-export default function MediaWebView({
+//
+// Exposes goBackIfPossible() via ref rather than registering its own
+// hardwareBackPress listener — App.js owns the single back handler
+// (needed to ask "Exit app?" instead of closing outright) and calls into
+// whichever tab is on screen. A listener per webview would go back in
+// whichever tab registered last, not the visible one, since every loaded
+// tab's webview stays mounted.
+const MediaWebView = forwardRef(function MediaWebView({
   config,
   isSignedInToGoogle,
   showDebugTools,
@@ -398,7 +404,7 @@ export default function MediaWebView({
   onPageChange,
   openRequest = null,
   onOpenHandled,
-}) {
+}, ref) {
   const webviewRef = useRef(null);
   // "Watch next" / "Read next" from the Library (App.js passes it as
   // openRequest: { id, url, checkJs, expect }): the page to open, and a
@@ -777,22 +783,22 @@ export default function MediaWebView({
     [config, allowedDomains]
   );
 
-  // Android hardware back button: go back in the webview's own history
-  // (previous manga page, previous search results, etc) instead of the
-  // default behavior of closing the app entirely. Only intercepts when
-  // there's actually somewhere to go back to — otherwise falls through
-  // to the default (letting the app close/navigate away normally).
-  useEffect(() => {
-    const onBackPress = () => {
-      if (canGoBack && webviewRef.current) {
-        webviewRef.current.goBack();
-        return true;
-      }
-      return false;
-    };
-    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => subscription.remove();
-  }, [canGoBack]);
+  // Android back button (App.js): back in the webview's own history
+  // (previous page, previous search results, etc) when there is one;
+  // false otherwise, so App.js asks whether to exit.
+  useImperativeHandle(
+    ref,
+    () => ({
+      goBackIfPossible: () => {
+        if (canGoBack && webviewRef.current) {
+          webviewRef.current.goBack();
+          return true;
+        }
+        return false;
+      },
+    }),
+    [canGoBack]
+  );
 
   // Saves a held picture (src/imageHold.js) to the phone's photo gallery,
   // named "<code>_<time>" on a title's page (e.g. "12345_20261014_220215"),
@@ -1244,7 +1250,9 @@ export default function MediaWebView({
       />
     </View>
   );
-}
+});
+
+export default MediaWebView;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
