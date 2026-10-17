@@ -279,6 +279,30 @@ function familyModeLockJs(siteUrl) {
   `;
 }
 
+// On `siteUrl`'s search page (`path`, search in ?<param>=): once the page
+// has loaded, its search box gets the whole search back — for sites that
+// write it into the box cut short. The box is the page's
+// input[name=<param>], or else its first search box.
+function keepWholeSearchJs(siteUrl, path, param) {
+  return `
+    (function() {
+      var host = location.hostname.replace(/^www[.]/, '');
+      if (host !== ${JSON.stringify(hostOf(siteUrl) || '')} || location.pathname !== ${JSON.stringify(path)}) return;
+      document.addEventListener('DOMContentLoaded', function() {
+        var match = location.search.match(new RegExp('[?&]' + ${JSON.stringify(param)} + '=([^&]*)'));
+        if (!match) return;
+        var box = document.querySelector('input[name=' + JSON.stringify(${JSON.stringify(param)}) + ']') ||
+          document.querySelector('input[type="search"]');
+        if (!box) return;
+        try {
+          box.value = decodeURIComponent(match[1].split('+').join(' '));
+        } catch (e) {}
+      });
+    })();
+    true;
+  `;
+}
+
 export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
@@ -451,6 +475,11 @@ export const MEDIA_TYPES = {
     ],
     // For titles not opened on a site yet (imported from MAL).
     buildSearchUrl: (title) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(title)}`,
+    // Some search pages write the search back into their box cut short
+    // (e.g. without quotes, so "under observation: ..." shows as "under"),
+    // and searching again from there loses the rest. This puts the whole
+    // search from the address back in the box.
+    beforeLoadJs: keepWholeSearchJs(MANHWA_SITE_URL, '/browse', 'search'),
     // First site: series at /series/<id>, chapters at /series/<id>/<key>
     // (no chapter number in the address, so progress isn't tracked there).
     // The code is the series id; on the second site it's the series slug,

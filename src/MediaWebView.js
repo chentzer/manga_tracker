@@ -35,6 +35,63 @@ import { suppressNextRelock } from './relockGuard';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, pictureExtension, timeStamp } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
+import { AD_BLOCK_JS, isAdUrl } from './adBlock';
+import { galleryFolderFor, saveFileToGallery, safeFileName } from './gallery';
+
+// Asks the page for what a screenshot's file name needs (App.js →
+// getScreenshotInfo): its URL, the page title, and the current position
+// of the video being watched — the one that's playing, or else the
+// largest one on the page. Only sees videos in the page itself; a player
+// embedded from another site (an iframe) reports no position, and the
+// name just leaves it out.
+function buildScreenshotInfoJs(requestId) {
+  return `
+    (function() {
+      var vids = document.querySelectorAll('video');
+      var video = null;
+      for (var i = 0; i < vids.length; i++) {
+        if (!vids[i].paused && !vids[i].ended) { video = vids[i]; break; }
+      }
+      if (!video) {
+        var bestArea = 0;
+        for (var j = 0; j < vids.length; j++) {
+          var r = vids[j].getBoundingClientRect();
+          if (r.width * r.height > bestArea) { bestArea = r.width * r.height; video = vids[j]; }
+        }
+      }
+      var ogTitle = document.querySelector('meta[property="og:title"]');
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'screenshotInfo',
+        requestId: ${JSON.stringify(requestId)},
+        url: location.href,
+        title: (ogTitle && ogTitle.content) || document.title || null,
+        currentTime: video && isFinite(video.currentTime) ? video.currentTime : null,
+      }));
+    })();
+    true;
+  `;
+}
+
+// Pauses every video/audio on the page, including inside same-site
+// frames (players hosted on another site can't be reached from here).
+export const PAUSE_MEDIA_JS = `
+  (function () {
+    function pauseIn(doc) {
+      try {
+        var media = doc.querySelectorAll('video, audio');
+        for (var i = 0; i < media.length; i++) {
+          try { media[i].pause(); } catch (e) {}
+        }
+        var frames = doc.querySelectorAll('iframe');
+        for (var j = 0; j < frames.length; j++) {
+          try { if (frames[j].contentDocument) pauseIn(frames[j].contentDocument); } catch (e) {}
+        }
+      } catch (e) {}
+    }
+    pauseIn(document);
+  })();
+  true;
+`;
 
 // Which optional controls to show (Settings → Buttons). Each also needs
 // the type to support it: several sites for the site list, savePageImage
@@ -404,8 +461,13 @@ const MediaWebView = forwardRef(function MediaWebView({
   onPageChange,
   openRequest = null,
   onOpenHandled,
+  blockAds = true,
 }, ref) {
   const webviewRef = useRef(null);
+  // Pending getScreenshotInfo() calls, keyed by request id, resolved when
+  // the page answers with a 'screenshotInfo' message.
+  const screenshotRequests = useRef(new Map());
+  const screenshotRequestCounter = useRef(0);
   // "Watch next" / "Read next" from the Library (App.js passes it as
   // openRequest: { id, url, checkJs, expect }): the page to open, and a
   // script to run once it has loaded — on the page whose URL contains
@@ -770,6 +832,11 @@ const MediaWebView = forwardRef(function MediaWebView({
       if (config.blockedUrlPatterns && config.blockedUrlPatterns.some((p) => p.test(request.url))) {
         return false;
       }
+      // Known ad networks (adBlock.js) are never opened, on any tab.
+      if (blockAds && isAdUrl(request.url)) {
+        logDebug(`Ad blocked: page ${request.url}`);
+        return false;
+      }
       if (!config.blockExternalNavigation) return true;
       const requestHostname = getHostname(request.url);
       // Also allow non-http(s) schemes (e.g. about:blank, data:) through
@@ -780,7 +847,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         (domain) => requestHostname === domain || requestHostname.endsWith(`.${domain}`)
       );
     },
-    [config, allowedDomains]
+    [config, allowedDomains, blockAds, logDebug]
   );
 
   // Android back button (App.js): back in the webview's own history
@@ -796,12 +863,53 @@ const MediaWebView = forwardRef(function MediaWebView({
         }
         return false;
       },
+      // For App.js's screenshot filing log (Settings → Show debug tools).
+      logDebug: (message) => logDebug(message),
+      // Called by App.js when you switch to another tab or leave the app,
+      // so a video doesn't keep playing where you can't see it.
+      pauseMedia: () => {
+        webviewRef.current?.injectJavaScript(PAUSE_MEDIA_JS);
+      },
+      // For naming screenshots (App.js). Resolves to
+      // { code, pageNumber, title, currentTime } — any of them null when
+      // not available. Never rejects: if the page doesn't answer within
+      // 1.5s it falls back to the last known URL, without title/time.
+      // The title prefers the Library entry's (same name you see in the
+      // Library), falling back to the page's own title.
+      getScreenshotInfo: () =>
+        new Promise((resolve) => {
+          const requestId = String(++screenshotRequestCounter.current);
+          const finish = (page) => {
+            const url = (page && page.url) || currentUrlRef.current;
+            const resolved = url ? resolveSource(config, url) : null;
+            const code = resolved ? resolved.source.extractId(resolved.match) : null;
+            const pageNumber =
+              resolved && resolved.source.extractPageNumber ? resolved.source.extractPageNumber(resolved.match) : null;
+            const entry = code ? getEntry(code, config.key) : null;
+            resolve({
+              code: code || null,
+              pageNumber: pageNumber || null,
+              title: (entry && entry.title) || (page && page.title) || null,
+              currentTime: page && typeof page.currentTime === 'number' ? page.currentTime : null,
+            });
+          };
+          const timer = setTimeout(() => {
+            screenshotRequests.current.delete(requestId);
+            finish(null);
+          }, 1500);
+          screenshotRequests.current.set(requestId, (page) => {
+            clearTimeout(timer);
+            finish(page);
+          });
+          webviewRef.current?.injectJavaScript(buildScreenshotInfoJs(requestId));
+        }),
     }),
-    [canGoBack]
+    [canGoBack, config, logDebug]
   );
 
-  // Saves a held picture (src/imageHold.js) to the phone's photo gallery,
-  // named "<code>_<time>" on a title's page (e.g. "12345_20261014_220215"),
+  // Saves a held picture (src/imageHold.js) to this tab's gallery folder
+  // (e.g. Pictures/Manga Tracker/Manga/, gallery.js), named
+  // "<code>_<time>" on a title's page (e.g. "12345_20261014_220215"),
   // else "<site>_<time>".
   const savingHeldPicture = useRef(false);
   const saveHeldPicture = useCallback(
@@ -848,8 +956,9 @@ const MediaWebView = forwardRef(function MediaWebView({
         finalPath = `${FileSystem.cacheDirectory}${base}.${ext}`;
         await FileSystem.moveAsync({ from: tempPath, to: finalPath });
         tempPath = null;
-        await MediaLibrary.saveToLibraryAsync(finalPath);
-        toast('Saved to your photo gallery');
+        const folder = galleryFolderFor(config.label);
+        await saveFileToGallery(finalPath, folder);
+        toast(`Saved to ${folder}`);
         logDebug(`Hold to save: saved "${base}.${ext}".`);
       } catch (err) {
         toast(`Couldn't save the picture (${err.message}).`, true);
@@ -876,6 +985,21 @@ const MediaWebView = forwardRef(function MediaWebView({
       // without a full page load, which react-native-webview's
       // onNavigationStateChange never fires for. URL_WATCHER_JS below
       // polls for that and reports changes through this same channel.
+      if (payload.type === 'screenshotInfo') {
+        const callback = screenshotRequests.current.get(payload.requestId);
+        if (callback) {
+          screenshotRequests.current.delete(payload.requestId);
+          callback(payload);
+        }
+        return;
+      }
+
+      // Reported by AD_BLOCK_JS (adBlock.js) each time it stops something.
+      if (payload.type === 'adBlocked') {
+        logDebug(`Ad blocked: ${payload.what} ${payload.url}`);
+        return;
+      }
+
       if (payload.type === 'urlchange') {
         checkUrlAndExtract(payload.url);
         return;
@@ -895,7 +1019,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         }
         if (!payload.url && !payload.dataUrl) return;
         const pageUrl = currentUrlRef.current;
-        Alert.alert('Save picture?', 'Saves it to your photo gallery.', [
+        Alert.alert('Save picture?', `Saves it to your gallery in ${galleryFolderFor(config.label)}.`, [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Save', onPress: () => saveHeldPicture(payload, pageUrl) },
         ]);
@@ -946,13 +1070,19 @@ const MediaWebView = forwardRef(function MediaWebView({
             const pageNumber = source.extractPageNumber ? source.extractPageNumber(match) : null;
             fileNameBase = pageNumber ? `${code} -- ${pageNumber}` : code;
           }
+          fileNameBase = safeFileName(fileNameBase);
 
           const tempPath = `${FileSystem.cacheDirectory}${fileNameBase}.jpg`;
           await FileSystem.downloadAsync(payload.imageUrl, tempPath, {
             headers: currentUrlRef.current ? { Referer: currentUrlRef.current } : undefined,
           });
-          await MediaLibrary.saveToLibraryAsync(tempPath);
-          logDebug(`Saved current page image to your photo gallery as "${fileNameBase}".`);
+          const folder = galleryFolderFor(config.label);
+          try {
+            await saveFileToGallery(tempPath, folder);
+          } finally {
+            FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+          }
+          logDebug(`Saved current page image to ${folder} as "${fileNameBase}".`);
         } catch (err) {
           logDebug(`Save image FAILED: ${err.message}`);
         }
@@ -1241,12 +1371,13 @@ const MediaWebView = forwardRef(function MediaWebView({
           (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '') +
           getBeforeLoadJs(config) +
           TAB_BAR_WATCH_JS +
-          IMAGE_HOLD_JS
+          IMAGE_HOLD_JS +
+          (blockAds ? AD_BLOCK_JS : '')
         }
-        // The tab-row watcher and hold-to-save again once the page has
-        // loaded, since Android doesn't always run the script above (it
-        // only runs once per page).
-        injectedJavaScript={TAB_BAR_WATCH_JS + IMAGE_HOLD_JS}
+        // The tab-row watcher, hold-to-save and ad blocking again once the
+        // page has loaded, since Android doesn't always run the script
+        // above (each only runs once per page).
+        injectedJavaScript={TAB_BAR_WATCH_JS + IMAGE_HOLD_JS + (blockAds ? AD_BLOCK_JS : '')}
       />
     </View>
   );

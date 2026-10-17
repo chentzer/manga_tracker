@@ -6,6 +6,8 @@ import {
   entryExists,
   restoreEntry,
   EDITABLE_COLUMNS,
+  getArtistFavorites,
+  setArtistFavorite,
 } from './db';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
@@ -79,6 +81,10 @@ function backupFileNameFor(mediaType) {
   return `${mediaType}-backup.csv`;
 }
 
+// Favourite artists (artists.js) go to their own file.
+const ARTIST_FAVORITES_FILE = 'favorite-artists.csv';
+const ARTIST_FAVORITE_COLUMNS = ['media_type', 'name', 'favorite', 'updated_at'];
+
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
   const str = String(value);
@@ -89,6 +95,10 @@ function csvEscape(value) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
   return str;
+}
+
+function rowsToCsv(rows, columns) {
+  return [columns.join(','), ...rows.map((row) => columns.map((col) => csvEscape(row[col])).join(','))].join('\n');
 }
 
 export function entriesToCsv(mediaType = null) {
@@ -161,6 +171,44 @@ function parseCsvToObjects(text) {
   });
 }
 
+// Two-way sync of favourite artists with Drive's favorite-artists.csv.
+// Every artist ever favourited is listed with favorite 1 or 0 and when
+// that last changed; for each artist, whichever side changed it more
+// recently wins (so un-favouriting on one phone isn't undone by an
+// older "favourite" in Drive). Drive then gets the merged list.
+export function mergeArtistFavorites(localRows, remoteCsvText) {
+  const keyOf = (row) => `${row.media_type}\u0000${row.name}`;
+  const merged = new Map(localRows.map((row) => [keyOf(row), { ...row }]));
+  const newerFromDrive = [];
+  if (remoteCsvText) {
+    parseCsvToObjects(remoteCsvText).forEach((row) => {
+      if (!row.media_type || !row.name) return;
+      const remote = {
+        media_type: row.media_type,
+        name: row.name,
+        favorite: row.favorite === '1' ? 1 : 0,
+        updated_at: Number(row.updated_at) || 0,
+      };
+      const local = merged.get(keyOf(remote));
+      if (!local || remote.updated_at > local.updated_at) {
+        merged.set(keyOf(remote), remote);
+        newerFromDrive.push(remote);
+      }
+    });
+  }
+  return { rows: Array.from(merged.values()), newerFromDrive };
+}
+
+async function syncArtistFavorites() {
+  const remoteCsvText = await fetchBackupCsvContent(ARTIST_FAVORITES_FILE);
+  const { rows, newerFromDrive } = mergeArtistFavorites(getArtistFavorites(), remoteCsvText);
+  newerFromDrive.forEach((row) => setArtistFavorite(row.media_type, row.name, row.favorite, row.updated_at));
+  if (rows.length > 0 || remoteCsvText) {
+    await backupCsvToDrive(rowsToCsv(rows, ARTIST_FAVORITE_COLUMNS), ARTIST_FAVORITES_FILE);
+  }
+  return newerFromDrive.length;
+}
+
 // Call this after any change (new entry, rating, etc). Returns a result
 // object rather than throwing/swallowing silently, so callers (e.g. the
 // debug log in MediaWebView.js) can actually show what happened instead
@@ -189,6 +237,12 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
       errors.push(`${mediaConfig.label}: ${err.message}`);
     }
     job.step();
+  }
+  try {
+    await syncArtistFavorites();
+  } catch (err) {
+    console.warn('Drive backup failed for favourite artists:', err.message);
+    errors.push(`Favourite artists: ${err.message}`);
   }
   job.end({ ok: errors.length === 0, error: errors.join('\n') });
   return {
@@ -346,6 +400,14 @@ async function runRestore(onProgress, job) {
       restored++;
       if (onProgress) onProgress(processed, processed);
     }
+  }
+
+  // Favourite artists too (newest change wins, see mergeArtistFavorites).
+  // A failure here doesn't undo the entries restored above.
+  try {
+    await syncArtistFavorites();
+  } catch (err) {
+    console.warn('Restoring favourite artists failed:', err.message);
   }
 
   return { restored, skipped, imagesRestored };

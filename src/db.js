@@ -153,6 +153,19 @@ export function initDb() {
       value TEXT
     );
   `);
+  // Favourite artists (the Library's Artists view, artists.js), per media
+  // type. Un-favourited artists are kept with favorite = 0 rather than
+  // deleted, and updated_at (ms) says when that last changed, so the
+  // Drive backup can tell which side's change is newer (backup.js).
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS artist_favorites (
+      media_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      favorite INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (media_type, name)
+    );
+  `);
   // Notepad: only ever holds notes written on THIS device.
   // Drive keeps a merged copy of every device's notes (see notepadSync.js),
   // but nothing is ever restored from Drive into this table — each
@@ -353,6 +366,22 @@ export function setSetting(key, value) {
     `INSERT INTO settings (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [key, value]
+  );
+}
+
+// [{ media_type, name, favorite, updated_at }] — every artist ever
+// favourited, including ones since un-favourited (favorite = 0).
+export function getArtistFavorites(mediaType = null) {
+  return mediaType
+    ? db.getAllSync('SELECT * FROM artist_favorites WHERE media_type = ?', [mediaType])
+    : db.getAllSync('SELECT * FROM artist_favorites');
+}
+
+export function setArtistFavorite(mediaType, name, favorite, updatedAt = Date.now()) {
+  db.runSync(
+    `INSERT INTO artist_favorites (media_type, name, favorite, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(media_type, name) DO UPDATE SET favorite = excluded.favorite, updated_at = excluded.updated_at`,
+    [mediaType, name, favorite ? 1 : 0, updatedAt]
   );
 }
 

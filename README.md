@@ -155,7 +155,9 @@ Two separate things sync to Drive once connected, both automatic:
   `last_progress_url`, written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
   `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
-  so each type's data stays easy to open/browse individually. Each file
+  so each type's data stays easy to open/browse individually. Favourite
+  artists (the Library's Artists view) go to `MangaTracker/favorite-artists.csv`;
+  for each artist, whichever side changed it more recently wins. Each file
   is overwritten in place — not a growing pile of dated backups — and
   refreshes automatically after every new entry or rating change, plus
   on demand via **Backup Now** in Settings (⚙️, top right).
@@ -361,8 +363,8 @@ so nothing renders blank.
   yourself. A "Save Page Image" button (types with
   `savePageImage: true` only — Manga in the example)
   grabs the largest currently-rendered image on the page (not necessarily
-  the cover — whatever's actually on screen) and saves it straight to the
-  phone's photo gallery via `expo-media-library`, named `code -- page`
+  the cover — whatever's actually on screen) and saves it to the tab's
+  gallery folder (`Pictures/Manga Tracker/<tab>/`, `src/gallery.js`), named `code -- page`
   (e.g. `abc12 -- ch60`) using the current URL matched against the type's
   `urlRegex`/`extractPageNumber` — falls back to a timestamp if the
   current page doesn't match the pattern at all. Accepts a
@@ -537,10 +539,50 @@ so nothing renders blank.
   `group_order`, both in the Drive backup.
 - **Hold to save a picture** (`src/imageHold.js`) — on any browsing tab,
   hold a finger on a picture for about half a second (without moving) and
-  the app asks to save it to your photo gallery. It finds the picture under
+  the app asks to save it to the tab's gallery folder. It finds the picture under
   the finger even behind a see-through layer (a full-screen viewer), and
   also takes a video's poster or a background picture; small icons are
   skipped. Saved as `<code>_<time>` on a title's page, else `<site>_<time>`.
+- **Gallery folders** (`src/gallery.js`) — everything the app saves goes
+  into `Pictures/Manga Tracker/`, one folder per tab (e.g.
+  `Pictures/Manga Tracker/Manga/`), instead of loose in the camera roll.
+- **Screenshot filing** (`src/screenshots.js`) — a phone screenshot taken
+  in the app is moved into that tab's gallery folder (the Library's go in
+  `Pictures/Manga Tracker/` itself), named after what's on screen:
+  `<code>--<page>_<title>` while reading, `<time>_<code>_<title>` while
+  watching (the video's position, e.g. `12m34s`). Android can't save a
+  screenshot anywhere else, so the app finds the one it just saved, copies
+  it into the folder and removes the original — Android asks before each
+  removal unless **Settings → Delete screenshots without asking** (Media
+  management access, Android 12+) is on. Needs full photo access, asked
+  for once; without it screenshots stay where Android put them.
+- **Block ads** (`src/adBlock.js`, Settings → App, on by default) — pages
+  on known ad networks never open, and in each page pop-ups that open
+  without a tap, ad scripts/frames/images, the page's requests to ad
+  networks, links to them and the usual ad boxes are blocked or hidden.
+  Frames from other sites can still show their own ads; the debug log
+  lists what was blocked.
+- **Videos pause** when you switch to another tab or leave the app, so
+  nothing plays where you can't see it; they resume from the same spot.
+- **Hidden from Recents** (`withHideFromRecents.js`, Android 13+) — the
+  app's content doesn't show in the recent-apps preview, while
+  screenshots still work (Android's usual way, FLAG_SECURE, would block
+  both).
+- **Whole search kept in the search box** — some search pages write the
+  search back into their box cut short (e.g. "under observation: ..."
+  shows as "under"), so searching again from there would lose the rest;
+  the first Manhwa site's search page gets the whole search from its
+  address put back (`keepWholeSearchJs` in `src/mediaTypes.js`).
+- **Artists view** (`src/artists.js`) — with a type chosen in the Library
+  (Manga, Manhwa, Anime), **🎭 Artists** shows one row per artist credited
+  on that type's titles (searchable), with a picture from one of their
+  covers (preferring titles that are theirs alone) and how many titles.
+  Tapping one opens their details: **☆ Add to Favourites** (★ favourites
+  go to the top, backed up to Drive), **📚 Show their titles** (the list,
+  filtered to them) and **✥ Move picture** to choose which part of the
+  picture shows (drag and zoom; `src/FocusImage.js`, kept on this phone).
+  **🎲 Random** can pick an artist instead of a title (**Pick a: 🎭
+  Artist**), where the Rating row's ♥ means your ★ favourite artists.
 - **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
   lists of items (text or links, which open with a tap). The built-in
   **Inbox** is for jotting things down, and is where text and links
@@ -643,7 +685,8 @@ so nothing renders blank.
   **MyAnimeList** (export/import), then **App lock** (see `AppLock.js` below)
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
-  `MediaWebView.js`; off by default so the normal UI stays clean). Under
+  `MediaWebView.js`; off by default so the normal UI stays clean), **Block
+  ads** and **Delete screenshots without asking** (Android 12+). Under
   **Buttons**, switches hide the **Site list** and **Save Page Image** on
   the tabs that have them (all
   shown by default;
@@ -733,8 +776,10 @@ store review entirely, which suits a personal tracker like this well.
   cached for the whole session, since they expire after about an hour —
   `GoogleSignin.getTokens()` handles refreshing under the hood cheaply,
   so there's no real cost to always asking.
-- **Save Page Image** imports `expo-media-library/legacy`: from SDK 57 the
-  plain import's `saveToLibraryAsync` throws at runtime.
+- Saving to the gallery uses expo-media-library's new `Album` API
+  (`src/gallery.js`): from SDK 57 the plain import's `saveToLibraryAsync`
+  throws at runtime. MediaWebView still imports `expo-media-library/legacy`
+  for its photo-permission request.
 - File operations use `expo-file-system/legacy` rather than the plain
   `expo-file-system` import — SDK 54 replaced the old function-based API
   (`getInfoAsync`, `downloadAsync`, etc.) with a new `File`/`Directory`

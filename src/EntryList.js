@@ -29,6 +29,16 @@ import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId } from './malList';
 import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString } from './malFormat';
 import { groupKey, groupOrder, guessGroup } from './groups';
+import {
+  buildArtistList,
+  loadFavoriteArtists,
+  setFavoriteArtist,
+  loadPictureFocus,
+  focusFor,
+  savePictureFocus,
+  parseAuthors,
+} from './artists';
+import FocusImage from './FocusImage';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -815,7 +825,122 @@ const RANDOM_RATING_CHOICES = [
   { key: 'low', label: '★1–5' },
   { key: 0, label: 'No score' },
 ];
-const EMPTY_RANDOM_CHOICE = { types: [], statuses: [], ratings: [] };
+// What Random picks: a title, or an artist credited on the matching titles.
+const RANDOM_KIND_CHOICES = [
+  { key: 'entry', label: '📚 Title' },
+  { key: 'artist', label: '🎭 Artist' },
+];
+const EMPTY_RANDOM_CHOICE = { types: [], statuses: [], ratings: [], kind: 'entry' };
+const EMPTY_SET = new Set();
+
+// How many titles, e.g. "1 title" / "3 titles".
+function titleCount(n) {
+  return `${n} title${n === 1 ? '' : 's'}`;
+}
+
+// Details for one artist in the Artists view: their picture (tap to see
+// it whole; ✥ Move picture to choose which part shows in the list), how
+// many saved titles they're on, a Favourite toggle (favourites go to the
+// top of the list) and a button to list their titles.
+function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles, onClose, onPickAgain, focus, onSaveFocus }) {
+  const [fullImageVisible, setFullImageVisible] = useState(false);
+  // Moving the picture: the position being tried (null when not moving).
+  const [draftFocus, setDraftFocus] = useState(null);
+  const moving = draftFocus !== null;
+  useEffect(() => setDraftFocus(null), [artist?.name]);
+  if (!artist) return null;
+  return (
+    <Modal visible={!!artist} animationType="slide" onRequestClose={onClose} transparent>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailCard}>
+          <ScrollView scrollEnabled={!moving}>
+            {artist.cover && moving ? (
+              <>
+                {/* Same shape as the list's picture, so you see what the list will show. */}
+                <FocusImage uri={artist.cover} style={styles.focusEditor} focus={draftFocus} onPanFocus={setDraftFocus} />
+                <View style={styles.zoomRow}>
+                  <Text style={styles.linkHint}>Drag to move · zoom:</Text>
+                  {[1, 1.5, 2, 3].map((z) => (
+                    <TouchableOpacity
+                      key={z}
+                      style={[styles.zoomChip, (draftFocus.zoom || 1) === z && styles.zoomChipActive]}
+                      onPress={() => setDraftFocus((d) => ({ ...d, zoom: z }))}
+                    >
+                      <Text style={(draftFocus.zoom || 1) === z ? styles.zoomTextActive : styles.zoomText}>{z}×</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.linkHint}>This is how it shows in the list.</Text>
+                <View style={styles.focusButtons}>
+                  <TouchableOpacity style={styles.focusButton} onPress={() => setDraftFocus(null)}>
+                    <Text style={styles.focusButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.focusButton}
+                    onPress={() => {
+                      onSaveFocus(artist, null);
+                      setDraftFocus(null);
+                    }}
+                  >
+                    <Text style={styles.focusButtonText}>Centre</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.focusButton, styles.focusSave]}
+                    onPress={() => {
+                      onSaveFocus(artist, draftFocus);
+                      setDraftFocus(null);
+                    }}
+                  >
+                    <Text style={styles.focusSaveText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : artist.cover ? (
+              <TouchableOpacity onPress={() => setFullImageVisible(true)} activeOpacity={0.9}>
+                <FocusImage uri={artist.cover} style={styles.detailImage} focus={focus} />
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.detailImage, styles.thumbPlaceholder]} />
+            )}
+            {artist.cover && !moving ? (
+              <TouchableOpacity onPress={() => setDraftFocus(focus || { x: 0.5, y: 0.5, zoom: 1 })} hitSlop={6}>
+                <Text style={styles.moveText}>✥ Move picture</Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={styles.detailTitle}>{artist.name}</Text>
+            <Text style={styles.artistDetailCount}>{titleCount(artist.count)} saved</Text>
+
+            <TouchableOpacity
+              style={[styles.favoriteButton, isFavorite && styles.favoriteButtonActive]}
+              onPress={() => onToggleFavorite(artist.name)}
+            >
+              <Text style={[styles.favoriteButtonText, isFavorite && styles.favoriteButtonTextActive]}>
+                {isFavorite ? '★ Favourite' : '☆ Add to Favourites'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.detailUrlButton} onPress={() => onShowTitles(artist.name)}>
+              <Text style={styles.detailUrlText}>📚 Show their titles</Text>
+            </TouchableOpacity>
+          </ScrollView>
+
+          {onPickAgain ? (
+            <TouchableOpacity style={styles.pickAgainButton} onPress={onPickAgain}>
+              <Text style={styles.pickAgainButtonText}>🎲 Pick again</Text>
+            </TouchableOpacity>
+          ) : null}
+          <View style={styles.detailFooterRow}>
+            <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onClose}>
+              <Text style={styles.detailCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <FullImageModal uri={artist.cover} visible={fullImageVisible} onClose={() => setFullImageVisible(false)} />
+    </Modal>
+  );
+}
 
 // Whether an entry matches the Random window's rating row (any of the
 // chosen ones; none chosen = any).
@@ -881,6 +1006,17 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
                 )
               )}
             </View>
+
+            <Text style={styles.detailLabel}>Pick a</Text>
+            <View style={styles.readStatusRow}>
+              {RANDOM_KIND_CHOICES.map((k) =>
+                chip(choice.kind === k.key, k.label, () => onChange({ ...choice, kind: k.key }))
+              )}
+            </View>
+            <Text style={styles.randomHint}>
+              Artist picks someone credited on your titles that match the choices above (♥ Favourite:
+              your ★ favourite artists).
+            </Text>
           </ScrollView>
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onClose}>
@@ -1198,36 +1334,145 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [handleUpdate]
   );
 
+  // Artists view (artists.js): with a type chosen, 🎭 Artists shows one
+  // row per artist instead of the titles. Per type: 'artists' or 'items'.
+  const [sectionViews, setSectionViews] = useState({});
+  const setSectionView = useCallback((type, view) => setSectionViews((v) => ({ ...v, [type]: view })), []);
+  const showingArtists = !!filter && sectionViews[filter] === 'artists';
+  // Favourite artists per type, as Sets of names.
+  const loadAllFavorites = () => {
+    const all = {};
+    MEDIA_TYPE_LIST.forEach((m) => {
+      all[m.key] = loadFavoriteArtists(m.key);
+    });
+    return all;
+  };
+  const [favoritesByType, setFavoritesByType] = useState(loadAllFavorites);
+  const favsOf = (type) => favoritesByType[type] || EMPTY_SET;
+  // Hand-moved picture positions (FocusImage.js / artists.js).
+  const [pictureFocus, setPictureFocus] = useState(() => loadPictureFocus());
+  // Each artist's current picture per type, kept between reloads.
+  const coverPicks = useRef({});
+  const artistsOf = useCallback(
+    (type, list) => {
+      if (!coverPicks.current[type]) coverPicks.current[type] = {};
+      return buildArtistList(list.filter((e) => e.media_type === type), favoritesByType[type] || EMPTY_SET, coverPicks.current[type]);
+    },
+    [favoritesByType]
+  );
+  const artistList = useMemo(() => (filter ? artistsOf(filter, entries) : []), [filter, entries, artistsOf]);
+  // Search box above the Artists list; cleared when the type changes.
+  const [peopleQuery, setPeopleQuery] = useState('');
+  useEffect(() => setPeopleQuery(''), [filter]);
+  const shownArtists = useMemo(() => {
+    const q = peopleQuery.trim().toLowerCase();
+    return q ? artistList.filter((a) => a.name.toLowerCase().includes(q)) : artistList;
+  }, [artistList, peopleQuery]);
+  // The artist whose details are open: { type, name }.
+  const [selectedArtistRef, setSelectedArtistRef] = useState(null);
+  const selectedArtist = useMemo(() => {
+    if (!selectedArtistRef) return null;
+    const list = artistsOf(selectedArtistRef.type, getAllEntries(selectedArtistRef.type));
+    return list.find((a) => a.name === selectedArtistRef.name) || null;
+  }, [selectedArtistRef, artistsOf, entries]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleFavoriteArtist = useCallback(
+    (name) => {
+      if (!selectedArtistRef) return;
+      const type = selectedArtistRef.type;
+      setFavoriteArtist(name, !favsOf(type).has(name), type);
+      setFavoritesByType(loadAllFavorites());
+      backupSilently();
+    },
+    [selectedArtistRef, favoritesByType, backupSilently] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const saveFocus = useCallback(
+    (artist, focus) => {
+      if (!selectedArtistRef) return;
+      setPictureFocus(savePictureFocus(selectedArtistRef.type, artist.name, artist.cover, focus));
+    },
+    [selectedArtistRef]
+  );
+  // From an artist's details: back to that type's titles, filtered to them.
+  const showArtistTitles = useCallback(
+    (name) => {
+      const type = selectedArtistRef ? selectedArtistRef.type : filter;
+      setSelectedArtistRef(null);
+      setRandomOpened(false);
+      setFilter(type);
+      setSectionView(type, 'items');
+      setArtistFilter(name);
+    },
+    [selectedArtistRef, filter, setSectionView]
+  );
+
   // 🎲 Random: its window, its choices, and what this round has shown.
   const [randomVisible, setRandomVisible] = useState(false);
   const [randomChoice, setRandomChoice] = useState(EMPTY_RANDOM_CHOICE);
   const randomShown = useRef(new Set());
+  // What Random last opened ('entry' / 'artist'), for "Pick again".
   const [randomOpened, setRandomOpened] = useState(false);
 
+  // Picks with the Random window's choices and opens the pick's details: a
+  // title, or (Pick a: Artist) an artist credited on the matching titles —
+  // where the Rating row's ♥ means your ★ favourite artists. Skips what
+  // this round has shown until every match has been, and never repeats
+  // the one on screen.
   const pickRandomNow = useCallback(() => {
-    const pool = getAllEntries(null).filter(
+    const byType = getAllEntries(null).filter(
       (e) =>
         (randomChoice.types.length === 0 || randomChoice.types.includes(e.media_type)) &&
-        (randomChoice.statuses.length === 0 || randomChoice.statuses.includes(e.read_status)) &&
-        matchesRandomRating(e, randomChoice.ratings)
+        (randomChoice.statuses.length === 0 || randomChoice.statuses.includes(e.read_status))
     );
-    if (pool.length === 0) {
+    const artistMode = randomChoice.kind === 'artist';
+    let items;
+    if (artistMode) {
+      const SEP = '\u0000';
+      const namesOf = (list) => list.flatMap((e) => parseAuthors(e.author).map((n) => `${e.media_type}${SEP}${n}`));
+      const ratings = randomChoice.ratings;
+      const others = ratings.filter((r) => r !== 'favorite');
+      if (ratings.length === 0) items = namesOf(byType);
+      else {
+        items = [
+          ...(others.length ? namesOf(byType.filter((e) => matchesRandomRating(e, others))) : []),
+          ...(ratings.includes('favorite')
+            ? namesOf(byType).filter((key) => {
+                const [type, name] = key.split(SEP);
+                return favsOf(type).has(name);
+              })
+            : []),
+        ];
+      }
+      items = Array.from(new Set(items));
+    } else {
+      items = byType.filter((e) => matchesRandomRating(e, randomChoice.ratings)).map((e) => `${e.media_type}:${e.source_id}`);
+    }
+    if (items.length === 0) {
       Alert.alert('Nothing to pick', 'Nothing in your Library matches those choices.');
       return;
     }
-    const keyOf = (e) => `${e.media_type}:${e.source_id}`;
-    let options = pool.filter((e) => !randomShown.current.has(keyOf(e)));
+    const current = artistMode
+      ? selectedArtistRef && `${selectedArtistRef.type}\u0000${selectedArtistRef.name}`
+      : selectedKey;
+    let options = items.filter((item) => !randomShown.current.has(item));
     if (options.length === 0) {
       // Every match has been shown: start over, avoiding the one on screen.
       randomShown.current = new Set();
-      options = pool.length > 1 ? pool.filter((e) => keyOf(e) !== selectedKey) : pool;
+      options = items.length > 1 ? items.filter((item) => item !== current) : items;
     }
     const pick = options[Math.floor(Math.random() * options.length)];
-    randomShown.current.add(keyOf(pick));
+    randomShown.current.add(pick);
     setRandomVisible(false);
-    setRandomOpened(true);
-    setSelectedKey(keyOf(pick));
-  }, [randomChoice, selectedKey]);
+    setRandomOpened(artistMode ? 'artist' : 'entry');
+    if (artistMode) {
+      const [type, name] = pick.split('\u0000');
+      setSelectedKey(null);
+      setSelectedArtistRef({ type, name });
+    } else {
+      setSelectedArtistRef(null);
+      setSelectedKey(pick);
+    }
+  }, [randomChoice, selectedKey, selectedArtistRef, favoritesByType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Each press of 🎲 Random starts a new round with fresh choices.
   const openRandom = useCallback(() => {
@@ -1266,8 +1511,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
   // "Pick again" is only offered on details opened by Random.
   useEffect(() => {
-    if (!selectedKey) setRandomOpened(false);
-  }, [selectedKey]);
+    if (!selectedKey && !selectedArtistRef) setRandomOpened(false);
+  }, [selectedKey, selectedArtistRef]);
 
   const handleDeleteEntry = useCallback(
     (item) => {
@@ -1367,6 +1612,82 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         ))}
       </View>
 
+      {filter ? (
+        <View style={styles.filterBar}>
+          {[
+            { key: 'items', label: '📚 Titles' },
+            { key: 'artists', label: '🎭 Artists' },
+          ].map((v) => {
+            const active = showingArtists === (v.key === 'artists');
+            return (
+              <TouchableOpacity
+                key={v.key}
+                style={[styles.filterChip, active && styles.filterChipActive]}
+                onPress={() => setSectionView(filter, v.key)}
+              >
+                <Text style={active ? styles.filterTextActive : styles.filterText}>{v.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {showingArtists ? (
+        <>
+          <View style={styles.peopleSearchRow}>
+            <TextInput
+              style={[styles.tagInput, { flex: 1 }]}
+              value={peopleQuery}
+              onChangeText={setPeopleQuery}
+              placeholder="Search artists…"
+              placeholderTextColor="#999"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {peopleQuery ? (
+              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')}>
+                <Text style={styles.artistFilterClear}>✕</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <FlatList
+            style={styles.list}
+            data={shownArtists}
+            keyboardShouldPersistTaps="handled"
+            keyExtractor={(item) => item.name}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.artistListRow}
+                onPress={() => setSelectedArtistRef({ type: filter, name: item.name })}
+              >
+                {item.cover ? (
+                  <FocusImage
+                    uri={item.cover}
+                    style={styles.artistListImage}
+                    focus={focusFor(pictureFocus, filter, item.name, item.cover)}
+                  />
+                ) : (
+                  <View style={[styles.artistListImage, styles.thumbPlaceholder]} />
+                )}
+                <View style={styles.meta}>
+                  <Text style={styles.artistListName} numberOfLines={3}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.author}>{titleCount(item.count)}</Text>
+                </View>
+                {favsOf(filter).has(item.name) ? <Text style={styles.favoriteStar}>★</Text> : null}
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                No artists yet — they appear here from the authors of your saved titles.
+              </Text>
+            }
+          />
+        </>
+      ) : (
+        <>
       {/* Filters fold away into one bar (summary of what's on + Clear), so
           the list keeps the screen; tap the bar to show them all. */}
       <View style={styles.filterToggleRow}>
@@ -1537,6 +1858,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           </Text>
         }
       />
+        </>
+      )}
 
       <DetailModal
         entry={selectedEntry}
@@ -1548,7 +1871,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onResolveConflict={handleResolveConflict}
         onOpenNext={handleOpenNext}
         onSetRepeating={handleSetRepeating}
-        onPickAgain={randomOpened ? pickRandomNow : null}
+        onPickAgain={randomOpened === 'entry' ? pickRandomNow : null}
         onToggleFavorite={handleToggleFavorite}
         onDelete={handleDeleteEntry}
         groupMembers={groupMembers}
@@ -1556,6 +1879,21 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onWriteGroup={handleWriteGroup}
         onLeaveGroup={handleLeaveGroup}
         onOpenEntry={(e) => setSelectedKey(`${e.media_type}:${e.source_id}`)}
+      />
+
+      <ArtistDetailModal
+        artist={selectedArtist}
+        isFavorite={!!selectedArtist && !!selectedArtistRef && favsOf(selectedArtistRef.type).has(selectedArtist.name)}
+        onToggleFavorite={toggleFavoriteArtist}
+        onShowTitles={showArtistTitles}
+        onClose={() => setSelectedArtistRef(null)}
+        onPickAgain={randomOpened === 'artist' ? pickRandomNow : null}
+        focus={
+          selectedArtist && selectedArtistRef
+            ? focusFor(pictureFocus, selectedArtistRef.type, selectedArtist.name, selectedArtist.cover)
+            : null
+        }
+        onSaveFocus={saveFocus}
       />
 
       <RandomModal
@@ -1781,6 +2119,43 @@ const styles = StyleSheet.create({
   filterToggleArrow: { color: '#666', fontSize: 14, marginLeft: 8 },
   filterPanel: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
   heartBadge: { fontSize: 14, color: '#e94560' },
+  artistListRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
+  },
+  artistListImage: { width: 180, height: 120, borderRadius: 8, backgroundColor: '#eee' },
+  artistListName: { fontSize: 17, fontWeight: '700', color: '#222' },
+  favoriteStar: { fontSize: 20, color: '#f5a623', marginLeft: 8 },
+  artistDetailCount: { fontSize: 14, color: '#666', marginTop: 4 },
+  favoriteButton: {
+    marginTop: 14,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#f5a623',
+  },
+  favoriteButtonActive: { backgroundColor: '#f5a623' },
+  favoriteButtonText: { color: '#c47f00', fontWeight: '700', fontSize: 15 },
+  favoriteButtonTextActive: { color: '#fff' },
+  focusEditor: { width: '100%', aspectRatio: 1.5, borderRadius: 10, backgroundColor: '#eee', marginBottom: 6 },
+  zoomRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  zoomChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#eee' },
+  zoomChipActive: { backgroundColor: '#0f3460' },
+  zoomText: { color: '#333', fontSize: 12 },
+  zoomTextActive: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  linkHint: { fontSize: 11, color: '#999', marginBottom: 6 },
+  focusButtons: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  focusButton: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
+  focusButtonText: { color: '#333', fontWeight: '600' },
+  focusSave: { backgroundColor: '#16213e' },
+  focusSaveText: { color: '#fff', fontWeight: '700' },
+  moveText: { color: '#1a73e8', fontSize: 13, fontWeight: '600', marginTop: 8 },
+  peopleSearchRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 8 },
   heartButton: {
     marginTop: 12,
     paddingVertical: 10,

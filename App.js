@@ -13,7 +13,11 @@ import {
   LayoutAnimation,
   Platform,
   ToastAndroid,
+  AppState,
+  Linking,
 } from 'react-native';
+import { addScreenshotListener } from 'expo-screen-capture';
+import { getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
 import { useShareIntent } from 'expo-share-intent';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initDb, getSetting, setSetting, addNote } from './src/db';
@@ -37,6 +41,9 @@ import {
 } from './src/dataSaver';
 import { MEDIA_TYPE_LIST } from './src/mediaTypes';
 import AppLock, { useAppLockSetting } from './src/AppLock';
+import { galleryFolderFor } from './src/gallery';
+import { fileScreenshot, buildGalleryFileName } from './src/screenshots';
+import { suppressNextRelock, isRelockSuppressed } from './src/relockGuard';
 
 // Tabs = one per media type (from config, so this never needs manual
 // updates when a type is added) + a unified library at the end.
@@ -106,7 +113,19 @@ const BUTTON_SETTINGS = [
   },
 ];
 
-// Settings → Data saver (src/dataSaver.js).
+// Opens Android's "Media management apps" screen (Android 12+). With that
+// access on, deleting the original screenshot no longer shows the
+// "Allow Manga Tracker to delete…?" dialog (needs MANAGE_MEDIA in
+// app.config.js). Falls back to the app's own settings page if that
+// screen can't be opened.
+function openMediaManagementSettings() {
+  Linking.sendIntent('android.settings.REQUEST_MANAGE_MEDIA').catch(() =>
+    Linking.openSettings().catch(() => {})
+  );
+}
+
+// Settings → Data saver (src/dataSaver.js). Block ads (under App) also
+// saves data, since ads are never downloaded.
 const DATA_SAVER_SETTINGS = [
   {
     key: 'lazyTabs',
@@ -153,6 +172,99 @@ function AppContent({ notepadRefreshKey }) {
     const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => subscription.remove();
   }, [tab]);
+
+  // Settings → Block ads (src/adBlock.js). On unless turned off.
+  const [blockAds, setBlockAds] = useState(() => getSetting('blockAds', '1') === '1');
+  const toggleBlockAds = (value) => {
+    setBlockAds(value);
+    setSetting('blockAds', value ? '1' : '0');
+  };
+
+  // Tabs stay loaded when you switch away (so they keep their place), so
+  // pause any video in the tab you're leaving — no sound or battery use
+  // from a tab you can't see. Play resumes from the same spot.
+  const previousTabRef = useRef(tab);
+  useEffect(() => {
+    const left = webviewRefs.current[previousTabRef.current];
+    if (previousTabRef.current !== tab && left && left.pauseMedia) left.pauseMedia();
+    previousTabRef.current = tab;
+  }, [tab]);
+
+  // Pause any playing video as soon as the app leaves the screen (phone
+  // locked, Home, another app) rather than let it play on behind it.
+  // Skipped for the app's own system dialogs (permission/delete prompts),
+  // which don't count as leaving.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'background' || isRelockSuppressed()) return;
+      Object.values(webviewRefs.current).forEach((w) => w && w.pauseMedia && w.pauseMedia());
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // Phone screenshots taken in the app are filed into the gallery under
+  // Pictures/Manga Tracker/<tab>/ (or Manga Tracker/ itself on the
+  // Library tab) with a descriptive name — see src/screenshots.js. Only
+  // runs while unlocked: AppLock shows nothing else while locked.
+  useEffect(() => {
+    // Finding the screenshot Android just saved needs full photo access
+    // (and on Android 13 and older, so does detecting it at all). Asked
+    // once; if refused, screenshots simply stay in Screenshots.
+    getPermissionsAsync()
+      .then((permission) => {
+        if (permission.status !== 'granted' && permission.canAskAgain) {
+          suppressNextRelock(); // the permission dialog would trigger AppLock
+          return requestPermissionsAsync();
+        }
+        return null;
+      })
+      .catch(() => {});
+
+    const subscription = addScreenshotListener(() => {
+      const tabKey = tabRef.current;
+      const mediaConfig = MEDIA_TYPE_LIST.find((m) => m.key === tabKey);
+      const webview = mediaConfig ? webviewRefs.current[tabKey] : null;
+      const folder = galleryFolderFor(mediaConfig ? mediaConfig.label : null);
+      // Step-by-step details go to a debug log (Settings → Show debug
+      // tools): the current tab's own, or — on the Library — the first
+      // browsing tab's, labelled with where it came from.
+      const logTarget =
+        webview && webview.logDebug
+          ? { tab: webview, prefix: '' }
+          : {
+              tab: MEDIA_TYPE_LIST.map((m) => webviewRefs.current[m.key]).find((w) => w && w.logDebug),
+              prefix: `[${mediaConfig ? mediaConfig.label : 'Library'} tab] `,
+            };
+      const onLog = (message) => logTarget.tab && logTarget.tab.logDebug(logTarget.prefix + message);
+      fileScreenshot({
+        folder,
+        onLog,
+        getName: webview ? () => webview.getScreenshotInfo().then((info) => buildGalleryFileName(info)) : null,
+      }).then((result) => {
+        if (Platform.OS !== 'android') return;
+        if (result.ok) {
+          ToastAndroid.show(`Screenshot saved to ${result.folder}`, ToastAndroid.SHORT);
+        } else if (result.reason === 'permission') {
+          ToastAndroid.show(
+            'Screenshot left in Screenshots — allow full photo access for Manga Tracker to file it.',
+            ToastAndroid.LONG
+          );
+        } else if (result.reason === 'not-found') {
+          ToastAndroid.show(
+            'Couldn’t find the new screenshot to file — it’s still in Screenshots.',
+            ToastAndroid.LONG
+          );
+        } else {
+          // Names the step and error, so a failure can be reported exactly.
+          ToastAndroid.show(
+            `Couldn’t file that screenshot (failed while ${result.step}: ${result.error}) — it’s still in Screenshots.`,
+            ToastAndroid.LONG
+          );
+        }
+      });
+    });
+    return () => subscription.remove();
+  }, []);
 
   // The tab row hides on browsing tabs once the page has sat still (no
   // scrolling) for TAB_BAR_HIDE_MS — taps on the page don't count. Pulling
@@ -562,6 +674,7 @@ function AppContent({ notepadRefreshKey }) {
                 showDebugTools={showDebugTools}
                 onViewInLibrary={handleViewInLibrary}
                 buttons={buttons}
+                blockAds={blockAds}
                 onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
                 initialUrl={lastUrls.current[mediaConfig.key] || null}
                 onPageChange={(url) => {
@@ -661,6 +774,16 @@ function AppContent({ notepadRefreshKey }) {
               </View>
               <Switch value={lockEnabled} onValueChange={changeLockEnabled} />
             </View>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Block ads</Text>
+                <Text style={styles.settingsHint}>
+                  Stops pop-ups, ad networks and ad boxes on every tab. Turn off if a site stops working;
+                  takes effect when a page next loads.
+                </Text>
+              </View>
+              <Switch value={blockAds} onValueChange={toggleBlockAds} />
+            </View>
             <View style={styles.settingsRow}>
               <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>Show debug tools</Text>
@@ -671,6 +794,20 @@ function AppContent({ notepadRefreshKey }) {
               </View>
               <Switch value={showDebugTools} onValueChange={toggleDebugTools} />
             </View>
+            {Platform.OS === 'android' && Platform.Version >= 31 ? (
+              <View style={[styles.settingsRow, styles.settingsRowSpaced]}>
+                <View style={styles.settingsRowText}>
+                  <Text style={styles.settingsLabel}>Delete screenshots without asking</Text>
+                  <Text style={styles.settingsHint}>
+                    After filing a screenshot, Android asks before removing the original. Turn on
+                    "Media management" for Manga Tracker on the next screen to skip that question.
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.settingsSmallButton} onPress={openMediaManagementSettings}>
+                  <Text style={styles.settingsSmallButtonText}>Open</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <Text style={styles.settingsSectionTitle}>Buttons</Text>
             {BUTTON_SETTINGS.map((button, i) => (
@@ -795,4 +932,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
+  settingsRowSpaced: { marginTop: 16 },
 });

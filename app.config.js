@@ -22,13 +22,23 @@ export default {
     },
     android: {
       package: 'com.chentzer.mangatracker',
-      permissions: ['INTERNET'],
+      permissions: [
+        'INTERNET',
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+        // Screenshot filing (src/screenshots.js): removing the original
+        // without asking each time, once allowed in Settings.
+        'android.permission.MANAGE_MEDIA',
+      ],
     },
     scheme: 'mangatracker',
     plugins: [
       '@react-native-google-signin/google-signin',
       'expo-local-authentication',
       './withGradleMemoryFix.js',
+      // Keeps the app's content out of the Recents preview (Android 13+),
+      // while still allowing screenshots.
+      './withHideFromRecents.js',
       [
         'expo-media-library',
         {

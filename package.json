@@ -19,6 +19,7 @@
     "expo-local-authentication": "~57.0.3",
     "expo-media-library": "~57.0.5",
     "expo-network": "~57.0.2",
+    "expo-screen-capture": "~57.0.3",
     "expo-share-intent": "^8.0.0",
     "expo-sharing": "~57.0.23",
     "expo-sqlite": "~57.0.3",
