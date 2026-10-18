@@ -576,6 +576,11 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
   );
 }
 
+// An entry's genres (comma-separated, from AniList by MAL id).
+function parseGenres(genres) {
+  return (genres || '').split(',').map((g) => g.trim()).filter(Boolean);
+}
+
 // An entry's page on MyAnimeList (anime or manga list, by its MAL id).
 function malUrlOf(entry) {
   return `https://myanimelist.net/${malTypeOf(entry.media_type)}/${entry.mal_id}`;
@@ -664,6 +669,14 @@ function DetailModal({
                     {malUrlOf(entry).replace(/^https:\/\//, '')}
                   </Text>
                 </TouchableOpacity>
+              </View>
+            ) : null}
+            {parseGenres(entry.genres).length > 0 ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Genres</Text>
+                <Text style={[styles.detailValue, styles.detailGenres]}>
+                  {parseGenres(entry.genres).join(', ')}
+                </Text>
               </View>
             ) : null}
             <View style={styles.detailRow}>
@@ -1054,6 +1067,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [minRating, setMinRating] = useState(null);
   const [readStatusFilter, setReadStatusFilter] = useState(null);
   const [tagFilters, setTagFilters] = useState([]); // array of selected tag strings (AND logic)
+  const [genreFilters, setGenreFilters] = useState([]); // selected genres (AND logic, like tags)
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
   const [conflictsOnly, setConflictsOnly] = useState(false); // "⚠ to review" chip
 
@@ -1093,6 +1107,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     setMinRating(null);
     setReadStatusFilter(null);
     setTagFilters([]);
+    setGenreFilters([]);
     setArtistFilter('');
     setSelectedKey(focusKey);
     onFocusHandled?.();
@@ -1124,6 +1139,10 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       const hasAllSelected = tagFilters.every((t) => entryTags.includes(t.toLowerCase()));
       if (!hasAllSelected) return false;
     }
+    if (genreFilters.length > 0) {
+      const entryGenres = parseGenres(e.genres);
+      if (!genreFilters.every((g) => entryGenres.includes(g))) return false;
+    }
     return true;
   });
 
@@ -1140,6 +1159,19 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     entries.forEach((e) => parseTags(e.tags).forEach((t) => set.add(t)));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [entries]);
+
+  // Every genre in use, for the genre chip row (narrows with the type chips too).
+  const allGenres = useMemo(() => {
+    const set = new Set();
+    entries.forEach((e) => parseGenres(e.genres).forEach((g) => set.add(g)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [entries]);
+
+  const toggleGenreFilter = useCallback((genre) => {
+    setGenreFilters((prev) =>
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
+    );
+  }, []);
 
   const toggleTagFilter = useCallback((tag) => {
     setTagFilters((prev) =>
@@ -1511,6 +1543,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     ...(minRating === 'favorite' ? ['♥'] : minRating ? [`★${minRating}+`] : []),
     ...(readStatusFilter ? [READ_STATUS_ICONS[readStatusFilter] || '📌'] : []),
     ...(conflictsOnly ? ['⚠'] : []),
+    ...genreFilters,
     ...tagFilters.map((t) => `#${t}`),
   ];
   const clearFilters = () => {
@@ -1519,6 +1552,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     setReadStatusFilter(null);
     setConflictsOnly(false);
     setTagFilters([]);
+    setGenreFilters([]);
   };
 
   // "Pick again" is only offered on details opened by Random.
@@ -1796,6 +1830,26 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         ))}
       </ScrollView>
 
+      {allGenres.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tagFilterBar}
+          contentContainerStyle={styles.tagFilterBarContent}
+        >
+          {allGenres.map((genre) => (
+            <TouchableOpacity
+              key={genre}
+              style={[styles.filterChip, genreFilters.includes(genre) && styles.filterChipActive]}
+              onPress={() => toggleGenreFilter(genre)}
+            >
+              <Text style={genreFilters.includes(genre) ? styles.filterTextActive : styles.filterText}>
+                {genre}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : null}
       {allTags.length > 0 ? (
         <ScrollView
           horizontal
@@ -2342,6 +2396,8 @@ const styles = StyleSheet.create({
   },
   tagAddButtonText: { color: '#fff', fontWeight: '600' },
   tagFilterBar: { marginBottom: 8 },
+  // Genres can be a long list: they wrap under their label.
+  detailGenres: { flex: 1, marginLeft: 16, textAlign: 'right' },
   tagFilterBarContent: { paddingHorizontal: 10, gap: 8 },
   fullImageOverlay: {
     flex: 1,

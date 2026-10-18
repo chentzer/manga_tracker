@@ -638,7 +638,9 @@ so nothing renders blank.
   fresh, unfiltered set on open (via `openArtistFilter()`) regardless of
   the current type-filter chip, since the point is to show every artist
   across every type at once rather than just whichever type happens to
-  be selected. A scrollable minimum-score filter (★9+, ★8+, etc), a scrollable
+  be selected. A row of genre chips (genres come from AniList by
+  MyAnimeList id; multi-select — an entry must have *all* selected
+  genres). A scrollable minimum-score filter (★9+, ★8+, etc), a scrollable
   status filter (Reading/Watching, Read/Watched, On Hold, Dropped, Want
   to Read/Watch — combined generic wording here since this filter spans
   both media types at once), and a scrollable
@@ -648,7 +650,7 @@ so nothing renders blank.
   instant. Each row shows its score (★ 8) and progress (12/24 ep).
   Tapping a row opens a detail sheet showing the full title, author,
   media type, code, links to the title's page on the site (opens in its
-  tab) and on MyAnimeList (opens in the phone's browser), date added,
+  tab) and on MyAnimeList (opens in the phone's browser), genres, date added,
   sync status, the
   MyAnimeList fields (score 1–10, progress, dates, rewatches, priority,
   comments — see "MyAnimeList export / import"), a status toggle with
