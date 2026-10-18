@@ -1460,7 +1460,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     alignItems: 'center',
   },
-  saveImageButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  // Spans the button's full width (centred) rather than shrink-wrapping:
+  // on Samsung phones a colour emoji like 📚 is measured narrower than it
+  // draws, so a shrink-wrapped one-line label wrapped its last word
+  // ("Library") onto a hidden second line. With the full width there's
+  // always room, so nothing wraps.
+  saveImageButtonText: { color: '#fff', fontWeight: '600', fontSize: 13, alignSelf: 'stretch', textAlign: 'center' },
   captureHtmlButton: {
     backgroundColor: '#5a3d8a',
     paddingVertical: 8,
