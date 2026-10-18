@@ -22,7 +22,6 @@ import {
   updateEntryFields,
   parseTags,
   deleteEntry,
-  clearAllEntries,
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
@@ -1623,36 +1622,6 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     return sameTypeEntries.filter((e) => groupKey(e.group_name) === name).sort(groupOrder);
   }, [sameTypeEntries, selectedEntry]);
 
-  const handleClearAll = useCallback(() => {
-    if (entries.length === 0) return;
-
-    Alert.alert(
-      'Clear entire library?',
-      `This permanently deletes all ${entries.length} recorded entries and their saved thumbnails from this phone. This can't be undone. (Anything already backed up to Google Drive is left untouched there.)`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Everything',
-          style: 'destructive',
-          onPress: async () => {
-            // Best-effort local file cleanup — DB row deletion still
-            // proceeds even if some image files fail to remove.
-            await Promise.all(
-              entries
-                .filter((e) => e.local_image_path)
-                .map((e) =>
-                  FileSystem.deleteAsync(e.local_image_path, { idempotent: true }).catch(() => {})
-                )
-            );
-            clearAllEntries();
-            load();
-            backupSilently(); // reflect the now-empty library in the Drive CSV too
-          },
-        },
-      ]
-    );
-  }, [entries, load, backupSilently]);
-
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.randomTopButton} onPress={openRandom}>
@@ -1782,11 +1751,6 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             <Text style={conflictsOnly ? styles.filterTextActive : styles.reviewChipText}>
               ⚠ To review ({conflictCount})
             </Text>
-          </TouchableOpacity>
-        ) : null}
-        {entries.length > 0 ? (
-          <TouchableOpacity style={styles.clearAllChip} onPress={handleClearAll}>
-            <Text style={styles.clearAllText}>Clear All</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -2048,14 +2012,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#eee',
   },
   filterChipActive: { backgroundColor: '#0f3460' },
-  clearAllChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#fde2e2',
-    marginLeft: 'auto',
-  },
-  clearAllText: { color: '#c0392b', fontSize: 13, fontWeight: '600' },
   statusFilterBar: { flexGrow: 0 },
   statusFilterBarContent: { padding: 10, gap: 8 },
   filterText: { color: '#333', fontSize: 13 },

@@ -26,6 +26,7 @@ import {
   setSetting,
   markSynced,
   markSyncFailed,
+  fillMissingEntryFields,
 } from './db';
 import { isImportedSourceId, refreshFromAniList, findImportedByTitle, isAdultTitle } from './malList';
 import { todayString } from './malFormat';
@@ -141,6 +142,29 @@ const GRAB_PAGE_HTML_JS = `
   })();
   true;
 `;
+
+// Whether the entry's saved cover file is really on the phone.
+async function hasCoverFile(entry) {
+  if (!entry.local_image_path) return false;
+  try {
+    return (await FileSystem.getInfoAsync(entry.local_image_path)).exists;
+  } catch {
+    return false;
+  }
+}
+
+// What an entry already in the Library is missing that its page can give
+// (MediaWebView reads the page again for it): its cover, title or author.
+// An alt title is filled too if the page has one, but isn't a reason on
+// its own, since most pages don't.
+async function missingDetails(entry) {
+  const empty = (v) => v === null || v === undefined || String(v).trim() === '';
+  const missing = [];
+  if (!(await hasCoverFile(entry))) missing.push('cover');
+  if (empty(entry.title)) missing.push('title');
+  if (empty(entry.author)) missing.push('author');
+  return missing;
+}
 
 async function downloadImageLocally(imageUrl, mediaType, sourceId, refererUrl) {
   const dir = `${FileSystem.documentDirectory}${mediaType}-covers/`;
@@ -765,14 +789,24 @@ const MediaWebView = forwardRef(function MediaWebView({
       }
       pendingFromPage.current = false;
       // Already recorded entries are skipped, except ones still missing
-      // their MyAnimeList id (recorded before it was read): the page is
-      // read again just to fill that in.
+      // their MyAnimeList id (recorded before it was read), cover, title or
+      // author: the page is read again just to fill those in.
       const existing = getEntry(sourceId, config.key);
       const extractProgress = source.extractProgress || config.extractProgress;
       if (existing && extractProgress) applyProgress(existing, extractProgress(match, url), url);
       if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
         setCurrentEntryKey(`${config.key}:${sourceId}`);
+        missingDetails(existing).then((missing) => {
+          if (!missing.length || pendingSourceId.current || inFlightSourceIds.current.has(sourceId)) return;
+          logDebug(`${sourceId} is missing its ${missing.join(', ')} — reading the page for it.`);
+          inFlightSourceIds.current.add(sourceId);
+          pendingSourceId.current = sourceId;
+          pendingPageUrl.current = url;
+          setTimeout(() => {
+            webviewRef.current?.injectJavaScript(source.extractMetadataJs);
+          }, 400);
+        });
         return;
       }
       setCurrentEntryKey(existing ? `${config.key}:${sourceId}` : null);
@@ -1188,7 +1222,8 @@ const MediaWebView = forwardRef(function MediaWebView({
 
       // Re-check right before writing, closing the gap between the
       // nav-state check and this async step. An existing entry only gets
-      // its MyAnimeList id filled in, if it was missing.
+      // what it was missing filled in: its MyAnimeList id, cover, title or
+      // author (fillMissingEntryFields — nothing already there changes).
       const existing = getEntry(sourceId, config.key);
       if (existing) {
         if (!existing.mal_id && payload.malId) {
@@ -1196,6 +1231,42 @@ const MediaWebView = forwardRef(function MediaWebView({
           refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
           logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
           maybeBackupLibraryToDrive();
+        }
+        if (!payload.skip) {
+          let coverPath = null;
+          if (payload.imageUrl && !(await hasCoverFile(existing))) {
+            try {
+              coverPath = await downloadImageLocally(payload.imageUrl, config.key, sourceId, pageUrl);
+            } catch (err) {
+              logDebug(`Cover download FAILED for ${sourceId}: ${err.message}`);
+            }
+          }
+          const filled = fillMissingEntryFields(sourceId, config.key, {
+            title: payload.title,
+            altTitle: payload.altTitle,
+            author: payload.author,
+            coverPath,
+          });
+          if (filled.length) {
+            logDebug(`Filled in for ${sourceId}: ${filled.join(', ')}`);
+            maybeBackupLibraryToDrive();
+          }
+          // A new cover goes up like a new entry's (or waits for Wi-Fi).
+          if (coverPath && isSignedInToGoogle && !driveSyncAllowed()) {
+            markDriveSyncDeferred();
+          } else if (coverPath && isSignedInToGoogle) {
+            try {
+              const updated = getEntry(sourceId, config.key);
+              const driveFileId = await uploadImageToDrive(
+                config.key,
+                buildDriveDisplayName(sourceId, updated && updated.title),
+                coverPath
+              );
+              markSynced(sourceId, config.key, driveFileId);
+            } catch (err) {
+              markSyncFailed(sourceId, config.key);
+            }
+          }
         }
         clearPending();
         inFlightSourceIds.current.delete(sourceId);

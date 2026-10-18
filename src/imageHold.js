@@ -4,14 +4,17 @@
 // see-through layer (e.g. a full-screen viewer): <img>, a video's poster,
 // or a CSS background picture. Small icons (under 40px on screen) are
 // skipped. blob: pictures can't be downloaded from outside the page, so
-// they're read here and sent as data instead. Pinching or scrolling
-// cancels it. Reports { type: 'holdImage', url | dataUrl | error }.
+// they're read here and sent as data instead. Moving the finger
+// (scrolling, pinching) cancels it; the page shifting on its own (e.g. a
+// reader's pictures loading above) doesn't. Android's own long-press
+// (contextmenu) also triggers it, since that can cancel the touch before
+// the half second is up. Reports { type: 'holdImage', url | dataUrl | error }.
 // Safe to run twice on one page (it's injected before and after load).
 export const IMAGE_HOLD_JS = `
   (function () {
     if (window.__mtImageHold) return;
     window.__mtImageHold = true;
-    var timer = null, startX = 0, startY = 0;
+    var timer = null, startX = 0, startY = 0, held = false;
     function send(msg) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(msg)); } catch (e) {}
     }
@@ -39,10 +42,12 @@ export const IMAGE_HOLD_JS = `
       }
       return null;
     }
+    // Sends the picture at startX/startY, if any; true if there was one.
     function hold() {
       timer = null;
       var src = pictureAt(startX, startY);
-      if (!src) return;
+      if (!src) return false;
+      held = true;
       if (/^blob:/i.test(src)) {
         fetch(src).then(function (r) { return r.blob(); }).then(function (b) {
           var reader = new FileReader();
@@ -55,12 +60,14 @@ export const IMAGE_HOLD_JS = `
         var url = absolute(src);
         if (url) send({ type: 'holdImage', url: url });
       }
+      return true;
     }
     function cancel() {
       if (timer) { clearTimeout(timer); timer = null; }
     }
     document.addEventListener('touchstart', function (e) {
       cancel();
+      held = false;
       if (e.touches.length !== 1) return;
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
@@ -73,7 +80,12 @@ export const IMAGE_HOLD_JS = `
     }, true);
     document.addEventListener('touchend', cancel, true);
     document.addEventListener('touchcancel', cancel, true);
-    window.addEventListener('scroll', cancel, true);
+    document.addEventListener('contextmenu', function (e) {
+      if (held) { e.preventDefault(); return; }
+      cancel();
+      if (e.clientX || e.clientY) { startX = e.clientX; startY = e.clientY; }
+      if (hold()) e.preventDefault();
+    }, true);
   })();
   true;
 `;

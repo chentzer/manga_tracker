@@ -20,7 +20,8 @@ import { addScreenshotListener } from 'expo-screen-capture';
 import { getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
 import { useShareIntent } from 'expo-share-intent';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { initDb, getSetting, setSetting, addNote } from './src/db';
+import * as FileSystem from 'expo-file-system/legacy';
+import { initDb, getSetting, setSetting, addNote, getAllEntries, clearAllEntries } from './src/db';
 import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
@@ -35,6 +36,7 @@ import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import { syncNotepadToDrive } from './src/notepadSync';
 import { beginSync } from './src/syncStatus';
+import { keepAwakeWhileSyncing } from './src/keepAwake';
 import { exportMalList, pickAndImportMalList, MAL_LISTS } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
@@ -349,6 +351,9 @@ function AppContent({ notepadRefreshKey }) {
 
   // Wi-Fi vs mobile data, for Data saver.
   useEffect(() => startNetworkWatch(), []);
+
+  // The screen stays on while Backup Now / Restore run (keepAwake.js).
+  useEffect(() => keepAwakeWhileSyncing(), []);
   // Drive sync held back for Wi-Fi runs as soon as the phone is on Wi-Fi
   // again, or the setting is turned off.
   const catchUpDriveSync = useCallback(async () => {
@@ -513,6 +518,38 @@ function AppContent({ notepadRefreshKey }) {
       `Your library data has been saved to Drive as library-backup.csv${
         uploaded > 0 ? `, and ${uploaded} image${uploaded === 1 ? '' : 's'} were uploaded` : ''
       }.`
+    );
+  };
+
+  // Settings → Clear All: every entry in every tab, with its saved cover,
+  // off this phone. Drive keeps them (clearAllEntries records no
+  // deletions), and the next sync brings them back.
+  const handleClearAll = () => {
+    const all = getAllEntries();
+    if (all.length === 0) {
+      Alert.alert('Library is empty', 'There are no entries on this phone.');
+      return;
+    }
+    Alert.alert(
+      'Clear entire library?',
+      `This deletes all ${all.length} entries in every tab, and their saved covers, from this phone. Your Google Drive backup keeps them, and the next sync (or Restore) brings them back, covers and all.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Everything',
+          style: 'destructive',
+          onPress: async () => {
+            // A cover that fails to delete doesn't stop the clear.
+            await Promise.all(
+              all
+                .filter((e) => e.local_image_path)
+                .map((e) => FileSystem.deleteAsync(e.local_image_path, { idempotent: true }).catch(() => {}))
+            );
+            clearAllEntries();
+            reloadLibrary();
+          },
+        },
+      ]
     );
   };
 
@@ -792,6 +829,20 @@ function AppContent({ notepadRefreshKey }) {
               <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : '⬇ Import MAL list'}</Text>
             </TouchableOpacity>
 
+            <Text style={styles.settingsSectionTitle}>Library</Text>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Clear All</Text>
+                <Text style={styles.settingsHint}>
+                  Deletes every entry in every tab from this phone. Your Drive backup keeps them, and
+                  the next sync brings them back fresh from Drive.
+                </Text>
+              </View>
+              <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={handleClearAll}>
+                <Text style={styles.settingsSmallButtonText}>Clear All</Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.settingsSectionTitle}>App</Text>
             <View style={[styles.settingsRow, styles.settingsRowGap]}>
               <View style={styles.settingsRowText}>
@@ -961,5 +1012,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
+  settingsDangerButton: { backgroundColor: '#c0392b' },
   settingsRowSpaced: { marginTop: 16 },
 });
