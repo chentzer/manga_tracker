@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Manga Tracker",
+  "version": "1.0.0",
+  "description": "Records the manga, manhwa and anime you read to your Manga Tracker library on Google Drive, like the app's tabs.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAi1VeN2Y/60G2v/PL/bkVO7f5xfbTW8zMBxpXU9SqCYwA20Qi0w9TwZnYOXg5pWGGL34drLHqYB88W3fkXKA2tcBzn++rp1+Mpf90l+aTokfp29qCUTzElSUBO/WswtJgq+G8oKWqXfBqSWZysF144Opgy/+r7NkDdWeMbYD5sscY4r0h0M8/ZRYEJalwfm/0gmw8NFU8qB5iq3aD9nJmHrfS1t1AJ5YdpKfdZa1KRCUTwuudsy7zVjxfYkdwJ41IFfzghNqhLuwgT+K8ceuRWcdQhshiGZ3g0g0g+9KCqamYkapvV3PkCgbE3E+jaVxxAmIg1zUnCszQHNgUqBJDvwIDAQAB",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Manga Tracker"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "storage",
+    "identity",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://graphql.anilist.co/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
+}

@@ -231,12 +231,109 @@ export function initDb() {
       uid TEXT PRIMARY KEY
     );
   `);
+  initEntrySync();
+
   // App lock (AppLock.js): off on a fresh install. Builds before this
   // setting existed always locked, so an update from one of those keeps
   // the lock on. Once set, it's only ever changed from Settings.
   if (getSetting('appLockEnabled') === null) {
     setSetting('appLockEnabled', existingInstall ? '1' : '0');
   }
+}
+
+// Two-way Drive sync of entries (backup.js mergeLibraryFromDrive, and the
+// browser extension in extension/): every entry carries updated_at, the
+// last time its details changed anywhere (ISO, UTC), and deletions are
+// remembered in entry_tombstones with the time they happened, so the
+// newer side wins. Triggers keep both up to date for every write in the
+// app: a change to an entry's details stamps it (unless the write sets
+// updated_at itself, as the Drive merge does), and deleting an entry or
+// moving it to another code or type (adopting an imported title, sorting
+// manga into manhwa) leaves a tombstone for the old one.
+const ENTRY_DATA_COLUMNS = [
+  'source_id', 'media_type', 'title', 'alt_title', 'author', 'score', 'tags', 'read_status',
+  'source_url', 'mal_id', 'mal_data', 'start_date', 'finish_date', 'progress',
+  'progress_volumes', 'total', 'total_volumes', 'times_repeated', 'repeating', 'priority',
+  'comments', 'series_type', 'genres', 'is_adult', 'mal_conflicts', 'last_progress_url',
+  'repeat_progress', 'group_name', 'group_order', 'favorite',
+];
+const NOW_ISO = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+
+function initEntrySync() {
+  try {
+    db.execSync('ALTER TABLE entries ADD COLUMN updated_at TEXT;');
+  } catch (e) {
+    // Column already exists — nothing to do.
+  }
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS entry_tombstones (
+      source_id TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      deleted_at TEXT NOT NULL,
+      PRIMARY KEY (source_id, media_type)
+    );
+    CREATE TRIGGER IF NOT EXISTS entries_sync_insert AFTER INSERT ON entries
+    BEGIN
+      DELETE FROM entry_tombstones WHERE source_id = NEW.source_id AND media_type = NEW.media_type;
+      UPDATE entries SET updated_at = ${NOW_ISO} WHERE id = NEW.id AND updated_at IS NULL;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entries_sync_update AFTER UPDATE ON entries
+    WHEN NEW.updated_at IS OLD.updated_at AND (${ENTRY_DATA_COLUMNS.map((c) => `NEW.${c} IS NOT OLD.${c}`).join(' OR ')})
+    BEGIN
+      UPDATE entries SET updated_at = ${NOW_ISO} WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entries_sync_rekey AFTER UPDATE OF source_id, media_type ON entries
+    WHEN OLD.source_id IS NOT NEW.source_id OR OLD.media_type IS NOT NEW.media_type
+    BEGIN
+      INSERT OR REPLACE INTO entry_tombstones (source_id, media_type, deleted_at)
+        VALUES (OLD.source_id, OLD.media_type, ${NOW_ISO});
+      DELETE FROM entry_tombstones WHERE source_id = NEW.source_id AND media_type = NEW.media_type;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entries_sync_delete AFTER DELETE ON entries
+    BEGIN
+      INSERT OR REPLACE INTO entry_tombstones (source_id, media_type, deleted_at)
+        VALUES (OLD.source_id, OLD.media_type, ${NOW_ISO});
+    END;
+  `);
+  // Deletions older than half a year have reached every device by now.
+  db.runSync(`DELETE FROM entry_tombstones WHERE deleted_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-180 days')`);
+}
+
+// Deleted entries of one type: [{ source_id, media_type, deleted_at }].
+export function getEntryTombstones(mediaType) {
+  return db.getAllSync('SELECT * FROM entry_tombstones WHERE media_type = ?', [mediaType]);
+}
+
+export function getEntryTombstone(sourceId, mediaType) {
+  return db.getFirstSync('SELECT * FROM entry_tombstones WHERE source_id = ? AND media_type = ?', [
+    sourceId,
+    mediaType,
+  ]);
+}
+
+// Records a deletion that happened elsewhere: the later time wins, or
+// with `exact`, this time (an entry just deleted here because of it,
+// whose own tombstone says "now").
+export function putEntryTombstone(sourceId, mediaType, deletedAt, { exact = false } = {}) {
+  db.runSync(
+    `INSERT INTO entry_tombstones (source_id, media_type, deleted_at) VALUES (?, ?, ?)
+     ON CONFLICT (source_id, media_type) DO UPDATE SET deleted_at = ${
+       exact ? 'excluded.deleted_at' : 'MAX(deleted_at, excluded.deleted_at)'
+     }`,
+    [sourceId, mediaType, deletedAt]
+  );
+}
+
+// Takes an entry's details from Drive (a newer change made elsewhere),
+// including its updated_at, so the update isn't stamped as a new change.
+const SYNCED_COLUMNS = ['title', 'alt_title', 'author', 'source_url', 'updated_at'];
+export function applySyncedFields(sourceId, mediaType, fields) {
+  const keys = Object.keys(fields).filter((k) => SYNCED_COLUMNS.includes(k) || EDITABLE_COLUMNS.includes(k));
+  if (keys.length === 0) return;
+  db.runSync(
+    `UPDATE entries SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE source_id = ? AND media_type = ?`,
+    [...keys.map((k) => (fields[k] === undefined ? null : fields[k])), sourceId, mediaType]
+  );
 }
 
 function hasColumn(name) {
@@ -441,6 +538,8 @@ export const EDITABLE_COLUMNS = [
   'group_name',
   'group_order',
   'favorite',
+  // When its details last changed (two-way Drive sync, initEntrySync).
+  'updated_at',
 ];
 
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.

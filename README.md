@@ -167,8 +167,10 @@ Two separate things sync to Drive once connected, both automatic:
   `sync_status`, `created_at`, `mal_id`, `mal_data` and the MyAnimeList
   fields (`start_date`, `finish_date`, `progress`, `progress_volumes`,
   `total`, `total_volumes`, `times_repeated`, `repeating`, `priority`,
-  `comments`, `series_type`), `genres`, `is_adult`, `mal_conflicts` and
-  `last_progress_url`, written to a separate CSV file **per
+  `comments`, `series_type`), `genres`, `is_adult`, `mal_conflicts`,
+  `last_progress_url` and `updated_at` (when its details last changed),
+  plus a row with `deleted_at` for each entry deleted (see "Two-way
+  sync" below), written to a separate CSV file **per
   media type** — `MangaTracker/manga-backup.csv`,
   `MangaTracker/anime-backup.csv`, etc — rather than one combined file,
   so each type's data stays easy to open/browse individually. Favourite
@@ -177,6 +179,29 @@ Two separate things sync to Drive once connected, both automatic:
   is overwritten in place — not a growing pile of dated backups — and
   refreshes automatically after every new entry or rating change, plus
   on demand via **Backup Now** in Settings (⚙️, top right).
+
+### Two-way sync
+
+The entry files are also changed by the browser extension (below), so
+every backup first brings Drive's changes in (`mergeTypeFromDrive` /
+`planEntryMerge` in `src/backup.js`) and only then writes the file, and
+only when it would change:
+
+- Every entry carries `updated_at`, the last time its details changed,
+  anywhere (ISO time, UTC). Database triggers (`initEntrySync` in
+  `src/db.js`) stamp it on every change made in the app — not on cover or
+  sync bookkeeping — and leave it alone when a change from Drive sets it.
+- Deleting an entry, or moving it to another code or type (linking an
+  imported title to its site page, sorting manga into manhwa), leaves a
+  tombstone (`entry_tombstones`) with the time, written to the file as a
+  row with `deleted_at`. Tombstones are dropped after 180 days.
+- Per entry, the newer side wins: a newer change in Drive replaces the
+  entry's details here; a deletion newer than the entry's last change
+  deletes it; an entry only in Drive is added (with its cover from Drive)
+  unless it was deleted here after its last change.
+- The app also syncs when it starts with Drive connected and each time
+  you come back to it (at most every 2 minutes), and the Library reloads
+  when something came in.
 
 If your phone is lost or reset, install the app fresh and tap **Settings
 → Google Drive → Connect** — it pulls each type's CSV back down and re-adds every entry not
@@ -782,6 +807,60 @@ so nothing renders blank.
   after any real auth failure or enrollment issue (never on the first
   attempt) so a device-side lock-screen misconfiguration can never
   permanently lock you out of your own app.
+
+## Browser extension (Brave / Chrome)
+
+`extension/` is a Chromium extension that does on your computer what the
+app's tabs do: on your sites it records the titles you open and your
+chapter / episode progress, with the same questions (start rereading?
+ahead of your record?), links titles imported from MyAnimeList, skips
+NSFW (18+) titles, and uploads covers. It writes straight to the same
+Drive files (`MangaTracker/<type>-backup.csv`, covers in
+`MangaTracker/<type>/`), stamping `updated_at`, and the app picks the
+changes up on its next sync ("Two-way sync" above). Its toolbar button
+shows a ✓ on a recorded title's page, and its popup shows that entry:
+status, score, progress and rereading, saved to Drive.
+
+It recognises pages exactly as the app does: `extension/sites.generated.js`
+is built from `src/mediaTypes.js` (patterns, codes, chapter numbers and
+the app's own page scripts, which report through a stand-in for the app's
+webview), with placeholder sites swapped for yours at run time. After
+changing `mediaTypes.js`, rebuild it:
+
+```bash
+node extension/build-sites.mjs
+```
+
+Setting it up:
+
+1. Brave → `brave://extensions` (Chrome: `chrome://extensions`) → turn on
+   **Developer mode** → **Load unpacked** → pick the `extension` folder.
+   Its id is fixed by the `key` in `manifest.json`:
+   `aapgcipkdhmbmphncoeciejepcdmlbmc`.
+2. Google Cloud Console → **APIs & Services → Credentials** → open the
+   app's **web** OAuth client (`GOOGLE_CLIENT_ID_WEB` in `.env`) → under
+   **Authorized redirect URIs** add
+   `https://aapgcipkdhmbmphncoeciejepcdmlbmc.chromiumapp.org/` → Save.
+   (The extension signs in through that web client, in the app's own
+   project, so the `drive.file` scope sees the app's MangaTracker folder.
+   Brave has no built-in Chrome sign-in, so it uses Google's web sign-in
+   window.)
+3. Open the extension's **Settings** (its popup → Settings, or right-click
+   its icon → Options): paste the web client ID, press **Connect Google
+   Drive** and pick your account, then enter your sites (the same as
+   `.env`) and press **Save sites**, allowing access to them. Reload any
+   pages of those sites that were already open.
+
+Nothing private is in the repo: the client ID and sites live only in the
+extension's own storage. Sign-in tokens last an hour and are renewed
+without asking while your Google session in the browser is signed in.
+
+Code: `background.js` (what a visit does to the library; Drive files are
+read fresh before every change and written back one change at a time),
+`content.js` (follows the page address, reads the page, shows the
+answers in a small card), `library.js` (the app's progress rules),
+`drive.js` (sign-in, Drive files, covers), `csv.js` (the backup format),
+`rules.js` (the site patterns for your sites), `popup.*`, `options.*`.
 
 ## Installing permanently on your phone (no PC needed after this)
 

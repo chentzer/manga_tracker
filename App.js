@@ -24,7 +24,13 @@ import { initDb, getSetting, setSetting, addNote } from './src/db';
 import MediaWebView from './src/MediaWebView';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
-import { maybeBackupLibraryToDrive, uploadPendingImages, restoreFromDriveBackup, countPendingImages } from './src/backup';
+import {
+  maybeBackupLibraryToDrive,
+  uploadPendingImages,
+  restoreFromDriveBackup,
+  countPendingImages,
+  onLibraryChangedFromDrive,
+} from './src/backup';
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import { syncNotepadToDrive } from './src/notepadSync';
@@ -202,6 +208,19 @@ function AppContent({ notepadRefreshKey }) {
     return () => subscription.remove();
   }, []);
 
+  // Coming back to the app picks up changes made elsewhere (the browser
+  // extension, another phone) through the Drive backup, which merges
+  // Drive in first (backup.js) — at most every 2 minutes.
+  const lastDrivePull = useRef(0);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' || Date.now() - lastDrivePull.current < 2 * 60 * 1000) return;
+      lastDrivePull.current = Date.now();
+      maybeBackupLibraryToDrive().catch(() => {});
+    });
+    return () => subscription.remove();
+  }, []);
+
   // Phone screenshots taken in the app are filed into the gallery under
   // Pictures/Manga Tracker/<tab>/ (or Manga Tracker/ itself on the
   // Library tab) with a descriptive name — see src/screenshots.js. Only
@@ -361,6 +380,10 @@ function AppContent({ notepadRefreshKey }) {
   const [libraryReloadKey, setLibraryReloadKey] = useState(0);
   const reloadLibrary = () => setLibraryReloadKey((k) => k + 1);
 
+  // Changes made elsewhere (the browser extension, another phone) come in
+  // with every Drive backup; the Library shows them straight away.
+  useEffect(() => onLibraryChangedFromDrive(() => reloadLibrary()), []);
+
   const handleViewInLibrary = (entryKey) => {
     setLibraryFocusKey(entryKey);
     setTab('library');
@@ -395,6 +418,9 @@ function AppContent({ notepadRefreshKey }) {
         // into the Inbox before Drive was signed in for this run.
         syncNotepadToDrive();
         catchUpDriveSync();
+        // Changes made elsewhere since the app last ran (backup.js merges
+        // Drive in before writing).
+        maybeBackupLibraryToDrive().catch(() => {});
       }
     });
   }, []);

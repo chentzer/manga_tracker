@@ -1,0 +1,128 @@
+:root {
+  --bg: #ffffff;
+  --text: #1a1a2e;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --accent: #e94560;
+  --link: #0f3460;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a2e;
+    --text: #f2f4f7;
+    --muted: #98a2b3;
+    --line: #2a3a5e;
+    --link: #8fb3ff;
+  }
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, sans-serif;
+}
+body.popup {
+  width: 320px;
+}
+body.options {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #16213e;
+  color: #fff;
+  font-weight: 600;
+}
+header a {
+  color: #8fb3ff;
+  font-weight: 400;
+  font-size: 13px;
+}
+main {
+  padding: 12px 14px 14px;
+}
+h1 {
+  font-size: 16px;
+  margin: 0 0 2px;
+}
+body.options h1 {
+  font-size: 22px;
+}
+h2 {
+  font-size: 15px;
+  margin: 24px 0 8px;
+}
+.alt,
+.meta,
+.hint {
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.meta {
+  font-size: 12px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+label.check {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text);
+}
+input[type='text'],
+input[type='url'],
+input[type='number'],
+select {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+code {
+  font-size: 12px;
+  word-break: break-all;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.saved {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+button {
+  font: inherit;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 14px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button.plain {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.link {
+  display: block;
+  margin-top: 12px;
+  color: var(--link);
+}

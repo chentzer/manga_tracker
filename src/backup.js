@@ -8,6 +8,12 @@ import {
   EDITABLE_COLUMNS,
   getArtistFavorites,
   setArtistFavorite,
+  getEntry,
+  deleteEntry,
+  getEntryTombstones,
+  getEntryTombstone,
+  putEntryTombstone,
+  applySyncedFields,
 } from './db';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
@@ -56,6 +62,11 @@ const COLUMNS = [
   'group_name',
   'group_order',
   'favorite',
+  // Two-way sync (initEntrySync in db.js; also written by the browser
+  // extension): when the row's details last changed, and on rows that
+  // only say an entry was deleted, when that happened.
+  'updated_at',
+  'deleted_at',
 ];
 
 // Number columns: a CSV gives back strings.
@@ -107,6 +118,12 @@ export function entriesToCsv(mediaType = null) {
   entries.forEach((entry) => {
     rows.push(COLUMNS.map((col) => csvEscape(entry[col])).join(','));
   });
+  // Deleted entries, so the other side deletes them too.
+  if (mediaType) {
+    getEntryTombstones(mediaType).forEach((t) => {
+      rows.push(COLUMNS.map((col) => csvEscape(t[col])).join(','));
+    });
+  }
   return rows.join('\n');
 }
 
@@ -199,6 +216,111 @@ export function mergeArtistFavorites(localRows, remoteCsvText) {
   return { rows: Array.from(merged.values()), newerFromDrive };
 }
 
+// ---------- Two-way sync of entries ----------
+
+// What a type's file in Drive changes here, by updated_at / deleted_at
+// (ISO times, so they compare as text; a missing one counts as oldest):
+// - a deletion newer than the entry's last change deletes it;
+// - an entry not here is added, unless it was deleted here after its
+//   last change;
+// - an entry changed in Drive more recently than here takes Drive's
+//   details.
+// local: this type's entries; tombstones: its deletions; remoteRows:
+// the parsed file. Returns { add, update, remove, forget }: rows to add,
+// rows to take, { source_id, deleted_at } to delete, and deletions to
+// remember for entries that aren't here anyway.
+export function planEntryMerge(local, tombstones, remoteRows) {
+  const byId = new Map(local.map((e) => [e.source_id, e]));
+  const deletedAt = new Map(tombstones.map((t) => [t.source_id, t.deleted_at]));
+  const plan = { add: [], update: [], remove: [], forget: [] };
+  remoteRows.forEach((row) => {
+    const id = row.source_id;
+    if (!id) return;
+    const here = byId.get(id);
+    if (row.deleted_at) {
+      if (here && (here.updated_at || '') < row.deleted_at) {
+        plan.remove.push({ source_id: id, deleted_at: row.deleted_at });
+      } else if (!here && (deletedAt.get(id) || '') < row.deleted_at) {
+        plan.forget.push({ source_id: id, deleted_at: row.deleted_at });
+      }
+      return;
+    }
+    if (!here) {
+      if (deletedAt.has(id) && deletedAt.get(id) >= (row.updated_at || '')) return;
+      plan.add.push(row);
+    } else if ((row.updated_at || '') > (here.updated_at || '')) {
+      plan.update.push(row);
+    }
+  });
+  return plan;
+}
+
+// A CSV row's values as entry columns ('' becomes null, numbers become
+// numbers).
+function rowColumns(row) {
+  const columns = {};
+  [...EDITABLE_COLUMNS, 'title', 'alt_title', 'author', 'source_url'].forEach((col) => {
+    if (!(col in row)) return;
+    const value = row[col];
+    columns[col] = value === '' ? null : NUMBER_COLUMNS.includes(col) ? Number(value) : value;
+  });
+  return columns;
+}
+
+// Listeners told when entries changed because of Drive (App.js reloads
+// the Library).
+const driveChangeListeners = new Set();
+export function onLibraryChangedFromDrive(listener) {
+  driveChangeListeners.add(listener);
+  return () => driveChangeListeners.delete(listener);
+}
+
+// Brings one type's file from Drive into the library (planEntryMerge).
+// New entries get their cover from Drive when there is one. Returns how
+// many entries changed.
+async function mergeTypeFromDrive(mediaType, csvText) {
+  const rows = parseCsvToObjects(csvText).filter((r) => !r.media_type || r.media_type === mediaType);
+  const plan = planEntryMerge(getAllEntries(mediaType), getEntryTombstones(mediaType), rows);
+  for (const t of plan.remove) {
+    const entry = getEntry(t.source_id, mediaType);
+    deleteEntry(t.source_id, mediaType);
+    putEntryTombstone(t.source_id, mediaType, t.deleted_at, { exact: true });
+    if (entry && entry.local_image_path) {
+      FileSystem.deleteAsync(entry.local_image_path, { idempotent: true }).catch(() => {});
+    }
+  }
+  plan.forget.forEach((t) => putEntryTombstone(t.source_id, mediaType, t.deleted_at));
+  plan.update.forEach((row) => applySyncedFields(row.source_id, mediaType, rowColumns(row)));
+  for (const row of plan.add) {
+    let localImagePath = null;
+    try {
+      localImagePath = await downloadCoverForRestore(
+        mediaType,
+        row.source_id,
+        `${FileSystem.documentDirectory}${mediaType}-covers/`
+      );
+    } catch (err) {
+      // Added without a cover; a later restore can pick it up.
+    }
+    const { title, alt_title, author, source_url, mal_id, mal_data, ...columns } = rowColumns(row);
+    restoreEntry({
+      ...columns,
+      sourceId: row.source_id,
+      mediaType,
+      title,
+      altTitle: alt_title,
+      author,
+      sourceUrl: source_url,
+      localImagePath,
+      syncStatus: localImagePath ? 'synced' : 'pending',
+      createdAt: row.created_at || null,
+      malId: mal_id || null,
+      malData: mal_data || null,
+    });
+  }
+  return plan.add.length + plan.update.length + plan.remove.length;
+}
+
 async function syncArtistFavorites() {
   const remoteCsvText = await fetchBackupCsvContent(ARTIST_FAVORITES_FILE);
   const { rows, newerFromDrive } = mergeArtistFavorites(getArtistFavorites(), remoteCsvText);
@@ -228,10 +350,18 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
     return { attempted: false, success: false, error: null, deferred: true };
   }
   const errors = [];
+  let changedFromDrive = 0;
   const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length });
   for (const mediaConfig of MEDIA_TYPE_LIST) {
     try {
-      await backupCsvToDrive(entriesToCsv(mediaConfig.key), backupFileNameFor(mediaConfig.key));
+      // Changes made elsewhere (the browser extension, another phone)
+      // come in first, so writing the file doesn't undo them; the file is
+      // only written when it would change.
+      const fileName = backupFileNameFor(mediaConfig.key);
+      const remote = await fetchBackupCsvContent(fileName);
+      if (remote) changedFromDrive += await mergeTypeFromDrive(mediaConfig.key, remote);
+      const csv = entriesToCsv(mediaConfig.key);
+      if (csv !== (remote || '').trim()) await backupCsvToDrive(csv, fileName);
     } catch (err) {
       console.warn(`Drive backup failed for ${mediaConfig.key}:`, err.message);
       errors.push(`${mediaConfig.label}: ${err.message}`);
@@ -245,8 +375,10 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
     errors.push(`Favourite artists: ${err.message}`);
   }
   job.end({ ok: errors.length === 0, error: errors.join('\n') });
+  if (changedFromDrive > 0) driveChangeListeners.forEach((listener) => listener(changedFromDrive));
   return {
     attempted: true,
+    changedFromDrive,
     success: errors.length === 0,
     error: errors.length > 0 ? errors.join('; ') : null,
   };
@@ -359,7 +491,15 @@ async function runRestore(onProgress, job) {
       processed++;
       job.step();
 
-      if (!sourceId || entryExists(sourceId, mediaType)) {
+      // Deletion rows (deleted_at), and entries deleted here since their
+      // last change.
+      const tombstone = sourceId ? getEntryTombstone(sourceId, mediaType) : null;
+      if (
+        !sourceId ||
+        row.deleted_at ||
+        entryExists(sourceId, mediaType) ||
+        (tombstone && tombstone.deleted_at >= (row.updated_at || ''))
+      ) {
         skipped++;
         if (onProgress) onProgress(processed, processed);
         continue;
