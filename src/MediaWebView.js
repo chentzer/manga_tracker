@@ -635,8 +635,11 @@ const MediaWebView = forwardRef(function MediaWebView({
   // - otherwise it's recorded (recordProgress). `fresh` is for a series
   //   recorded just now, which has no record to be ahead of.
   const applyProgress = useCallback(
-    (entry, number, url, { fresh = false } = {}) => {
-      if (!entry || !number) return;
+    (entry, chapter, url, { fresh = false } = {}) => {
+      // Chapter 0 (a prologue or one-shot) is a chapter too; when it's the
+      // whole title (a total of 1), it counts as 1, so a reread of it ends.
+      if (!entry || chapter === null || chapter === undefined || Number.isNaN(chapter)) return;
+      const number = chapter === 0 && entry.total === 1 ? 1 : chapter;
       const key = `${entry.media_type}:${entry.source_id}`;
       const title = entry.title || entry.source_id;
       const unit = config.key === 'anime' ? 'episode' : 'chapter';
@@ -647,7 +650,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         if (askedRef.current.has(`${key}:repeat`)) return;
         if (Date.now() < Number(getSetting(snoozeKey, '0'))) return;
         askedRef.current.add(`${key}:repeat`);
-        Alert.alert(`Start ${verb}?`, `You've completed "${title}". Start ${verb} it from ${unit} ${number}?`, [
+        Alert.alert(`Start ${verb}?`, `You've completed "${title}". Start ${verb} it from ${unit} ${chapter}?`, [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Just looking',
@@ -1150,7 +1153,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         sourceId = String(payload.sourceId);
         const known = getEntry(sourceId, config.key);
         if (ownsPending) setCurrentEntryKey(known ? `${config.key}:${sourceId}` : null);
-        if (known && payload.progress) applyProgress(known, payload.progress, pageUrl);
+        if (known && payload.progress != null) applyProgress(known, payload.progress, pageUrl);
         // A series page's own answer was already marked in flight by
         // checkUrlAndExtract; anything else for that series is a duplicate.
         const waitedFor = ownsPending && pendingSourceId.current === sourceId;
@@ -1258,8 +1261,8 @@ const MediaWebView = forwardRef(function MediaWebView({
         // Recorded from an episode page: that's progress too.
         const resolvedPage = resolveSource(config, pageUrl);
         const extractProgress = resolvedPage && (resolvedPage.source.extractProgress || config.extractProgress);
-        const pageProgress = payload.progress || (extractProgress ? extractProgress(resolvedPage.match, pageUrl) : null);
-        if (pageProgress) {
+        const pageProgress = payload.progress ?? (extractProgress ? extractProgress(resolvedPage.match, pageUrl) : null);
+        if (pageProgress != null) {
           // A series new to the library has no record to be ahead of; one
           // imported from MAL does.
           applyProgress(getEntry(sourceId, config.key), pageProgress, pageUrl, { fresh: !adopted });

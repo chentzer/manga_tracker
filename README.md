@@ -301,7 +301,8 @@ finish date and sets progress to the total when the total is known.
   reader pages) sets the series to Reading/Watching, fills an empty start
   date with today, and sets episodes/chapters to that number. Progress
   only moves forward, so opening an earlier episode again doesn't lower
-  it.
+  it. A chapter 0 (prologue or one-shot) counts too; when it's the whole
+  title (a total of 1 chapter), it counts as chapter 1.
 - **Ahead of your record.** Opening an episode more than one past your
   record (it says 4, you open 7) asks first: **Go to episode 5** (the
   next one after your record), **Record 7**, or **Keep 4**. A series
