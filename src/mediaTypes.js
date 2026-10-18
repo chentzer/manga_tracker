@@ -380,24 +380,47 @@ function familyModeLockJs(siteUrl) {
 }
 
 // On `siteUrl`'s search page (`path`, search in ?<param>=): once the page
-// has loaded, its search box gets the whole search back — for sites that
-// write it into the box cut short. The box is the page's
+// has loaded, its search box gets the whole search from the address — for
+// sites that write it into the box cut short, and for ones whose box only
+// filters the page (it ignores the address). Typed in the way the page's
+// own script sees it (React-style inputs), and set again for a few
+// seconds in case the page redraws the box empty (until you type or
+// tap). The box is the page's
 // input[name=<param>], or else its first search box.
 function keepWholeSearchJs(siteUrl, path, param) {
   return `
     (function() {
       var host = location.hostname.replace(/^www[.]/, '');
       if (host !== ${JSON.stringify(hostOf(siteUrl) || '')} || location.pathname !== ${JSON.stringify(path)}) return;
-      document.addEventListener('DOMContentLoaded', function() {
-        var match = location.search.match(new RegExp('[?&]' + ${JSON.stringify(param)} + '=([^&]*)'));
-        if (!match) return;
+      var match = location.search.match(new RegExp('[?&]' + ${JSON.stringify(param)} + '=([^&]*)'));
+      if (!match) return;
+      var query;
+      try {
+        query = decodeURIComponent(match[1].split('+').join(' '));
+      } catch (e) {
+        return;
+      }
+      var setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      var tries = 0;
+      // Your own typing or tapping ends it.
+      var stopped = false;
+      function stop() { stopped = true; }
+      document.addEventListener('keydown', stop, true);
+      document.addEventListener('touchstart', stop, true);
+      function fill() {
+        if (stopped) return;
         var box = document.querySelector('input[name=' + JSON.stringify(${JSON.stringify(param)}) + ']') ||
-          document.querySelector('input[type="search"]');
-        if (!box) return;
-        try {
-          box.value = decodeURIComponent(match[1].split('+').join(' '));
-        } catch (e) {}
-      });
+          document.querySelector('input[type="search"]') ||
+          document.querySelector('input[placeholder*="earch"]');
+        if (box && box.value !== query) {
+          setValue.call(box, query);
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (++tries < 20) setTimeout(fill, 300);
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fill);
+      else fill();
     })();
     true;
   `;

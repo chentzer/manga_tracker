@@ -607,6 +607,9 @@ function AppContent({ notepadRefreshKey }) {
       if (result.linked > 0) {
         lines.push(`${result.linked} already in your library got their MyAnimeList id.`);
       }
+      if (result.nsfw > 0) {
+        lines.push(`${result.nsfw} NSFW (18+) title${result.nsfw === 1 ? ' was' : 's were'} left out.`);
+      }
       if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
       if (result.differing > 0) {
         lines.push(

@@ -186,6 +186,36 @@ export function isHentai(entry) {
   return entry.is_adult === 1 || /(^|,)\s*hentai\s*(,|$)/i.test(entry.genres || '');
 }
 
+// Genres that mark a title 18+ (a site's own genres/tags, or AniList's).
+// Whole genres only, so e.g. "Young Adult" doesn't count.
+const ADULT_GENRE = /^(hentai|adult|18\+|r-?18|smut|pornographic)$/i;
+function hasAdultGenre(genres) {
+  const text = Array.isArray(genres) ? genres.join(',') : genres || '';
+  return text.split(/[,;|/]/).some((g) => ADULT_GENRE.test(g.trim()));
+}
+
+// Whether a title about to be recorded is 18+ (not recorded): from the
+// site's genres, or AniList's adult flag / Hentai genre by MAL id. If
+// AniList can't be reached, only the site's genres count.
+export async function isAdultTitle({ malId, mediaType, genres }) {
+  if (hasAdultGenre(genres)) return true;
+  if (!malId) return false;
+  try {
+    const res = await fetch(ANILIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        query: 'query ($id: Int, $type: MediaType) { Media(idMal: $id, type: $type) { isAdult genres } }',
+        variables: { id: Number(malId), type: malTypeOf(mediaType) === 'anime' ? 'ANIME' : 'MANGA' },
+      }),
+    });
+    const m = (await res.json()).data?.Media;
+    return !!m && (m.isAdult || hasAdultGenre(m.genres));
+  } catch (err) {
+    return false;
+  }
+}
+
 // Entries worth asking AniList about: genres never looked up, or no total
 // yet (still airing, or never known) and not already asked today.
 function needsAniList(entry) {
@@ -311,11 +341,11 @@ async function readPickedFile(uri) {
 
 const ANILIST_INFO_QUERY = `query ($ids: [Int], $type: MediaType) {
   Page(perPage: 50) {
-    media(idMal_in: $ids, type: $type) { idMal countryOfOrigin title { english } coverImage { large } }
+    media(idMal_in: $ids, type: $type) { idMal countryOfOrigin title { english } coverImage { large } isAdult genres }
   }
 }`;
 
-// Map of MAL id → { country, english, cover } from AniList, 50 per
+// Map of MAL id → { country, english, cover, adult } from AniList, 50 per
 // request (job: a status-pill job, one step per request). Throws if
 // AniList can't be reached.
 export async function lookUpOnAniList(malType, malIds, job = null) {
@@ -336,6 +366,7 @@ export async function lookUpOnAniList(malType, malIds, job = null) {
         country: m.countryOfOrigin,
         english: m.title?.english || null,
         cover: m.coverImage?.large || null,
+        adult: !!m.isAdult || hasAdultGenre(m.genres),
       });
     });
     job?.step();
@@ -450,6 +481,7 @@ export function importParsedList({ mediaType, user, items }, aniList = new Map()
   let alreadyThere = 0;
   let differing = 0;
   let manhwa = 0;
+  let nsfw = 0;
 
   items.forEach((item) => {
     const malId = Number(item[format.idField]);
@@ -482,6 +514,12 @@ export function importParsedList({ mediaType, user, items }, aniList = new Map()
       return;
     }
 
+    // 18+ titles aren't added (AniList's adult flag / Hentai genre).
+    if (details && details.adult) {
+      nsfw++;
+      return;
+    }
+
     const malData = JSON.stringify(item);
     const columns = columnsFromMalItem(mediaType, item);
 
@@ -508,7 +546,7 @@ export function importParsedList({ mediaType, user, items }, aniList = new Map()
     );
   }
 
-  return { mediaType, added, linked, alreadyThere, differing, manhwa };
+  return { mediaType, added, linked, alreadyThere, differing, manhwa, nsfw };
 }
 
 // Lets you pick a MAL export file and imports it, showing "Import" in

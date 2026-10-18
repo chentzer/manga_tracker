@@ -27,7 +27,7 @@ import {
   markSynced,
   markSyncFailed,
 } from './db';
-import { isImportedSourceId, refreshFromAniList, findImportedByTitle } from './malList';
+import { isImportedSourceId, refreshFromAniList, findImportedByTitle, isAdultTitle } from './malList';
 import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
@@ -1158,6 +1158,21 @@ const MediaWebView = forwardRef(function MediaWebView({
       // from a page that does.
       if (payload.skip) {
         logDebug(`Matched ${sourceId} — ${payload.skip}, not recording from this page.`);
+        pendingSourceId.current = null;
+        pendingPageUrl.current = null;
+        inFlightSourceIds.current.delete(sourceId);
+        return;
+      }
+
+      // 18+ titles aren't recorded (site genres, or AniList by MAL id).
+      if (
+        !(payload.malId && getEntryByMalId(payload.malId, config.key)) &&
+        (await isAdultTitle({ malId: payload.malId, mediaType: config.key, genres: payload.genre }))
+      ) {
+        logDebug(`Matched ${sourceId} — NSFW (18+), not recording it.`);
+        const text = `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.`;
+        if (Platform.OS === 'android') ToastAndroid.show(text, ToastAndroid.LONG);
+        else Alert.alert('NSFW', text);
         pendingSourceId.current = null;
         pendingPageUrl.current = null;
         inFlightSourceIds.current.delete(sourceId);

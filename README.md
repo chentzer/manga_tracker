@@ -581,7 +581,19 @@ so nothing renders blank.
   search back into their box cut short (e.g. "under observation: ..."
   shows as "under"), so searching again from there would lose the rest;
   the first Manhwa site's search page gets the whole search from its
-  address put back (`keepWholeSearchJs` in `src/mediaTypes.js`).
+  address put back (`keepWholeSearchJs` in `src/mediaTypes.js`). That
+  site's box also only filters the page and ignores the address, so the
+  search is typed into it the way the page's own script sees it, and set
+  again for a few seconds in case the page redraws the box (until you
+  type or tap). This is what makes searches from the Library (e.g. **Read
+  ch 1** on a title imported from MyAnimeList) show their results there.
+- **No NSFW titles** — a title isn't recorded when it's 18+: the site's
+  own genres include Hentai, Adult, Smut, 18+ or R-18, or AniList (by its
+  MyAnimeList id) marks it adult or Hentai (`isAdultTitle` in
+  `src/malList.js`). A toast says "NSFW (18+)" and that it wasn't added.
+  If AniList can't be reached, only the site's genres count. MyAnimeList
+  imports leave such titles out too, and the import summary says how
+  many.
 - **Artists view** (`src/artists.js`) — with a type chosen in the Library
   (Manga, Manhwa, Anime), **🎭 Artists** shows one row per artist credited
   on that type's titles (searchable), with a picture from one of their
