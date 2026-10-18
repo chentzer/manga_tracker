@@ -139,17 +139,20 @@
     const progress = source.extractProgress ? source.extractProgress(match, url) : null;
     if (!sourceId && !source.seriesFromPage) return;
 
-    let visit = { need: 'details', isNew: true };
-    if (sourceId) {
-      visit = await send({ type: 'visit', mediaType: type.key, sourceId, url, progress });
-      show(visit, { mediaType: type.key, sourceId, url });
-    }
-    if (visit.notConnected || visit.error || visit.need !== 'details') return;
     if (reading.has(url)) return;
     reading.add(url);
     try {
-      await sleep(400); // as the app: let the page settle first
-      const payload = await readPage(source);
+      // The page is read straight away (after a moment to settle), while
+      // the library is checked; its details are only sent if needed. The
+      // site's page scripts wait for details that load later themselves.
+      const read = sleep(300).then(() => readPage(source));
+      let visit = { need: 'details', isNew: true };
+      if (sourceId) {
+        visit = await send({ type: 'visit', mediaType: type.key, sourceId, url, progress });
+        show(visit, { mediaType: type.key, sourceId, url });
+      }
+      if (visit.notConnected || visit.error || visit.need !== 'details') return;
+      const payload = await read;
       const id = payload.sourceId ? String(payload.sourceId) : sourceId;
       if (!id) return;
       const pageUrl = payload.pageUrl || url;

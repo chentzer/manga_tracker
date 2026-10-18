@@ -213,63 +213,69 @@ async function forgetTab(tabId) {
 
 // A page with its series in the address: { need: 'details' } when the page
 // has to be read (series not recorded, or still missing its MAL id).
+// With a chapter number it's one fresh read (and a write if it changes);
+// without, the recently read copy is enough.
 async function handleVisit({ mediaType, sourceId, url, progress }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
-  const { rows } = await load(mediaType);
-  const row = findRow(rows, sourceId);
+  let row;
+  let result = {};
+  if (progress === null || progress === undefined) {
+    row = findRow((await load(mediaType)).rows, sourceId);
+  } else {
+    result = await mutate(mediaType, async (fresh) => {
+      row = findRow(fresh, sourceId);
+      return row ? applyProgress(mediaType, row, progress, url) : { unchanged: true };
+    });
+  }
   if (!row) return { need: 'details', isNew: true };
   await rememberTab(tabId, mediaType, sourceId);
-  const result =
-    progress === null || progress === undefined
-      ? {}
-      : await mutate(mediaType, async (fresh) => {
-          const current = findRow(fresh, sourceId);
-          return current ? applyProgress(mediaType, current, progress, url) : { unchanged: true };
-        });
   return row.mal_id ? result : { ...result, need: 'details', isNew: false };
 }
 
 // The page's details (title, cover, author, MAL id; and for pages without
-// their series in the address, the series and chapter).
+// their series in the address, the series and chapter). One fresh read
+// of the file and one write: the AniList look-up starts first, alongside
+// that read, and a new title's cover uploads alongside the write (it's
+// fetched from Drive by the app when it adds the title).
 async function handleDetails({ mediaType, sourceId, url, progress, payload, image }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
-  const { rows } = await load(mediaType, { fresh: true });
-  const existing = findRow(rows, sourceId);
-  if (existing) {
-    await rememberTab(tabId, mediaType, sourceId);
-    return mutate(mediaType, async (fresh) => {
-      const row = findRow(fresh, sourceId);
-      if (!row) return { unchanged: true };
+  const cached = cache.get(mediaType);
+  const likelyNew = !payload.skip && !(cached && findRow(cached.rows, sourceId));
+  const infoPromise = likelyNew ? aniListInfo(payload.malId, mediaType) : null;
+  let coverUpload = null;
+
+  const result = await mutate(mediaType, async (fresh) => {
+    const existing = findRow(fresh, sourceId);
+    if (existing) {
       let changed = false;
-      if (!row.mal_id && payload.malId) {
-        row.mal_id = String(payload.malId);
-        touch(row);
+      if (!existing.mal_id && payload.malId) {
+        existing.mal_id = String(payload.malId);
+        touch(existing);
         changed = true;
       }
       const result =
-        progress === null || progress === undefined ? { unchanged: true } : await applyProgress(mediaType, row, progress, url);
+        progress === null || progress === undefined
+          ? { unchanged: true }
+          : await applyProgress(mediaType, existing, progress, url);
       return changed ? { ...result, unchanged: false } : result;
-    });
-  }
-  if (payload.skip) return {};
+    }
+    if (payload.skip) return { unchanged: true, skipped: true };
 
-  // 18+ titles aren't recorded (the site's genres, or AniList by MAL id).
-  const info = await aniListInfo(payload.malId, mediaType);
-  if (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres)))) {
-    return { toast: `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.` };
-  }
+    // 18+ titles aren't recorded (the site's genres, or AniList by MAL id).
+    const info = await (infoPromise || aniListInfo(payload.malId, mediaType));
+    if (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres)))) {
+      return { unchanged: true, skipped: true, toast: `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.` };
+    }
 
-  const coverSaved = await saveCover(mediaType, sourceId, payload.title, { image, imageUrl: payload.imageUrl });
-  const details = {
-    title: payload.title,
-    altTitle: payload.altTitle,
-    author: payload.author,
-    sourceUrl: payload.sourceUrl || url,
-    malId: payload.malId,
-    coverSaved,
-  };
-  const result = await mutate(mediaType, async (fresh) => {
-    if (findRow(fresh, sourceId)) return { unchanged: true }; // recorded meanwhile
+    coverUpload = saveCover(mediaType, sourceId, payload.title, { image, imageUrl: payload.imageUrl });
+    const details = {
+      title: payload.title,
+      altTitle: payload.altTitle,
+      author: payload.author,
+      sourceUrl: payload.sourceUrl || url,
+      malId: payload.malId,
+      coverSaved: false,
+    };
     const imported = findImported(fresh, payload.malId, [payload.title, payload.altTitle]);
     let row;
     if (imported) {
@@ -300,7 +306,8 @@ async function handleDetails({ mediaType, sourceId, url, progress, payload, imag
         (imported ? `Linked "${title}" to your MyAnimeList entry.` : `Added "${title}" to Manga Tracker.`),
     };
   });
-  await rememberTab(tabId, mediaType, sourceId);
+  if (coverUpload) coverUpload.catch(() => {}); // finishes in the background
+  if (!result.skipped) await rememberTab(tabId, mediaType, sourceId);
   return result;
 }
 

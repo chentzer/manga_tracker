@@ -855,8 +855,17 @@ Nothing private is in the repo: the client ID and sites live only in the
 extension's own storage. Sign-in tokens last an hour and are renewed
 without asking while your Google session in the browser is signed in.
 
+Saving is kept to as few Drive requests as possible: a chapter is one
+read and one write of the CSV; a new title adds its cover upload, which
+runs alongside the write (the card says it's added as soon as the entry
+is in). Folder and file ids are remembered in the extension's session
+storage (`driveId:<name>`), so nothing is searched for on a save, and
+looked up again only when Drive says one is gone. The page is read while
+the library is being checked, not after, and silent sign-in renews with
+your account (`loginHint`) without the account picker.
+
 Code: `background.js` (what a visit does to the library; Drive files are
-read fresh before every change and written back one change at a time),
+read fresh once per change and written back one change at a time),
 `content.js` (follows the page address, reads the page, shows the
 answers in a small card), `library.js` (the app's progress rules),
 `drive.js` (sign-in, Drive files, covers), `csv.js` (the backup format),
