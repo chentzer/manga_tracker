@@ -79,7 +79,7 @@ function render(where, entry) {
       repeat_progress: repeat.checked ? repeatProgress.value : 0,
     };
     const result = await send({ type: 'edit', mediaType: where.mediaType, sourceId: where.sourceId, fields });
-    saved.textContent = result && result.error ? `Not saved: ${result.error}` : 'Saved to Drive';
+    saved.textContent = result && result.error ? `Not saved: ${result.error}` : 'Saved — syncing to Drive';
   };
 
   const total = entry.total ? ` / ${entry.total}` : '';
@@ -103,9 +103,31 @@ function render(where, entry) {
   );
 }
 
+// Changes saved here but not in Drive yet (written in the background,
+// retried if that fails).
+function syncNote(sync) {
+  if (!sync || !sync.waiting) return null;
+  const note = el(
+    'p',
+    { class: sync.error ? 'note warn' : 'note' },
+    `${sync.waiting} change${sync.waiting === 1 ? '' : 's'} waiting to sync to Drive${sync.error ? ` — ${sync.error}. Retrying.` : '.'} `
+  );
+  const button = el('button', { class: 'plain small' }, 'Sync now');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Syncing…';
+    const r = await send({ type: 'syncNow' });
+    note.replaceWith(syncNote(r) || el('p', { class: 'note' }, 'All synced to Drive.'));
+  });
+  note.append(button);
+  return note;
+}
+
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const result = await send({ type: 'tabEntry', tabId: tab && tab.id });
+  const note = syncNote(result.sync);
+  if (note) document.body.insertBefore(note, main);
   if (!result.connected) {
     message(
       'Not connected to Google Drive.',

@@ -145,10 +145,16 @@
       // The page is read straight away (after a moment to settle), while
       // the library is checked; its details are only sent if needed. The
       // site's page scripts wait for details that load later themselves.
-      const read = sleep(300).then(() => readPage(source));
+      const started = performance.now();
+      const ms = () => `${Math.round(performance.now() - started)}ms`;
+      const read = sleep(300).then(() => readPage(source)).then((p) => {
+        console.debug(`[Manga Tracker] page read at ${ms()}`);
+        return p;
+      });
       let visit = { need: 'details', isNew: true };
       if (sourceId) {
         visit = await send({ type: 'visit', mediaType: type.key, sourceId, url, progress });
+        console.debug(`[Manga Tracker] library checked at ${ms()}`);
         show(visit, { mediaType: type.key, sourceId, url });
       }
       if (visit.notConnected || visit.error || visit.need !== 'details') return;
@@ -161,6 +167,7 @@
       const image = visit.isNew && !payload.skip ? await coverData(payload.imageUrl) : null;
       const context = { mediaType: type.key, sourceId: id, url: pageUrl };
       const result = await send({ type: 'details', ...context, progress: pageProgress, payload, image });
+      console.debug(`[Manga Tracker] saved at ${ms()}`);
       show(result, context);
     } finally {
       reading.delete(url);

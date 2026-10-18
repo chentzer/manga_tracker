@@ -855,19 +855,38 @@ Nothing private is in the repo: the client ID and sites live only in the
 extension's own storage. Sign-in tokens last an hour and are renewed
 without asking while your Google session in the browser is signed in.
 
-Saving is kept to as few Drive requests as possible: a chapter is one
-read and one write of the CSV; a new title adds its cover upload, which
-runs alongside the write (the card says it's added as soon as the entry
-is in). Folder and file ids are remembered in the extension's session
-storage (`driveId:<name>`), so nothing is searched for on a save, and
-looked up again only when Drive says one is gone. The page is read while
-the library is being checked, not after, and silent sign-in renews with
-your account (`loginHint`) without the account picker.
+Saving doesn't wait for Drive. A change is decided on the extension's
+own copy of the library (the last copy read from Drive, refreshed in the
+background after 30 seconds, waited for only when over 5 minutes old),
+put in an outbox (`chrome.storage.local`, so it survives the browser
+closing) and answered straight away — the card or popup says it's saved
+in well under a second. The outbox is written to Drive right after: a
+fresh read of the file, the waiting changes applied on top, one write, so
+nothing changed elsewhere meanwhile is overwritten. If that fails
+(offline, signed out, a Drive error) the changes stay in the outbox and
+are retried after 5, 15 and 60 seconds while the extension is awake, every
+minute by alarm otherwise, and when the browser starts or Drive is
+connected; the toolbar badge shows **…** while changes wait and **!** when
+writing them failed, and the popup says how many wait, why, with **Sync
+now**. A new title's cover uploads alongside; a failed cover upload goes
+in the outbox too. Until a change is written, the app can't see it.
 
-Code: `background.js` (what a visit does to the library; Drive files are
-read fresh once per change and written back one change at a time),
-`content.js` (follows the page address, reads the page, shows the
-answers in a small card), `library.js` (the app's progress rules),
+Drive requests are kept down: folder and file ids are remembered in the
+extension's session storage (`driveId:<name>`), so nothing is searched for,
+and looked up again only when Drive says one is gone; a sync is one read
+and one write per type. Silent sign-in renews with your account
+(`loginHint`) without the account picker.
+
+Timings: the background console (`brave://extensions` → the extension →
+**service worker**) logs how long each step took, e.g.
+`details manga 123: library 2ms, anilist 310ms, queued 3ms` and
+`sync manga (1 change): read 420ms, write 610ms`; the page's own console
+logs when the page was read, the library checked and the save answered.
+
+Code: `background.js` (what a visit does to the library, the outbox and
+its retries), `content.js` (follows the page address, reads the page,
+shows the answers in a small card), `library.js` (the app's progress
+rules, and the changes the outbox applies),
 `drive.js` (sign-in, Drive files, covers), `csv.js` (the backup format),
 `rules.js` (the site patterns for your sites), `popup.*`, `options.*`.
 

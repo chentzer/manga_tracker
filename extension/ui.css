@@ -121,6 +121,19 @@ button.plain {
   color: var(--text);
   border: 1px solid var(--line);
 }
+.note {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 12px;
+  background: rgba(102, 112, 133, 0.12);
+}
+.note.warn {
+  background: rgba(233, 69, 96, 0.15);
+}
+button.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
 .link {
   display: block;
   margin-top: 12px;

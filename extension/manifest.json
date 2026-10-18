@@ -15,8 +15,10 @@
   "options_page": "options.html",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "identity",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",

@@ -130,3 +130,80 @@ export function hasAdultGenre(genres) {
   const text = Array.isArray(genres) ? genres.join(',') : genres || '';
   return text.split(/[,;|/]/).some((g) => ADULT_GENRE.test(g.trim()));
 }
+
+// ---------- Changes waiting to be written (background.js outbox) ----------
+// Each change is a small record ({ kind, sourceId, … }) applied to the
+// rows of a fresh copy of the file right before it's written, so nothing
+// changed elsewhere meanwhile is overwritten. Applying one again does no
+// harm (adding a title already there, or moving progress back, does
+// nothing).
+
+// AniList's genres and totals on a row (totals only where it has none).
+export function applyInfo(row, mediaType, info) {
+  if (!info) return;
+  row.genres = (info.genres || []).join(',');
+  row.is_adult = info.isAdult ? '1' : '0';
+  row.anilist_checked = today();
+  const total = mediaType === 'anime' ? info.episodes : info.chapters;
+  if (!Number(row.total) && total) row.total = String(total);
+  if (mediaType !== 'anime' && !Number(row.total_volumes) && info.volumes) row.total_volumes = String(info.volumes);
+}
+
+const EDITABLE = ['read_status', 'score', 'progress', 'progress_volumes', 'repeating', 'repeat_progress', 'favorite'];
+
+// The popup's changes. As in the app: Reading fills an empty start date,
+// Completed an empty finish date and the progress up to the total.
+export function editRow(row, fields) {
+  Object.keys(fields)
+    .filter((k) => EDITABLE.includes(k))
+    .forEach((k) => {
+      row[k] = fields[k] === null || fields[k] === undefined ? '' : String(fields[k]);
+    });
+  if (fields.read_status === 'reading' && !row.start_date) row.start_date = today();
+  if (fields.read_status === 'read') {
+    if (!row.finish_date) row.finish_date = today();
+    if (num(row.total) && num(row.progress) < num(row.total)) row.progress = row.total;
+  }
+  touch(row);
+}
+
+// Applies one change to a type's rows. Returns true if anything changed.
+export function applyChange(rows, mediaType, change) {
+  if (change.kind === 'add') {
+    if (findRow(rows, change.sourceId)) return false;
+    const imported = change.importedId ? findRow(rows, change.importedId) : null;
+    let row;
+    if (imported) {
+      adoptImported(rows, mediaType, imported, change.sourceId, change.details);
+      row = imported;
+    } else {
+      row = newRow(mediaType, change.sourceId, change.details);
+      rows.push(row);
+    }
+    applyInfo(row, mediaType, change.info);
+    return true;
+  }
+  const row = findRow(rows, change.sourceId);
+  if (!row) return false;
+  if (change.kind === 'malId') {
+    if (row.mal_id) return false;
+    row.mal_id = String(change.malId);
+    touch(row);
+    return true;
+  }
+  if (change.kind === 'record') return !!recordProgress(row, change.number, change.url);
+  if (change.kind === 'repeat') {
+    if (!(row.read_status === 'read' && num(row.repeating) === 1)) {
+      row.repeating = '1';
+      row.repeat_progress = '0';
+      touch(row);
+    }
+    recordProgress(row, change.number, change.url);
+    return true;
+  }
+  if (change.kind === 'edit') {
+    editRow(row, change.fields);
+    return true;
+  }
+  return false;
+}

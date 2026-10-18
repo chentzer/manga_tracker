@@ -3,24 +3,44 @@
 // app backs up to (MangaTracker/<type>-backup.csv), which the app merges
 // in on its next sync (src/backup.js). Every change stamps the row's
 // updated_at, so the newer change wins on both sides.
+//
+// Saving is instant: a change is decided on the extension's own copy of
+// the library, put in an outbox (chrome.storage.local, so it survives
+// the browser closing) and answered straight away. The outbox is then
+// written to Drive in the background: a fresh read of the file, the
+// waiting changes applied to it, one write. A failed write stays in the
+// outbox and is retried (5 s, 15 s, 60 s while the worker is awake, then
+// every minute by alarm, and when the browser starts or Drive is
+// connected); the badge shows changes still waiting.
 /* global chrome, self */
 import './sites.generated.js';
 import './rules.js';
 import { parseCsv, toCsv } from './csv.js';
 import { connect, disconnect, isConnected, readTextFile, writeTextFile, uploadCover, NotSignedInError } from './drive.js';
-import {
-  findRow,
-  findImported,
-  recordProgress,
-  progressDecision,
-  newRow,
-  adoptImported,
-  hasAdultGenre,
-  touch,
-  today,
-} from './library.js';
+import { findRow, findImported, progressDecision, hasAdultGenre, applyChange } from './library.js';
 
 const CONTENT_SCRIPT_ID = 'manga-tracker-pages';
+const FLUSH_ALARM = 'manga-tracker-flush';
+
+// ---------- Timing (background console) ----------
+
+// timer('details 123').mark('read') … .end(): how long each step took.
+function timer(label) {
+  const start = performance.now();
+  let last = start;
+  const parts = [];
+  return {
+    mark(step) {
+      const now = performance.now();
+      parts.push(`${step} ${Math.round(now - last)}ms`);
+      last = now;
+    },
+    end(step = 'done') {
+      this.mark(step);
+      console.log(`[Manga Tracker] ${label}: ${parts.join(', ')} — total ${Math.round(performance.now() - start)}ms`);
+    },
+  };
+}
 
 // ---------- Where the page script runs ----------
 
@@ -52,43 +72,184 @@ async function registerPageScript() {
   ]);
 }
 
-chrome.runtime.onInstalled.addListener(() => registerPageScript().catch(console.warn));
-chrome.runtime.onStartup.addListener(() => registerPageScript().catch(console.warn));
+chrome.runtime.onInstalled.addListener(() => {
+  registerPageScript().catch(console.warn);
+  flushSoon(0);
+});
+chrome.runtime.onStartup.addListener(() => {
+  registerPageScript().catch(console.warn);
+  flushSoon(0);
+});
+
+// ---------- The outbox ----------
+
+async function outbox() {
+  const { outbox: list } = await chrome.storage.local.get('outbox');
+  return list || [];
+}
+
+async function setOutbox(list) {
+  await chrome.storage.local.set({ outbox: list });
+  await showSyncState();
+}
+
+// Changes are added and removed one at a time, so two at once can't lose
+// one another.
+let outboxLock = Promise.resolve();
+function withOutbox(fn) {
+  const run = outboxLock.then(async () => {
+    const list = await outbox();
+    const next = await fn(list);
+    if (next) await setOutbox(next);
+  });
+  outboxLock = run.catch(() => {});
+  return run;
+}
+
+let nextChangeId = Date.now();
+async function enqueue(mediaType, ...changes) {
+  await withOutbox((list) => [...list, ...changes.map((c) => ({ ...c, mediaType, id: nextChangeId++ }))]);
+  flushSoon(0);
+}
+
+// The badge: "…" while changes wait, "!" when writing them failed.
+let lastError = null;
+async function showSyncState() {
+  const list = await outbox();
+  const waiting = list.length;
+  await chrome.action.setBadgeText({ text: waiting ? (lastError ? '!' : '…') : '' }).catch(() => {});
+  await chrome.action
+    .setBadgeBackgroundColor({ color: lastError ? '#e94560' : '#667085' })
+    .catch(() => {});
+  await chrome.action
+    .setTitle({
+      title: waiting
+        ? `Manga Tracker — ${waiting} change${waiting === 1 ? '' : 's'} waiting to sync${lastError ? ` (${lastError})` : ''}`
+        : 'Manga Tracker',
+    })
+    .catch(() => {});
+}
 
 // ---------- The library files ----------
 
 const fileName = (mediaType) => `${mediaType}-backup.csv`;
 
-// Recently read files, so looking things up on every page doesn't
-// download them each time. Writes always start from a fresh copy.
-const cache = new Map(); // mediaType -> { fileId, header, rows, at }
-const CACHE_MS = 30 * 1000;
+// The last copy read from (or written to) Drive per type.
+const files = new Map(); // mediaType -> { fileId, header, rows, at }
+const FILE_MS = 30 * 1000;
 
-async function load(mediaType, { fresh = false } = {}) {
-  const cached = cache.get(mediaType);
-  if (cached && !fresh && Date.now() - cached.at < CACHE_MS) return cached;
+async function readFile(mediaType) {
   const { fileId, text } = await readTextFile(fileName(mediaType));
   const { header, rows } = parseCsv(text);
   const file = { fileId, header, rows, at: Date.now() };
-  cache.set(mediaType, file);
+  files.set(mediaType, file);
   return file;
 }
 
-// One change at a time: each reads the file fresh, changes its rows
-// (change returns false to leave it alone) and writes it back.
-let queue = Promise.resolve();
-function mutate(mediaType, change) {
-  const run = queue.then(async () => {
-    const file = await load(mediaType, { fresh: true });
-    const result = await change(file.rows);
-    if (result === false || (result && result.unchanged)) return result;
-    file.fileId = await writeTextFile(fileName(mediaType), file.fileId, toCsv(file.header, file.rows));
-    file.at = Date.now();
-    return result;
-  });
-  queue = run.catch(() => {});
-  return run;
+const clone = (rows) => rows.map((r) => ({ ...r }));
+
+// The extension's view of a type's rows: the last copy from Drive with
+// the changes still in the outbox on top. What every answer is decided
+// on. A copy older than 30 s is read again in the background (answers
+// don't wait for it); one older than 5 minutes, or none, is waited for.
+// The write to Drive always starts from a fresh read, so a slightly old
+// copy here never overwrites anything.
+const STALE_MS = 5 * 60 * 1000;
+const refreshing = new Map();
+function refresh(mediaType) {
+  if (!refreshing.has(mediaType)) {
+    refreshing.set(mediaType, readFile(mediaType).finally(() => refreshing.delete(mediaType)));
+  }
+  return refreshing.get(mediaType);
 }
+
+async function view(mediaType) {
+  let file = files.get(mediaType);
+  const age = file ? Date.now() - file.at : Infinity;
+  if (age > STALE_MS) file = await refresh(mediaType);
+  else if (age > FILE_MS) refresh(mediaType).catch(() => {});
+  const rows = clone(file.rows);
+  (await outbox()).filter((c) => c.mediaType === mediaType).forEach((c) => applyChange(rows, mediaType, c));
+  return rows;
+}
+
+// Writes the outbox to Drive: per type, a fresh read, the changes applied,
+// one write; then those changes leave the outbox. One run at a time.
+let flushing = null;
+let retryTimer = null;
+let failures = 0;
+const RETRY_MS = [5000, 15000, 60000];
+
+function flushSoon(ms) {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => flush().catch(() => {}), ms);
+}
+
+async function flush() {
+  if (flushing) return flushing;
+  flushing = (async () => {
+    const list = await outbox();
+    if (!list.length) {
+      chrome.alarms.clear(FLUSH_ALARM);
+      return;
+    }
+    if (!(await isConnected())) {
+      lastError = 'not connected to Drive';
+      await showSyncState();
+      return;
+    }
+    const done = new Set();
+    try {
+      for (const mediaType of [...new Set(list.map((c) => c.mediaType))]) {
+        const changes = list.filter((c) => c.mediaType === mediaType);
+        const t = timer(`sync ${mediaType} (${changes.length} change${changes.length === 1 ? '' : 's'})`);
+        const file = await readFile(mediaType);
+        t.mark('read');
+        const covers = changes.filter((c) => c.kind === 'cover');
+        const rowChanges = changes.filter((c) => c.kind !== 'cover');
+        const changed = rowChanges.map((c) => applyChange(file.rows, mediaType, c)).some(Boolean);
+        if (changed) {
+          file.fileId = await writeTextFile(fileName(mediaType), file.fileId, toCsv(file.header, file.rows));
+          file.at = Date.now();
+          t.mark('write');
+        }
+        rowChanges.forEach((c) => done.add(c.id));
+        for (const c of covers) {
+          await uploadCoverNow(c);
+          done.add(c.id);
+        }
+        if (covers.length) t.mark('covers');
+        t.end();
+      }
+      failures = 0;
+      lastError = null;
+    } catch (err) {
+      failures++;
+      lastError = err instanceof NotSignedInError ? 'not connected to Drive' : err.message || String(err);
+      console.warn('[Manga Tracker] sync failed, will retry:', lastError);
+    }
+    await withOutbox((current) => current.filter((c) => !done.has(c.id)));
+    const left = (await outbox()).length;
+    if (left) {
+      // Retried while the worker is awake; the alarm wakes it otherwise.
+      chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
+      if (lastError) flushSoon(RETRY_MS[Math.min(failures - 1, RETRY_MS.length - 1)]);
+      else flushSoon(0); // added while this run was writing
+    } else {
+      chrome.alarms.clear(FLUSH_ALARM);
+    }
+    await showSyncState();
+  })();
+  try {
+    return await flushing;
+  } finally {
+    flushing = null;
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === FLUSH_ALARM) flush().catch(() => {});
+});
 
 // ---------- AniList (18+ check, genres, totals) ----------
 
@@ -112,34 +273,39 @@ async function aniListInfo(malId, mediaType) {
 
 // ---------- Covers ----------
 
-async function dataUrlToBlob(dataUrl) {
-  return (await fetch(dataUrl)).blob();
+async function coverBlob({ image, imageUrl }) {
+  let blob = image ? await (await fetch(image)).blob() : null;
+  if (!blob && imageUrl) {
+    const res = await fetch(imageUrl);
+    if (res.ok) blob = await res.blob();
+  }
+  return blob && blob.size ? blob : null;
 }
 
-// The page sends the cover it could read (dataUrl); otherwise it's
-// fetched from here, which works for sites whose access was granted.
-async function saveCover(mediaType, sourceId, title, { image, imageUrl }) {
+// Uploads a queued cover; one that can't be fetched at all is dropped
+// (throws only for Drive errors, which are retried).
+async function uploadCoverNow(change) {
+  let blob = null;
   try {
-    let blob = image ? await dataUrlToBlob(image) : null;
-    if (!blob && imageUrl) {
-      const res = await fetch(imageUrl);
-      if (res.ok) blob = await res.blob();
-    }
-    if (!blob || !blob.size) return false;
-    await uploadCover(mediaType, sourceId, title, blob);
-    return true;
+    blob = await coverBlob(change);
   } catch (err) {
-    console.warn('Cover upload failed:', err);
-    return false;
+    blob = null;
   }
+  if (!blob) return;
+  await uploadCover(change.mediaType, change.sourceId, change.title, blob);
+}
+
+// A new title's cover: uploaded right away alongside the entry's write;
+// if that fails it goes in the outbox to be retried.
+function saveCoverSoon(mediaType, sourceId, title, image, imageUrl) {
+  const change = { kind: 'cover', mediaType, sourceId, title, image: image || null, imageUrl: imageUrl || null };
+  uploadCoverNow(change).catch(() => enqueue(mediaType, change));
 }
 
 // ---------- What a visit does ----------
 
 const labels = (mediaType) =>
-  mediaType === 'anime'
-    ? { unit: 'episode', verb: 'rewatching', short: 'ep' }
-    : { unit: 'chapter', verb: 'rereading', short: 'ch' };
+  mediaType === 'anime' ? { unit: 'episode', verb: 'rewatching' } : { unit: 'chapter', verb: 'rereading' };
 
 // Asked once per series and chapter while the worker runs; "Not now" on
 // a reread question stops it for an hour (as the app's "Just looking").
@@ -151,19 +317,18 @@ async function repeatSnoozed(key) {
   return Date.now() < (stored[name] || 0);
 }
 
-// Progress for a recorded series: records it, or returns a question for
-// the page to show. Runs inside mutate (row is changed in place).
-async function applyProgress(mediaType, row, chapter, url, { fresh = false } = {}) {
+// Progress for a recorded series: { change } to queue, or a question for
+// the page to show.
+async function progressAnswer(mediaType, row, chapter, url, { fresh = false } = {}) {
   const decision = progressDecision(row, chapter, { fresh });
-  if (!decision) return { unchanged: true };
+  if (!decision) return {};
   const key = `${mediaType}:${row.source_id}`;
   const title = row.title || row.source_id;
   const { unit, verb } = labels(mediaType);
   if (decision.ask === 'repeat') {
-    if (asked.has(`${key}:repeat`) || (await repeatSnoozed(key))) return { unchanged: true };
+    if (asked.has(`${key}:repeat`) || (await repeatSnoozed(key))) return {};
     asked.add(`${key}:repeat`);
     return {
-      unchanged: true,
       question: {
         text: `You've completed "${title}". Start ${verb} it from ${unit} ${chapter}?`,
         buttons: [
@@ -174,13 +339,12 @@ async function applyProgress(mediaType, row, chapter, url, { fresh = false } = {
     };
   }
   if (decision.ask === 'ahead') {
-    if (asked.has(`${key}:${decision.number}`)) return { unchanged: true };
+    if (asked.has(`${key}:${decision.number}`)) return {};
     asked.add(`${key}:${decision.number}`);
     const where = decision.current
       ? `Your record for "${title}" says you stopped at ${unit} ${decision.current}`
       : `Your record says you haven't started "${title}"`;
     return {
-      unchanged: true,
       question: {
         text: `${where}, but this is ${unit} ${decision.number}.`,
         buttons: [
@@ -190,11 +354,7 @@ async function applyProgress(mediaType, row, chapter, url, { fresh = false } = {
       },
     };
   }
-  const done = recordProgress(row, decision.record, url);
-  if (!done) return { unchanged: true };
-  return done.finishedRepeat
-    ? { toast: `"${title}": ${verb} counted (${row.times_repeated} times).` }
-    : {};
+  return { change: { kind: 'record', sourceId: row.source_id, number: decision.record, url } };
 }
 
 // The tab each page belongs to (for the popup).
@@ -213,159 +373,123 @@ async function forgetTab(tabId) {
 
 // A page with its series in the address: { need: 'details' } when the page
 // has to be read (series not recorded, or still missing its MAL id).
-// With a chapter number it's one fresh read (and a write if it changes);
-// without, the recently read copy is enough.
 async function handleVisit({ mediaType, sourceId, url, progress }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
-  let row;
-  let result = {};
-  if (progress === null || progress === undefined) {
-    row = findRow((await load(mediaType)).rows, sourceId);
-  } else {
-    result = await mutate(mediaType, async (fresh) => {
-      row = findRow(fresh, sourceId);
-      return row ? applyProgress(mediaType, row, progress, url) : { unchanged: true };
-    });
+  const t = timer(`visit ${mediaType} ${sourceId}`);
+  const row = findRow(await view(mediaType), sourceId);
+  t.mark('library');
+  if (!row) {
+    t.end('new title');
+    return { need: 'details', isNew: true };
   }
-  if (!row) return { need: 'details', isNew: true };
   await rememberTab(tabId, mediaType, sourceId);
+  let result = {};
+  if (progress !== null && progress !== undefined) {
+    const a = await progressAnswer(mediaType, row, progress, url);
+    if (a.change) await enqueue(mediaType, a.change);
+    result = a.question ? { question: a.question } : {};
+  }
+  t.end(outcome(result));
   return row.mal_id ? result : { ...result, need: 'details', isNew: false };
 }
 
+const outcome = (result) => (result.question ? 'asked' : 'answered');
+
 // The page's details (title, cover, author, MAL id; and for pages without
-// their series in the address, the series and chapter). One fresh read
-// of the file and one write: the AniList look-up starts first, alongside
-// that read, and a new title's cover uploads alongside the write (it's
-// fetched from Drive by the app when it adds the title).
+// their series in the address, the series and chapter).
 async function handleDetails({ mediaType, sourceId, url, progress, payload, image }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
-  const cached = cache.get(mediaType);
-  const likelyNew = !payload.skip && !(cached && findRow(cached.rows, sourceId));
-  const infoPromise = likelyNew ? aniListInfo(payload.malId, mediaType) : null;
-  let coverUpload = null;
+  const t = timer(`details ${mediaType} ${sourceId}`);
+  const rows = await view(mediaType);
+  t.mark('library');
+  const existing = findRow(rows, sourceId);
+  if (existing) {
+    await rememberTab(tabId, mediaType, sourceId);
+    const changes = [];
+    if (!existing.mal_id && payload.malId) changes.push({ kind: 'malId', sourceId, malId: payload.malId });
+    let result = {};
+    if (progress !== null && progress !== undefined) {
+      const a = await progressAnswer(mediaType, existing, progress, url);
+      if (a.change) changes.push(a.change);
+      if (a.question) result = { question: a.question };
+    }
+    if (changes.length) await enqueue(mediaType, ...changes);
+    t.end(outcome(result));
+    return result;
+  }
+  if (payload.skip) {
+    t.end('skipped');
+    return {};
+  }
 
-  const result = await mutate(mediaType, async (fresh) => {
-    const existing = findRow(fresh, sourceId);
-    if (existing) {
-      let changed = false;
-      if (!existing.mal_id && payload.malId) {
-        existing.mal_id = String(payload.malId);
-        touch(existing);
-        changed = true;
-      }
-      const result =
-        progress === null || progress === undefined
-          ? { unchanged: true }
-          : await applyProgress(mediaType, existing, progress, url);
-      return changed ? { ...result, unchanged: false } : result;
-    }
-    if (payload.skip) return { unchanged: true, skipped: true };
+  // 18+ titles aren't recorded (the site's genres, or AniList by MAL id).
+  const info = await aniListInfo(payload.malId, mediaType);
+  t.mark('anilist');
+  if (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres)))) {
+    t.end('nsfw');
+    return { toast: `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.` };
+  }
 
-    // 18+ titles aren't recorded (the site's genres, or AniList by MAL id).
-    const info = await (infoPromise || aniListInfo(payload.malId, mediaType));
-    if (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres)))) {
-      return { unchanged: true, skipped: true, toast: `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.` };
-    }
-
-    coverUpload = saveCover(mediaType, sourceId, payload.title, { image, imageUrl: payload.imageUrl });
-    const details = {
-      title: payload.title,
-      altTitle: payload.altTitle,
-      author: payload.author,
-      sourceUrl: payload.sourceUrl || url,
-      malId: payload.malId,
-      coverSaved: false,
-    };
-    const imported = findImported(fresh, payload.malId, [payload.title, payload.altTitle]);
-    let row;
-    if (imported) {
-      adoptImported(fresh, mediaType, imported, sourceId, details);
-      row = imported;
-    } else {
-      row = newRow(mediaType, sourceId, details);
-      fresh.push(row);
-    }
-    if (info) {
-      row.genres = (info.genres || []).join(',');
-      row.is_adult = info.isAdult ? '1' : '0';
-      row.anilist_checked = today();
-      const total = mediaType === 'anime' ? info.episodes : info.chapters;
-      if (!Number(row.total) && total) row.total = String(total);
-      if (mediaType !== 'anime' && !Number(row.total_volumes) && info.volumes) row.total_volumes = String(info.volumes);
-    }
-    const progressResult =
-      progress === null || progress === undefined
-        ? {}
-        : await applyProgress(mediaType, row, progress, url, { fresh: !imported });
-    const title = row.title || sourceId;
-    return {
-      ...progressResult,
-      unchanged: false,
-      toast:
-        progressResult.toast ||
-        (imported ? `Linked "${title}" to your MyAnimeList entry.` : `Added "${title}" to Manga Tracker.`),
-    };
-  });
-  if (coverUpload) coverUpload.catch(() => {}); // finishes in the background
-  if (!result.skipped) await rememberTab(tabId, mediaType, sourceId);
-  return result;
+  const imported = findImported(rows, payload.malId, [payload.title, payload.altTitle]);
+  const details = {
+    title: payload.title,
+    altTitle: payload.altTitle,
+    author: payload.author,
+    sourceUrl: payload.sourceUrl || url,
+    malId: payload.malId,
+    coverSaved: false,
+  };
+  const add = { kind: 'add', sourceId, importedId: imported ? imported.source_id : null, details, info };
+  // Progress is decided on the title as it will be once added.
+  const after = clone(rows);
+  applyChange(after, mediaType, add);
+  const row = findRow(after, sourceId);
+  const a =
+    progress === null || progress === undefined
+      ? {}
+      : await progressAnswer(mediaType, row, progress, url, { fresh: !imported });
+  await enqueue(mediaType, add, ...(a.change ? [a.change] : []));
+  saveCoverSoon(mediaType, sourceId, payload.title, image, payload.imageUrl);
+  await rememberTab(tabId, mediaType, sourceId);
+  const title = row.title || sourceId;
+  t.end('queued');
+  return {
+    ...(a.question ? { question: a.question } : {}),
+    toast: imported ? `Linked "${title}" to your MyAnimeList entry.` : `Added "${title}" to Manga Tracker.`,
+  };
 }
 
 // An answer to a question shown on the page.
-async function handleAnswer({ mediaType, sourceId, url, answer }) {
+async function handleAnswer({ mediaType, sourceId, url, answer: reply }) {
   const key = `${mediaType}:${sourceId}`;
-  if (answer.kind === 'snooze') {
+  if (reply.kind === 'snooze') {
     await chrome.storage.local.set({ [`repeatSnooze:${key}`]: Date.now() + 60 * 60 * 1000 });
     return {};
   }
-  if (answer.kind === 'keep') return {};
-  return mutate(mediaType, async (rows) => {
-    const row = findRow(rows, sourceId);
-    if (!row) return { unchanged: true };
-    if (answer.kind === 'repeat') {
-      row.repeating = '1';
-      row.repeat_progress = '0';
-      touch(row);
-    }
-    const done = recordProgress(row, answer.number, url);
-    if (!done && answer.kind !== 'repeat') return { unchanged: true };
-    return done && done.finishedRepeat ? { toast: 'Reread counted.' } : {};
-  });
+  if (reply.kind === 'keep') return {};
+  await enqueue(mediaType, { kind: reply.kind === 'repeat' ? 'repeat' : 'record', sourceId, number: reply.number, url });
+  return {};
 }
 
 // ---------- Popup ----------
 
-const EDITABLE = ['read_status', 'score', 'progress', 'progress_volumes', 'repeating', 'repeat_progress', 'favorite'];
-
 async function handleTabEntry({ tabId }) {
   const connected = await isConnected();
+  const waiting = (await outbox()).length;
+  const sync = { waiting, error: lastError };
   const stored = await chrome.storage.session.get(`tab:${tabId}`);
   const where = stored[`tab:${tabId}`];
-  if (!where) return { connected, entry: null };
-  if (!connected) return { connected, entry: null, where };
-  const { rows } = await load(where.mediaType);
-  return { connected, where, entry: findRow(rows, where.sourceId) };
+  if (!where) return { connected, sync, entry: null };
+  if (!connected) return { connected, sync, entry: null, where };
+  return { connected, sync, where, entry: findRow(await view(where.mediaType), where.sourceId) };
 }
 
 async function handleEdit({ mediaType, sourceId, fields }) {
-  return mutate(mediaType, async (rows) => {
-    const row = findRow(rows, sourceId);
-    if (!row) return { unchanged: true };
-    Object.keys(fields)
-      .filter((k) => EDITABLE.includes(k))
-      .forEach((k) => {
-        row[k] = fields[k] === null || fields[k] === undefined ? '' : String(fields[k]);
-      });
-    // As in the app: Reading fills an empty start date, Completed an empty
-    // finish date and the progress up to the total.
-    if (fields.read_status === 'reading' && !row.start_date) row.start_date = today();
-    if (fields.read_status === 'read') {
-      if (!row.finish_date) row.finish_date = today();
-      if (Number(row.total) && Number(row.progress) < Number(row.total)) row.progress = row.total;
-    }
-    touch(row);
-    return { entry: { ...row } };
-  });
+  const t = timer(`edit ${mediaType} ${sourceId}`);
+  await enqueue(mediaType, { kind: 'edit', sourceId, fields });
+  const entry = findRow(await view(mediaType), sourceId);
+  t.end('queued');
+  return { entry };
 }
 
 // ---------- Messages ----------
@@ -377,9 +501,14 @@ const handlers = {
   leftPage: (msg, sender) => forgetTab(sender.tab && sender.tab.id).then(() => ({})),
   tabEntry: (msg) => handleTabEntry(msg),
   edit: (msg) => handleEdit(msg),
-  connect: () => connect().then(() => ({ ok: true })),
+  connect: () =>
+    connect().then(() => {
+      flushSoon(0);
+      return { ok: true };
+    }),
   disconnect: () => disconnect().then(() => ({ ok: true })),
-  status: async () => ({ connected: await isConnected() }),
+  status: async () => ({ connected: await isConnected(), waiting: (await outbox()).length, error: lastError }),
+  syncNow: () => flush().then(async () => ({ waiting: (await outbox()).length, error: lastError })),
   sitesChanged: () => registerPageScript().then(() => ({ ok: true })),
 };
 
@@ -396,3 +525,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(`tab:${tabId}`));
+
+// Whatever was waiting when the worker last stopped.
+flushSoon(1000);
