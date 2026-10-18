@@ -324,7 +324,9 @@ finish date and sets progress to the total when the total is known.
   anime) in the detail sheet opens the first chapter, or the one after
   your progress (during a rewatch, after the rewatch
   position: **▶ Rewatch ep N**) in its tab (`openNext` in `mediaTypes.js`).
-  On a Completed series it just says it's completed.
+  On a Completed series it's **▶ Reread** (Rewatch for anime): it turns
+  on Rereading and opens the first chapter, from the series page rather
+  than the last chapter you read.
   Anime opens episode N directly and then checks the page's episode list;
   manga reopens the last chapter page you read and presses its Next
   button (or, with no last chapter, opens chapter N from the series

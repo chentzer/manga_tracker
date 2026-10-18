@@ -582,18 +582,20 @@ function parseGenres(genres) {
 }
 
 // The detail sheet's main button: "Start reading" before the first
-// chapter, "Continue reading · ch N" after, with 🔍 when the title's page
+// chapter, "Continue reading · ch N" after, "Reread" once completed, with 🔍 when the title's page
 // on the site isn't known yet (imported from MyAnimeList), since it
 // searches for it instead.
 function nextButtonLabel(entry, words) {
-  if (entry.read_status === 'read' && !entry.repeating) return '✓ Completed';
+  const icon = isImportedSourceId(entry.source_id) ? '🔍' : '▶';
+  // Completed: starts a reread from the first chapter.
+  if (entry.read_status === 'read' && !entry.repeating) return `${icon} ${words.again}`;
   const verb = entry.media_type === 'anime' ? 'watching' : 'reading';
   const label = entry.repeating
     ? `${words.again} ${words.short} ${(entry.repeat_progress || 0) + 1}`
     : entry.progress
       ? `Continue ${verb} · ${words.short} ${entry.progress + 1}`
       : `Start ${verb}`;
-  return `${isImportedSourceId(entry.source_id) ? '🔍' : '▶'} ${label}`;
+  return `${icon} ${label}`;
 }
 
 // An entry's page on MyAnimeList (anime or manga list, by its MAL id).
@@ -1327,11 +1329,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       // their alternate title.
       const searchTitle = item.alt_title || item.title || item.source_id;
       const unit = item.media_type === 'anime' ? 'episode' : 'chapter';
-      const repeating = item.read_status === 'read' && !!item.repeating;
+      let repeating = item.read_status === 'read' && !!item.repeating;
+      // Completed: "Reread" turns on rereading from the first chapter.
       if (item.read_status === 'read' && !repeating) {
-        const done = item.total ? ` (${item.progress || 0}/${item.total} ${unit}s)` : '';
-        Alert.alert('Completed', `"${title}" is completed${done}.`);
-        return;
+        handleUpdate(item, { repeating: 1, repeat_progress: 0 });
+        item = { ...item, repeating: 1, repeat_progress: 0 };
+        repeating = true;
       }
       // During a rewatch/reread, the next one after its own position.
       const n = ((repeating ? item.repeat_progress : item.progress) || 0) + 1;
@@ -1347,10 +1350,14 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
         return;
       }
+      // A reread that hasn't started opens the first chapter from the series
+      // page, not via the Next button of the last chapter you read.
+      const target =
+        repeating && !item.repeat_progress ? { ...item, progress: 0, last_progress_url: null } : item;
       setSelectedKey(null);
-      onOpenInTab?.(item.media_type, { ...config.openNext(item, n), expect: item.source_id });
+      onOpenInTab?.(item.media_type, { ...config.openNext(target, n), expect: item.source_id });
     },
-    [onOpenInTab]
+    [onOpenInTab, handleUpdate]
   );
 
   // The Rewatching/Rereading switch. Turning it off yourself asks whether
