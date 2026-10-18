@@ -184,6 +184,7 @@ const SERIES_BY_PAGE_READER_JS = `
   (function() {
     function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
     var parts = location.pathname.split('/').filter(Boolean);
+    var pageUrl = location.href;
     var tries = 0;
     function read(seriesId, progress) {
       var seriesUrl = location.origin + '/manga/' + seriesId;
@@ -209,6 +210,7 @@ const SERIES_BY_PAGE_READER_JS = `
           send({
             sourceId: seriesId,
             sourceUrl: seriesUrl,
+            pageUrl: pageUrl,
             progress: progress,
             imageUrl: cover ? new URL(cover.getAttribute('src'), location.origin).href : null,
             title: title,
@@ -216,15 +218,18 @@ const SERIES_BY_PAGE_READER_JS = `
             malId: malMatch ? Number(malMatch[1]) : null,
           });
         })
-        .catch(function() { send({ sourceId: seriesId, sourceUrl: seriesUrl, progress: progress, title: null }); });
+        .catch(function() { send({ sourceId: seriesId, sourceUrl: seriesUrl, pageUrl: pageUrl, progress: progress, title: null }); });
     }
     function readChapter() {
       var back = [].slice.call(document.querySelectorAll('a[href]')).map(function(a) {
         return (a.getAttribute('href') || '').match(/^(?:https?:[/][/][^/]+)?[/]manga[/]([0-9]+)/);
       }).filter(Boolean)[0];
-      var number = (document.title || '').match(/Ch[.] *([0-9.]+)/);
+      // "Series — Chapter 87 | Site" (or "Ch. 87: ..."): the last one, in
+      // case the series' own name has a number like that.
+      var found = (document.title || '').match(/Ch(?:apter|[.])? *[0-9]+(?:[.][0-9]+)?/gi);
+      var number = found && found[found.length - 1].match(/([0-9]+(?:[.][0-9]+)?)$/);
       if ((!back || !number) && ++tries < 20) { setTimeout(readChapter, 300); return; }
-      if (!back) { send({ skip: 'no link to its series on this chapter page' }); return; }
+      if (!back) { send({ skip: 'no link to its series on this chapter page', pageUrl: pageUrl }); return; }
       read(back[1], number ? Math.floor(Number(number[1])) : null);
     }
     if (parts[0] === 'manga') read(parts[1], null);

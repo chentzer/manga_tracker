@@ -63,9 +63,11 @@ adapt to whatever you actually use:
    - manga, first site: `/manga/<id>` (series page) or `/chapter/<id>`
      (reader page, with the chapter's own id). A chapter's address doesn't
      say which series it's from, so its script finds the series from the
-     page's link back to it and the chapter number from the page title,
-     and reports both (`seriesFromPage`); either way every chapter of a
-     series is one entry
+     page's link back to it and the chapter number from the page title
+     ("Ch. 87" or "Chapter 87"), and reports both with its own page
+     address (`seriesFromPage`) — so the answer still counts if you've
+     moved on before the slow page finished; either way every chapter of
+     a series is one entry
    - manga, second site (`extraSources`): `/title/<id>-<slug>` (series
      page) or `/title/<id>-<slug>/<chapterId>-chapter-<n>` (reader page)
    - anime: `/watch/<id>/...` (episode page) or `/info/<id>/...` (series

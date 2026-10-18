@@ -1109,29 +1109,47 @@ const MediaWebView = forwardRef(function MediaWebView({
         return;
       }
 
-      let sourceId = pendingSourceId.current;
-      const pageUrl = pendingPageUrl.current;
-
-      // The answer from a page without its series in the address: the
-      // series (sourceId) and chapter (progress) come from the page.
-      if (!sourceId && pendingFromPage.current && pageUrl) {
+      // Scripts of sites whose pages name their series (seriesFromPage in
+      // mediaTypes.js) answer with the series (sourceId), the chapter
+      // (progress) and their own page (pageUrl), so the answer stands
+      // even if you've moved on to another page while it was being read.
+      // Only an answer for the page being waited on clears that wait.
+      const selfNamed = !!(config.seriesFromPage && payload.pageUrl);
+      const ownsPending = !selfNamed || payload.pageUrl === pendingPageUrl.current;
+      const clearPending = () => {
+        if (!ownsPending) return;
+        pendingSourceId.current = null;
+        pendingPageUrl.current = null;
         pendingFromPage.current = false;
+      };
+      let sourceId = selfNamed ? null : pendingSourceId.current;
+      const pageUrl = selfNamed ? payload.pageUrl : pendingPageUrl.current;
+
+      if (selfNamed) {
         inFlightSourceIds.current.delete(pageUrl);
         if (!payload.sourceId) {
           logDebug(`Not recording from this page: ${payload.skip || 'no series found'}.`);
-          pendingPageUrl.current = null;
+          clearPending();
           return;
         }
         sourceId = String(payload.sourceId);
         const known = getEntry(sourceId, config.key);
-        setCurrentEntryKey(known ? `${config.key}:${sourceId}` : null);
+        if (ownsPending) setCurrentEntryKey(known ? `${config.key}:${sourceId}` : null);
         if (known && payload.progress) applyProgress(known, payload.progress, pageUrl);
-        if (inFlightSourceIds.current.has(sourceId)) {
-          pendingPageUrl.current = null;
+        // A series page's own answer was already marked in flight by
+        // checkUrlAndExtract; anything else for that series is a duplicate.
+        const waitedFor = ownsPending && pendingSourceId.current === sourceId;
+        if (!waitedFor && inFlightSourceIds.current.has(sourceId)) {
+          clearPending();
           return;
         }
         inFlightSourceIds.current.add(sourceId);
-        pendingSourceId.current = sourceId;
+      } else if (!sourceId && pendingFromPage.current && pageUrl) {
+        // An answer without the series (e.g. { skip }).
+        inFlightSourceIds.current.delete(pageUrl);
+        logDebug(`Not recording from this page: ${payload.skip || 'no series found'}.`);
+        clearPending();
+        return;
       }
       if (!sourceId) return;
 
@@ -1146,8 +1164,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
           maybeBackupLibraryToDrive();
         }
-        pendingSourceId.current = null;
-        pendingPageUrl.current = null;
+        clearPending();
         inFlightSourceIds.current.delete(sourceId);
         return;
       }
@@ -1158,8 +1175,7 @@ const MediaWebView = forwardRef(function MediaWebView({
       // from a page that does.
       if (payload.skip) {
         logDebug(`Matched ${sourceId} — ${payload.skip}, not recording from this page.`);
-        pendingSourceId.current = null;
-        pendingPageUrl.current = null;
+        clearPending();
         inFlightSourceIds.current.delete(sourceId);
         return;
       }
@@ -1173,8 +1189,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         const text = `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.`;
         if (Platform.OS === 'android') ToastAndroid.show(text, ToastAndroid.LONG);
         else Alert.alert('NSFW', text);
-        pendingSourceId.current = null;
-        pendingPageUrl.current = null;
+        clearPending();
         inFlightSourceIds.current.delete(sourceId);
         return;
       }
@@ -1237,7 +1252,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`
         );
-        setCurrentEntryKey(`${config.key}:${sourceId}`);
+        if (ownsPending) setCurrentEntryKey(`${config.key}:${sourceId}`);
         maybeBackupLibraryToDrive().then((result) => {
           if (!result.attempted) return; // Drive not connected — nothing to report
           logDebug(
@@ -1269,8 +1284,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         console.warn(`Failed to save ${config.key} entry:`, err);
         logDebug(`FAILED to save ${sourceId}: ${err.message}`);
       } finally {
-        pendingSourceId.current = null;
-        pendingPageUrl.current = null;
+        clearPending();
         inFlightSourceIds.current.delete(sourceId);
       }
     },
