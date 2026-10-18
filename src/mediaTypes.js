@@ -118,7 +118,7 @@ function openChapterFromRowsJs(n) {
       function go() {
         if (!expanded) {
           var more = [].slice.call(document.querySelectorAll('button')).filter(function (b) {
-            return /show [0-9]+ more chapters/i.test(b.textContent || '');
+            return /show [0-9]+ more/i.test(b.textContent || '');
           })[0];
           if (more) { more.click(); expanded = true; setTimeout(go, 600); return; }
         }
@@ -140,6 +140,90 @@ function openChapterFromRowsJs(n) {
     true;
   `;
 }
+
+// On a series page: opens its first chapter, whatever it's numbered
+// (0, a prologue before it, 0.5…). The site's own button comes first
+// ("Start reading", "First Chapter", "Read First"): a link is followed,
+// anything else is pressed. If that doesn't open a chapter (some only
+// scroll to the list or re-sort it), the lowest-numbered chapter in the
+// list is opened, after any "Show N more" button is pressed.
+const OPEN_FIRST_CHAPTER_JS = `
+  (function() {
+    var start = location.href;
+    var tries = 0;
+    var pressed = false;
+    var expanded = false;
+    function visible(el) { return !!(el.offsetParent || el.getClientRects().length); }
+    function firstButton() {
+      return [].slice.call(document.querySelectorAll('a, button')).filter(function (el) {
+        return visible(el) &&
+          /^(start reading|begin reading|read first|first chapter|read from start)$/i.test((el.textContent || '').trim());
+      })[0];
+    }
+    function numberOf(a) {
+      var texts = [a.getAttribute('aria-label') || '', a.textContent || '',
+        (a.parentElement && a.parentElement.textContent) || ''];
+      for (var i = 0; i < texts.length; i++) {
+        var m = texts[i].match(/Ch(?:apter|[.])? *(-?[0-9]+(?:[.][0-9]+)?)/i);
+        if (m) return Number(m[1]);
+      }
+      var h = (a.getAttribute('href') || '').match(/chapter-(-?[0-9]+(?:[.][0-9]+)?)/i);
+      return h ? Number(h[1]) : null;
+    }
+    // This series' chapters: links under its own address, or else (sites
+    // whose chapter addresses don't name the series) /chapter/ links.
+    function chapterLinks() {
+      var base = location.origin + location.pathname.replace(/[/]$/, '') + '/';
+      var all = [].slice.call(document.querySelectorAll('a[href]')).filter(function (a) {
+        var href = a.getAttribute('href') || '';
+        return href !== '#' && href.indexOf('javascript') !== 0;
+      });
+      var under = all.filter(function (a) { return a.href.indexOf(base) === 0; });
+      return under.length ? under : all.filter(function (a) { return /[/]chapter[/]/.test(a.href); });
+    }
+    function lowest() {
+      var best = null;
+      chapterLinks().forEach(function (a) {
+        var n = numberOf(a);
+        if (n === null || isNaN(n)) return;
+        if (!best || n < best.n) best = { n: n, a: a };
+      });
+      return best;
+    }
+    function go() {
+      if (location.href !== start) return; // a chapter opened
+      if (!pressed) {
+        var button = firstButton();
+        if (button) {
+          pressed = true;
+          var href = button.getAttribute('href');
+          if (button.tagName === 'A' && href && href !== '#' && href.indexOf('javascript') !== 0) {
+            location.href = button.href;
+            return;
+          }
+          button.click();
+          setTimeout(go, 1500);
+          return;
+        }
+      }
+      if (!expanded) {
+        var more = [].slice.call(document.querySelectorAll('button')).filter(function (b) {
+          return /show [0-9]+ more/i.test(b.textContent || '');
+        })[0];
+        if (more) { expanded = true; more.click(); setTimeout(go, 600); return; }
+      }
+      var best = lowest();
+      if (best && (tries > 2 || pressed)) { location.href = best.a.href; return; }
+      if (++tries < 25) { setTimeout(go, 400); return; }
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'episodeMissing',
+        message: "Couldn't find the first chapter on this page — pick it from the chapter list.",
+      }));
+    }
+    go();
+  })();
+  true;
+`;
 
 // On an episode page: checks episode N is in the episode list (items
 // labelled "EP <number>"), or reports the latest one.
@@ -482,6 +566,14 @@ export const MEDIA_TYPES = {
       return { url: `${MANGA_SITE_URL}/manga/${entry.source_id}`, checkJs: openChapterFromRowsJs(n) };
     },
     // For titles not opened on a site yet (imported from MAL).
+    // "Start reading" / "Reread" (Library): the series page's first chapter.
+    openFirst: (entry) => ({
+      url:
+        hostOf(entry.source_url || '') === MANGA_HOST_2
+          ? `${MANGA_SITE_2_URL}/title/${entry.source_id}`
+          : `${MANGA_SITE_URL}/manga/${entry.source_id}`,
+      checkJs: OPEN_FIRST_CHAPTER_JS,
+    }),
     buildSearchUrl: (title) => `${MANGA_SITE_URL}/search?search=${encodeURIComponent(title)}`,
     // If your site shows popup/redirect ads, uncomment this to block
     // any navigation attempt to a domain other than the one above —
@@ -640,6 +732,14 @@ export const MEDIA_TYPES = {
       entry.last_progress_url
         ? { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) }
         : { url: entry.source_url },
+    // "Start reading" / "Reread" (Library): the series page's first chapter.
+    openFirst: (entry) => ({
+      url:
+        hostOf(entry.source_url || '') === MANHWA_HOST_2
+          ? `${MANHWA_SITE_2_URL}/serie/${entry.source_id}/`
+          : `${MANHWA_SITE_URL}/series/${entry.source_id}`,
+      checkJs: OPEN_FIRST_CHAPTER_JS,
+    }),
     extraSources: [
       {
         name: MANHWA_HOST_2,

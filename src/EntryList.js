@@ -1350,11 +1350,17 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
         return;
       }
-      // A reread that hasn't started opens the first chapter from the series
-      // page, not via the Next button of the last chapter you read.
+      setSelectedKey(null);
+      // From the beginning (Start reading, or a reread that hasn't started):
+      // the site's first chapter, whatever it's numbered (openFirst).
+      if (n === 1 && config.openFirst) {
+        onOpenInTab?.(item.media_type, { ...config.openFirst(item), expect: item.source_id });
+        return;
+      }
+      // A reread that hasn't started (types without openFirst) opens the
+      // first one from the series page, not via the last one's Next button.
       const target =
         repeating && !item.repeat_progress ? { ...item, progress: 0, last_progress_url: null } : item;
-      setSelectedKey(null);
       onOpenInTab?.(item.media_type, { ...config.openNext(target, n), expect: item.source_id });
     },
     [onOpenInTab, handleUpdate]

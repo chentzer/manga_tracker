@@ -327,6 +327,13 @@ finish date and sets progress to the total when the total is known.
   On a Completed series it's **▶ Reread** (Rewatch for anime): it turns
   on Rereading and opens the first chapter, from the series page rather
   than the last chapter you read.
+  Starting from the beginning (Start reading, or a reread) on manga and
+  manhwa doesn't assume chapter 1 (`openFirst`, `OPEN_FIRST_CHAPTER_JS`
+  in `mediaTypes.js`): the series page's own button ("Start reading",
+  "First Chapter", "Read First") is followed or pressed, and if that
+  doesn't open a chapter (one site only re-sorts its list), the
+  lowest-numbered chapter in the list is opened — so a chapter 0 or a
+  prologue before it comes first.
   Anime opens episode N directly and then checks the page's episode list;
   manga reopens the last chapter page you read and presses its Next
   button (or, with no last chapter, opens chapter N from the series
