@@ -320,8 +320,9 @@ finish date and sets progress to the total when the total is known.
   so after each chapter update a box says volumes read wasn't changed,
   with **Edit** (opens the entry in the Library) and **Snooze 1 hour**
   (no more of these boxes for an hour). Set by `promptForVolumes`.
-- **▶ Watch ep N / Read ch N** in the detail sheet opens the episode or
-  chapter after your progress (during a rewatch, after the rewatch
+- **▶ Start reading / ▶ Continue reading · ch N** (watching / ep for
+  anime) in the detail sheet opens the first chapter, or the one after
+  your progress (during a rewatch, after the rewatch
   position: **▶ Rewatch ep N**) in its tab (`openNext` in `mediaTypes.js`).
   On a Completed series it just says it's completed.
   Anime opens episode N directly and then checks the page's episode list;
@@ -329,7 +330,8 @@ finish date and sets progress to the total when the total is known.
   button (or, with no last chapter, opens chapter N from the series
   page's list). If it doesn't exist yet, a box says so (e.g. "Episode 5
   isn't out yet — episode 4 is the latest"). Titles imported from MAL
-  that haven't been opened on the site offer a site search instead.
+  that haven't been opened on the site show 🔍 on the button and search
+  the site for the title instead; opening it from the results links it.
 - **🎲 Random** (the button at the top of the Library) picks one entry by
   category (Manga / Manhwa / Anime), status (Read/Watched, Want to
   Read/Watch, Reading/Watching) and rating (♥ Favourite, ★10 … ★6, ★1–5,

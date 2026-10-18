@@ -581,6 +581,21 @@ function parseGenres(genres) {
   return (genres || '').split(',').map((g) => g.trim()).filter(Boolean);
 }
 
+// The detail sheet's main button: "Start reading" before the first
+// chapter, "Continue reading · ch N" after, with 🔍 when the title's page
+// on the site isn't known yet (imported from MyAnimeList), since it
+// searches for it instead.
+function nextButtonLabel(entry, words) {
+  if (entry.read_status === 'read' && !entry.repeating) return '✓ Completed';
+  const verb = entry.media_type === 'anime' ? 'watching' : 'reading';
+  const label = entry.repeating
+    ? `${words.again} ${words.short} ${(entry.repeat_progress || 0) + 1}`
+    : entry.progress
+      ? `Continue ${verb} · ${words.short} ${entry.progress + 1}`
+      : `Start ${verb}`;
+  return `${isImportedSourceId(entry.source_id) ? '🔍' : '▶'} ${label}`;
+}
+
 // An entry's page on MyAnimeList (anime or manga list, by its MAL id).
 function malUrlOf(entry) {
   return `https://myanimelist.net/${malTypeOf(entry.media_type)}/${entry.mal_id}`;
@@ -779,13 +794,7 @@ function DetailModal({
           ) : null}
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailNextButton} onPress={() => onOpenNext(entry)}>
-              <Text style={styles.detailNextButtonText}>
-                {entry.read_status === 'read' && !entry.repeating
-                  ? '✓ Completed'
-                  : entry.repeating
-                    ? `▶ ${words.again} ${words.short} ${(entry.repeat_progress || 0) + 1}`
-                    : `▶ ${entry.media_type === 'anime' ? 'Watch' : 'Read'} ${words.short} ${(entry.progress || 0) + 1}`}
-              </Text>
+              <Text style={styles.detailNextButtonText}>{nextButtonLabel(entry, words)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.detailFooterRow}>
@@ -1307,8 +1316,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [load, backupSilently]
   );
 
-  // "▶ Watch ep N" / "▶ Read ch N": opens the episode/chapter after your
-  // progress in its tab (openNext in mediaTypes.js; the tab says if it
+  // "▶ Start reading" / "▶ Continue reading · ch N" (watching for anime):
+  // opens the episode/chapter after your progress in its tab (openNext in mediaTypes.js; the tab says if it
   // doesn't exist yet).
   const handleOpenNext = useCallback(
     (item) => {
@@ -1330,21 +1339,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         Alert.alert(`No next ${unit}`, `"${title}" has ${item.total} ${unit}s and you're at ${n - 1}.`);
         return;
       }
+      // Not opened on the site yet (imported from MyAnimeList): searches
+      // for it there. Opening it once from the results links it, and the
+      // button opens the chapter itself from then on.
       if (isImportedSourceId(item.source_id)) {
-        Alert.alert(
-          'Not opened on the site yet',
-          `"${title}" came from your MyAnimeList list, so its page on the site isn't known yet. Search for it, open it once, and this button will work.`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Search',
-              onPress: () => {
-                setSelectedKey(null);
-                onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
-              },
-            },
-          ]
-        );
+        setSelectedKey(null);
+        onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
         return;
       }
       setSelectedKey(null);
