@@ -590,6 +590,14 @@ so nothing renders blank.
   networks, links to them and the usual ad boxes are blocked or hidden.
   Frames from other sites can still show their own ads; the debug log
   lists what was blocked.
+- **No jumping to other apps** — links in a page that would open
+  another app (`market:`, `intent:`, `whatsapp:`, `tg:` …, e.g. an ad
+  sending you to the Play Store) are always blocked, on every tab: only
+  web pages (and `about:`, `data:`, `blob:`) load. A short notice says
+  so (at most every 10 seconds) and the debug log names the link. The
+  webview's `originWhitelist` is `*` so these reach
+  `handleShouldStartLoad` in `MediaWebView.js` instead of going straight
+  to Android.
 - **Videos pause** when you switch to another tab or leave the app, so
   nothing plays where you can't see it; they resume from the same spot.
 - **Hidden from Recents** (`withHideFromRecents.js`, Android 13+) — while

@@ -343,6 +343,10 @@ function buildAutoConfirmJs(domainButtonMap) {
 // Extracts the hostname from a URL string without relying on the global
 // URL class (not guaranteed available in every JS engine/RN version) —
 // a plain regex is simpler and works everywhere.
+// Schemes a page may load in place. Anything else (market:, intent:,
+// whatsapp:, tg: …) would hand the page to another app, so it's blocked.
+const IN_PAGE_SCHEME = /^(https?|about|data|blob):/i;
+
 function getHostname(url) {
   if (!url) return null;
   const match = url.match(/^https?:\/\/([^/]+)/i);
@@ -850,8 +854,19 @@ const MediaWebView = forwardRef(function MediaWebView({
   // checked regardless of domain, so a same-domain redirect endpoint
   // like this gets blocked too.
   const allowedDomains = getAllowedDomains(config);
+  const appLinkNoticeAt = useRef(0);
   const handleShouldStartLoad = useCallback(
     (request) => {
+      // Links that would open another app are always blocked, whatever the
+      // tab (originWhitelist below sends them here instead of to Android).
+      if (request.url && !IN_PAGE_SCHEME.test(request.url)) {
+        logDebug(`Blocked opening another app: ${request.url.slice(0, 120)}`);
+        if (Platform.OS === 'android' && Date.now() - appLinkNoticeAt.current > 10000) {
+          appLinkNoticeAt.current = Date.now();
+          ToastAndroid.show('Blocked: the page tried to open another app.', ToastAndroid.SHORT);
+        }
+        return false;
+      }
       if (config.blockedUrlPatterns && config.blockedUrlPatterns.some((p) => p.test(request.url))) {
         return false;
       }
@@ -862,9 +877,9 @@ const MediaWebView = forwardRef(function MediaWebView({
       }
       if (!config.blockExternalNavigation) return true;
       const requestHostname = getHostname(request.url);
-      // Also allow non-http(s) schemes (e.g. about:blank, data:) through
-      // untouched — getHostname returns null for those, and blocking
-      // them tends to break legitimate in-page behavior for no reason.
+      // Also allow about:blank, data: and blob: through untouched —
+      // getHostname returns null for those, and blocking them tends to
+      // break legitimate in-page behavior for no reason.
       if (!requestHostname) return true;
       return allowedDomains.some(
         (domain) => requestHostname === domain || requestHostname.endsWith(`.${domain}`)
@@ -1429,6 +1444,11 @@ const MediaWebView = forwardRef(function MediaWebView({
         source={startSource}
         onNavigationStateChange={handleNavigationStateChange}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
+        // Every address goes to handleShouldStartLoad. With the default
+        // (http/https only), anything else skips it and goes straight to
+        // Android, which opens whatever app handles it (an ad's market:
+        // link opening the Play Store).
+        originWhitelist={['*']}
         onMessage={handleMessage}
         // Pop-ups and "open in new window" links are handed to
         // handleOpenWindow, which opens them in this same view only if
