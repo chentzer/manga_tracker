@@ -542,6 +542,35 @@ export const EDITABLE_COLUMNS = [
   'updated_at',
 ];
 
+// Fills in an entry's empty details from its page, read again when it's
+// opened (MediaWebView.js): only fields that are empty now are written,
+// so nothing already there (or edited by hand) changes. coverPath: a
+// cover downloaded because the entry's was missing (no path, or its file
+// is gone) — always saved, and left 'pending' for the next upload.
+// Returns the names of the fields that were filled.
+export function fillMissingEntryFields(sourceId, mediaType, { title, altTitle, author, coverPath }) {
+  const entry = getEntry(sourceId, mediaType);
+  if (!entry) return [];
+  const empty = (v) => v === null || v === undefined || String(v).trim() === '';
+  const candidates = {
+    title: title || null,
+    alt_title: altTitle || null,
+    author: author ? String(author).trim() || null : null,
+  };
+  const fields = Object.fromEntries(Object.entries(candidates).filter(([k, v]) => v && empty(entry[k])));
+  if (coverPath) fields.local_image_path = coverPath;
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return [];
+  const sets = keys.map((k) => `${k} = ?`);
+  if (coverPath) sets.push("drive_file_id = NULL, sync_status = 'pending'");
+  db.runSync(`UPDATE entries SET ${sets.join(', ')} WHERE source_id = ? AND media_type = ?`, [
+    ...keys.map((k) => fields[k]),
+    sourceId,
+    mediaType,
+  ]);
+  return keys;
+}
+
 // Sets any of EDITABLE_COLUMNS on one entry, e.g. { progress: 12 }.
 export function updateEntryFields(sourceId, mediaType, fields) {
   const keys = Object.keys(fields).filter((k) => EDITABLE_COLUMNS.includes(k));
@@ -751,6 +780,13 @@ export function deleteEntry(sourceId, mediaType) {
 // Wipes every recorded entry. Used by the "Clear All" action in the
 // library — callers are responsible for confirming with the user first
 // and for cleaning up local image files, since this only touches the DB.
+// Drive keeps everything it clears: the deletions its delete trigger
+// would record (entries_sync_delete) are dropped again, so the next sync
+// brings every entry back from Drive rather than deleting it there.
 export function clearAllEntries() {
-  db.execSync('DELETE FROM entries;');
+  db.withTransactionSync(() => {
+    const { now } = db.getFirstSync("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS now");
+    db.execSync('DELETE FROM entries;');
+    db.runSync('DELETE FROM entry_tombstones WHERE deleted_at >= ?', [now]);
+  });
 }
