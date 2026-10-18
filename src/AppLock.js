@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useContext, useMemo, c
 import { Text, TouchableOpacity, StyleSheet, AppState, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as FileSystem from 'expo-file-system/legacy';
 import { isRelockSuppressed, suppressNextRelock } from './relockGuard';
 import { initDb, getSetting, setSetting } from './db';
 
@@ -32,6 +33,16 @@ export default function AppLock({ children }) {
   const [statusMessage, setStatusMessage] = useState(null);
   const [failedOnce, setFailedOnce] = useState(false);
   const appState = useRef(AppState.currentState);
+
+  // While App lock is on, the app's content is hidden in Recents (Android
+  // 13+). MainActivity checks for this file (withHideFromRecents.js).
+  useEffect(() => {
+    const flag = `${FileSystem.documentDirectory}hide-from-recents`;
+    (lockEnabled
+      ? FileSystem.writeAsStringAsync(flag, '1')
+      : FileSystem.deleteAsync(flag, { idempotent: true })
+    ).catch(() => {});
+  }, [lockEnabled]);
 
   const attemptUnlock = useCallback(async () => {
     setChecking(true);

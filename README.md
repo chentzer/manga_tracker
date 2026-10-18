@@ -83,6 +83,11 @@ adapt to whatever you actually use:
    the MyAnimeList link. The second site only records from the series
    page: its reader pages don't show the cover or author, so its script
    posts `{ skip: '…' }` there and nothing is saved from that page.
+   The anime script takes the cover from the page's AniList cover (the
+   `<img>` for the id in its anilist.co link) before `og:image`: a title
+   opened from inside the site (e.g. its search results) can still carry
+   the previous page's `og:` tags, so those are only used once `og:url`
+   names this title.
 4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
    The ▾ site list at the top of the tab switches between them. The first
    is expected to be a Next.js comics site (series at `/series/<id>`,
@@ -573,10 +578,13 @@ so nothing renders blank.
   lists what was blocked.
 - **Videos pause** when you switch to another tab or leave the app, so
   nothing plays where you can't see it; they resume from the same spot.
-- **Hidden from Recents** (`withHideFromRecents.js`, Android 13+) — the
-  app's content doesn't show in the recent-apps preview, while
-  screenshots still work (Android's usual way, FLAG_SECURE, would block
-  both).
+- **Hidden from Recents** (`withHideFromRecents.js`, Android 13+) — while
+  App lock is on, the app's content doesn't show in the recent-apps
+  preview, while screenshots still work (Android's usual way,
+  FLAG_SECURE, would block both). With App lock off, Recents shows the
+  app as usual. `src/AppLock.js` keeps a `hide-from-recents` file in the
+  app's files folder while the lock is on, and MainActivity checks it
+  when it starts and each time you leave the app.
 - **Whole search kept in the search box** — some search pages write the
   search back into their box cut short (e.g. "under observation: ..."
   shows as "under"), so searching again from there would lose the rest;

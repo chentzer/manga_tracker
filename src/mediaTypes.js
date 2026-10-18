@@ -715,7 +715,9 @@ export const MEDIA_TYPES = {
     // that swap the page client-side, so this waits until the <h1> is
     // there and og:url points at the series in the current URL before
     // reading anything — otherwise it could save the previous series'
-    // details. No author for anime. malId comes from the page's link to
+    // details. Opened from inside the site, the og: tags can be stale, so
+    // the cover comes from the page's AniList cover when there is one.
+    // No author for anime. malId comes from the page's link to
     // myanimelist.net/anime/<id> (see malList.js).
     extractMetadataJs: `
       (function() {
@@ -726,8 +728,16 @@ export const MEDIA_TYPES = {
           var ogUrl = document.querySelector('meta[property="og:url"]');
           var h1 = document.querySelector('h1');
           var seriesId = location.pathname.split('/')[2] || '';
-          var ready = h1 && h1.textContent.trim() &&
-            (!ogUrl || !seriesId || ogUrl.content.indexOf(seriesId) !== -1);
+          // Opened from inside the site (e.g. its search results), the og:
+          // tags can still be the previous page's; then the page's own
+          // title, once it names the <h1>, says it's ready.
+          var ogFresh = !ogUrl || !seriesId || ogUrl.content.indexOf(seriesId) !== -1;
+          var h1Text = h1 ? h1.textContent.trim() : '';
+          var ready = h1Text && (ogFresh || document.title.indexOf(h1Text.slice(0, 20)) !== -1);
+          if (!ogFresh) {
+            ogTitle = null;
+            ogImage = null;
+          }
 
           attempts++;
           if (!ready && attempts < 20) {
@@ -754,8 +764,19 @@ export const MEDIA_TYPES = {
             altTitle = null;
           }
           if (altTitle === title) altTitle = null;
+          // The cover: the page's AniList cover for its own AniList id
+          // (.../cover/large/bx<id>-...), else og:image, else the video's.
+          var aniLink = document.querySelector('a[href*="anilist.co/anime/"]');
+          var aniMatch = aniLink && aniLink.href.match(/anilist[.]co[/]anime[/]([0-9]+)/);
+          var cover = null;
+          if (aniMatch) {
+            var imgs = document.querySelectorAll('img[src*="/cover/"]');
+            for (var i = 0; i < imgs.length; i++) {
+              if (new RegExp('/[a-z]*' + aniMatch[1] + '-').test(imgs[i].src)) { cover = imgs[i].src; break; }
+            }
+          }
           var video = document.querySelector('video');
-          var imageUrl = (ogImage && ogImage.content) || (video && video.poster) || null;
+          var imageUrl = cover || (ogImage && ogImage.content) || (video && video.poster) || null;
 
           var malLink = document.querySelector('a[href*="myanimelist.net/anime/"]');
           var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]anime[/]([0-9]+)/);
