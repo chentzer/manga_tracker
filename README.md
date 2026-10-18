@@ -837,8 +837,8 @@ Setting it up:
    **Developer mode** → **Load unpacked** → pick the `extension` folder.
    Its id is fixed by the `key` in `manifest.json`:
    `aapgcipkdhmbmphncoeciejepcdmlbmc`.
-2. Google Cloud Console → **APIs & Services → Credentials** → open the
-   app's **web** OAuth client (`GOOGLE_CLIENT_ID_WEB` in `.env`) → under
+2. [Google Cloud Console → **APIs & Services → Credentials**](https://console.cloud.google.com/apis/credentials)
+   → under **OAuth 2.0 Client IDs**, open the app's **web** OAuth client (`GOOGLE_CLIENT_ID_WEB` in `.env`) → under
    **Authorized redirect URIs** add
    `https://aapgcipkdhmbmphncoeciejepcdmlbmc.chromiumapp.org/` → Save.
    (The extension signs in through that web client, in the app's own
