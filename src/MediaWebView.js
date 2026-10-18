@@ -870,6 +870,21 @@ const MediaWebView = forwardRef(function MediaWebView({
     [config, allowedDomains, blockAds, logDebug]
   );
 
+  // Pop-ups and "open in new window" links: opened in this same view only
+  // if they'd be allowed as a normal page (handleShouldStartLoad above),
+  // so ads and other sites are dropped.
+  const handleOpenWindow = useCallback(
+    (event) => {
+      const url = event.nativeEvent.targetUrl;
+      if (!url || !handleShouldStartLoad({ url })) {
+        logDebug(`Pop-up blocked: ${url || '(no address)'}`);
+        return;
+      }
+      webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
+    },
+    [handleShouldStartLoad, logDebug]
+  );
+
   // Android back button (App.js): back in the webview's own history
   // (previous page, previous search results, etc) when there is one;
   // false otherwise, so App.js asks whether to exit.
@@ -1412,10 +1427,14 @@ const MediaWebView = forwardRef(function MediaWebView({
         onNavigationStateChange={handleNavigationStateChange}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         onMessage={handleMessage}
-        // Prevents window.open()-based popups from opening a second
-        // webview/window at all — combined with onShouldStartLoadWithRequest
-        // above, this covers both common ad-popup mechanisms.
-        setSupportMultipleWindows={false}
+        // Pop-ups and "open in new window" links are handed to
+        // handleOpenWindow, which opens them in this same view only if
+        // they'd be allowed as a normal page (ads and other sites are
+        // dropped). Multiple windows stay switched on because turning them
+        // off lets a page's embedded frame take over the main page
+        // (CVE-2020-6506, per the react-native-webview docs).
+        setSupportMultipleWindows={true}
+        onOpenWindow={handleOpenWindow}
         // Without this, the fullscreen button on an HTML5 <video>
         // player does nothing at all on Android — WebView doesn't
         // support the browser Fullscreen API for video by default.
