@@ -25,8 +25,10 @@
 
   // ---------- The card ----------
 
+  // A card without buttons goes after 4 seconds (2.5 when brief), or when
+  // clicked; one with buttons stays until one is pressed.
   let card = null;
-  function showCard(text, buttons = [], onAnswer = null) {
+  function showCard(text, buttons = [], onAnswer = null, brief = false) {
     if (!card) {
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;';
@@ -40,9 +42,12 @@
           button { font: inherit; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; background: #2a3a5e; color: #fff; }
           button.main { background: #e94560; }
         </style>
-        <div class="card"><div class="name">Manga Tracker</div><div class="text"></div><div class="row"></div></div>`;
+        <div class="card"><div class="name">AniManga Tracker</div><div class="text"></div><div class="row"></div></div>`;
       document.documentElement.appendChild(host);
-      card = { host, root, timer: null };
+      card = { host, root, timer: null, buttons: false };
+      root.querySelector('.card').addEventListener('click', () => {
+        if (!card.buttons) card.host.style.display = 'none';
+      });
     }
     clearTimeout(card.timer);
     card.host.style.display = '';
@@ -59,21 +64,33 @@
       });
       row.appendChild(button);
     });
-    if (!buttons.length) card.timer = setTimeout(() => (card.host.style.display = 'none'), 4000);
+    card.buttons = buttons.length > 0;
+    if (!buttons.length) card.timer = setTimeout(() => (card.host.style.display = 'none'), brief ? 2500 : 4000);
   }
 
   // Shows what the background worker said about this page.
   function show(result, context) {
     if (!result) return;
-    if (result.error && result.error !== 'notConnected') console.warn('Manga Tracker:', result.error);
+    if (result.error && result.error !== 'notConnected') console.warn('AniManga Tracker:', result.error);
     if (result.question) {
       showCard(result.question.text, result.question.buttons, (answer) =>
         send({ type: 'answer', ...context, answer }).then((r) => show(r, context))
       );
     } else if (result.toast) {
-      showCard(result.toast);
+      showCard(result.toast, [], null, !!result.brief);
     }
   }
+
+  // A save is written to Drive after the card shows; only a delay says so,
+  // and then again once it's in.
+  chrome.runtime.onMessage.addListener((message) => {
+    if (!message) return;
+    if (message.type === 'saveDelayed') {
+      showCard(`Not in Drive yet: ${message.title}. AniManga Tracker keeps trying (${message.error}).`);
+    } else if (message.type === 'saveDone') {
+      showCard(`Now in Drive: ${message.title}`, [], null, true);
+    }
+  });
 
   // ---------- Reading a page ----------
 
@@ -148,13 +165,13 @@
       const started = performance.now();
       const ms = () => `${Math.round(performance.now() - started)}ms`;
       const read = sleep(300).then(() => readPage(source)).then((p) => {
-        console.debug(`[Manga Tracker] page read at ${ms()}`);
+        console.debug(`[AniManga Tracker] page read at ${ms()}`);
         return p;
       });
       let visit = { need: 'details', isNew: true };
       if (sourceId) {
         visit = await send({ type: 'visit', mediaType: type.key, sourceId, url, progress });
-        console.debug(`[Manga Tracker] library checked at ${ms()}`);
+        console.debug(`[AniManga Tracker] library checked at ${ms()}`);
         show(visit, { mediaType: type.key, sourceId, url });
       }
       if (visit.notConnected || visit.error || visit.need !== 'details') return;
@@ -166,8 +183,15 @@
         payload.progress !== undefined && payload.progress !== null ? payload.progress : progress;
       const image = visit.isNew && !payload.skip ? await coverData(payload.imageUrl) : null;
       const context = { mediaType: type.key, sourceId: id, url: pageUrl };
-      const result = await send({ type: 'details', ...context, progress: pageProgress, payload, image });
-      console.debug(`[Manga Tracker] saved at ${ms()}`);
+      const result = await send({
+        type: 'details',
+        ...context,
+        progress: pageProgress,
+        payload,
+        image,
+        fromPage: !sourceId,
+      });
+      console.debug(`[AniManga Tracker] saved at ${ms()}`);
       show(result, context);
     } finally {
       reading.delete(url);

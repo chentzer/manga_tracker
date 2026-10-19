@@ -1,0 +1,20 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- "Search AniManga Tracker" in the menu that appears over highlighted text
+         in other apps (ProcessTextActivity.kt). -->
+    <activity
+      android:name="expo.modules.processtext.ProcessTextActivity"
+      android:label="Search AniManga Tracker"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.intent.action.PROCESS_TEXT" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/plain" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

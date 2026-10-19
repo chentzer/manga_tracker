@@ -1,4 +1,4 @@
-# Manga Tracker
+# AniManga Tracker
 
 Records an entry (name = extracted ID, cover = thumbnail image) whenever you
 browse to a matching URL in one of the app's two built-in webview tabs:
@@ -125,7 +125,7 @@ redirect URI to register, just the platform's native account picker.
 2. **APIs & Services → Library** → search "Google Drive API" → **Enable**.
 3. **APIs & Services → OAuth consent screen**:
    - User type: **External** (unless you have a Google Workspace org).
-   - Fill in app name (e.g. "Manga Tracker"), your email for support/contact.
+   - Fill in app name (e.g. "AniManga Tracker"), your email for support/contact.
    - Scopes: you don't need to add `drive.file` here manually — it's
      requested at sign-in time by the app.
    - Under **Test users**, add your own Google account email. While the
@@ -330,11 +330,13 @@ finish date and sets progress to the total when the total is known.
   title (a total of 1 chapter), it counts as chapter 1.
 - **Ahead of your record.** Opening an episode more than one past your
   record (it says 4, you open 7) asks first: **Go to episode 5** (the
-  next one after your record), **Record 7**, or **Keep 4**. A series
-  recorded for the first time from that page isn't asked about.
+  next one after your record), **Record 7**, or **Keep 4** (which stops
+  asking about that series for the snooze time below, without recording
+  the episodes you open meanwhile). A series recorded for the first time
+  from that page isn't asked about.
 - **Rewatching / rereading.** Opening an episode of a Completed series
   asks whether you're starting a rewatch (**Just looking** stops asking
-  about that series for an hour). While rewatching, the status stays
+  about that series for the snooze time below). While rewatching, the status stays
   Completed (as on MAL), the Rewatching switch is on, and a separate
   rewatch position (`repeat_progress`; MAL's `my_rewatching_ep` for
   anime) moves forward as you watch, so your progress stays at the full
@@ -343,8 +345,12 @@ finish date and sets progress to the total when the total is known.
   switch off yourself asks whether to count it as a finished rewatch.
 - **Volumes (manga).** The manga site's pages don't show volume numbers,
   so after each chapter update a box says volumes read wasn't changed,
-  with **Edit** (opens the entry in the Library) and **Snooze 1 hour**
-  (no more of these boxes for an hour). Set by `promptForVolumes`.
+  with **Edit** (opens the entry in the Library) and **Snooze** (no more
+  of these boxes for the snooze time below). Set by `promptForVolumes`.
+- **Snooze time** — **Settings → Library → Snooze chapter questions**:
+  15 minutes, 1 hour (the default), 6 hours, 1 day or 1 week, for all
+  three questions above (`src/snooze.js`). The browser extension's own
+  "Not now" stays at an hour.
 - **▶ Start reading / ▶ Continue reading · ch N** (watching / ep for
   anime) in the detail sheet opens the first chapter, or the one after
   your progress (during a rewatch, after the rewatch
@@ -366,6 +372,8 @@ finish date and sets progress to the total when the total is known.
   isn't out yet — episode 4 is the latest"). Titles imported from MAL
   that haven't been opened on the site show 🔍 on the button and search
   the site for the title instead; opening it from the results links it.
+  The search shows a bar with **Next: <site> ›** to try the tab's other
+  sites (Manhwa has two).
 - **🎲 Random** (the button at the top of the Library) picks one entry by
   category (Manga / Manhwa / Anime), status (Read/Watched, Want to
   Read/Watch, Reading/Watching) and rating (♥ Favourite, ★10 … ★6, ★1–5,
@@ -378,6 +386,36 @@ finish date and sets progress to the total when the total is known.
   favourite (♥ on its Library row; stored as `favorite`, backed up with
   the rest). The Filters' score row has **♥ Favourites** to show only
   those.
+
+## Search a title from any app
+
+To look up a manga, manhwa or anime title fast: highlight it in any app
+(a browser, Discord, Reddit…) and pick **Search AniManga Tracker** from
+the menu over the selection (Android's text-selection menu; ⋮ shows more
+items there). Sharing text to the app (**Share › AniManga Tracker**)
+offers **Search** next to **Save to Notepad**. With App lock on, the
+search runs once you've unlocked.
+
+Where it opens (`src/quickSearch.js`):
+
+- **One Library entry has exactly that title** (or alternate title): its
+  page opens in its tab ("In your Library: …"). A title imported from MAL
+  that hasn't been opened on a site yet is searched in its tab instead.
+- **Only one tab's entries match part of it** (title, alternate title or
+  author): that tab's search opens.
+- **Otherwise** (no match, or e.g. Dr. Stone saved as both a manga and an
+  anime) **Search in…** asks which tab, with the tabs that have Library
+  matches first and how many.
+
+The search opens on the tab's first site with a bar showing
+“title” on <site>, **Next: <site> ›** for the tab's other sites, and ✕ to
+close it. Each tab's sites are its `titleSearch` in `src/mediaTypes.js`, or
+else its `buildSearchUrl`. Manga searches only its first site, since the
+second site's search address isn't set up.
+
+The menu item comes from the app's own native module
+(`modules/process-text`, an Android `PROCESS_TEXT` activity), so it needs a
+new build; it isn't in Expo Go.
 
 ## Name vs. dedup key
 
@@ -417,7 +455,7 @@ so nothing renders blank.
   `savePageImage: true` only — Manga in the example)
   grabs the largest currently-rendered image on the page (not necessarily
   the cover — whatever's actually on screen) and saves it to the tab's
-  gallery folder (`Pictures/Manga Tracker/<tab>/`, `src/gallery.js`), named `code -- page`
+  gallery folder (`Pictures/AniManga Tracker/<tab>/`, `src/gallery.js`), named `code -- page`
   (e.g. `abc12 -- ch60`) using the current URL matched against the type's
   `urlRegex`/`extractPageNumber` — falls back to a timestamp if the
   current page doesn't match the pattern at all. Accepts a
@@ -466,6 +504,8 @@ so nothing renders blank.
   it passes, even though its whole purpose is hijacking the page into
   an ad) — an optional `blockedUrlPatterns` (array of regexes, see
   `mediaTypes.js`) is checked regardless of domain to catch these.
+  The Manga and Manhwa tabs have it on, so their pages can't leave
+  their two sites (links out to other sites don't open either).
   `setSupportMultipleWindows={false}` is also set unconditionally as a
   light extra defense against popups specifically. `allowsFullscreenVideo`,
   `allowsInlineMediaPlayback`, and `mediaPlaybackRequiresUserAction={false}`
@@ -597,11 +637,11 @@ so nothing renders blank.
   also takes a video's poster or a background picture; small icons are
   skipped. Saved as `<code>_<time>` on a title's page, else `<site>_<time>`.
 - **Gallery folders** (`src/gallery.js`) — everything the app saves goes
-  into `Pictures/Manga Tracker/`, one folder per tab (e.g.
-  `Pictures/Manga Tracker/Manga/`), instead of loose in the camera roll.
+  into `Pictures/AniManga Tracker/`, one folder per tab (e.g.
+  `Pictures/AniManga Tracker/Manga/`), instead of loose in the camera roll.
 - **Screenshot filing** (`src/screenshots.js`) — a phone screenshot taken
   in the app is moved into that tab's gallery folder (the Library's go in
-  `Pictures/Manga Tracker/` itself), named after what's on screen:
+  `Pictures/AniManga Tracker/` itself), named after what's on screen:
   `<code>--<page>_<title>` while reading, `<time>_<code>_<title>` while
   watching (the video's position, e.g. `12m34s`). Android can't save a
   screenshot anywhere else, so the app finds the one it just saved, copies
@@ -615,6 +655,16 @@ so nothing renders blank.
   networks, links to them and the usual ad boxes are blocked or hidden.
   Frames from other sites can still show their own ads; the debug log
   lists what was blocked.
+- **Browser tab** (`src/BrowserTab.js`) — a plain browser for any site,
+  between Anime and the Library: type an address or search words (a
+  Google search) in its bar, with ‹ › and ⟳. Nothing there is recorded
+  in the Library. A page can't send you to another site by itself
+  (redirects, pop-unders): moving to another site is only allowed within
+  4 seconds of you touching the page or opening an address, and anything
+  else is stopped with a bar showing where it tried to go and **Open**
+  in case you wanted it. Block ads, hold to save (into
+  Pictures/AniManga Tracker/Browser/), screenshot filing and pull to
+  refresh work as on the other tabs.
 - **No jumping to other apps** — links in a page that would open
   another app (`market:`, `intent:`, `whatsapp:`, `tg:` …, e.g. an ad
   sending you to the Play Store) are always blocked, on every tab: only
@@ -662,8 +712,8 @@ so nothing renders blank.
 - **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
   lists of items (text or links, which open with a tap). The built-in
   **Inbox** is for jotting things down, and is where text and links
-  shared from other apps land (select them, then **Share › Manga
-  Tracker**; `expo-share-intent`, handled in App.js outside the app lock,
+  shared from other apps land (select them, then **Share › AniManga
+  Tracker** → **Save to Notepad**; links are always saved; `expo-share-intent`, handled in App.js outside the app lock,
   so sharing never asks to unlock). **Move** files an item into a named
   note, made with **＋ New**. Stored in SQLite (`notes`, `notebooks`).
   `src/notepadSync.js` syncs with Drive (`notepad.json`, plus a readable
@@ -745,8 +795,13 @@ so nothing renders blank.
   comes back when you pull down at the very top of the page. Pulling
   further (about 160px) and letting go reloads the page, with a small
   "Pull to refresh" / "Release to refresh" pill at the top meanwhile
-  (Android's web view has no pull-to-refresh of its own).
-  `src/tabBarWatch.js`, run inside each page, handles both and reports
+  (Android's web view has no pull-to-refresh of its own). At the very
+  bottom of a page, putting your finger down and pulling up about 160px
+  opens the **Library** ("Pull up for Library" / "Release for Library"
+  pill at the bottom). The pull has to start with the page already at
+  the bottom, so a swipe that only reaches the end of a chapter on the
+  way never jumps away by itself.
+  `src/tabBarWatch.js`, run inside each page, handles these and reports
   scrolling; the bar always shows on the Library tab.
   All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
@@ -870,6 +925,13 @@ connected; the toolbar badge shows **…** while changes wait and **!** when
 writing them failed, and the popup says how many wait, why, with **Sync
 now**. A new title's cover uploads alongside; a failed cover upload goes
 in the outbox too. Until a change is written, the app can't see it.
+
+Cards (bottom right of the page): **Added "…"**, **Chapter 12 recorded:
+…**, or on a page that's already saved a short **Already in AniManga
+Tracker: …**, so you can tell the extension saw it. If writing to Drive
+fails, the page that made the change shows **Not in Drive yet: …** once,
+and **Now in Drive: …** when it goes through. Click any card without
+buttons to close it.
 
 Drive requests are kept down: folder and file ids are remembered in the
 extension's session storage (`driveId:<name>`), so nothing is searched for,

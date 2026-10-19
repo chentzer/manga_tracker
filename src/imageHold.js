@@ -1,5 +1,11 @@
+import * as FileSystem from 'expo-file-system/legacy';
+// SDK 57: saveToLibraryAsync only works from the legacy entry point.
+import * as MediaLibrary from 'expo-media-library/legacy';
+import { suppressNextRelock } from './relockGuard';
+import { saveFileToGallery } from './gallery';
+
 // Hold a finger on a picture in a browsing tab (about half a second,
-// without moving) to save it (MediaWebView.js asks first). Finds the
+// without moving) to save it (MediaWebView.js / BrowserTab.js ask first). Finds the
 // picture under the finger even when the page covers it with a
 // see-through layer (e.g. a full-screen viewer): <img>, a video's poster,
 // or a CSS background picture. Small icons (under 40px on screen) are
@@ -115,4 +121,49 @@ export function pictureExtension(mimeType, url) {
 export function timeStamp(date = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}_${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`;
+}
+
+// Saves a held picture ({ url } or { dataUrl } from IMAGE_HOLD_JS) to the
+// gallery folder `folder`, named "<label>_<time>". Returns the file name;
+// throws with a reason to show if it can't be saved, or 'denied' when
+// photo access isn't allowed.
+export async function saveHeldPicture({ url, dataUrl }, pageUrl, folder, label) {
+  let tempPath = null;
+  let finalPath = null;
+  try {
+    // The permission dialog briefly counts as leaving the app (AppLock).
+    suppressNextRelock();
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') throw new Error('denied');
+    tempPath = `${FileSystem.cacheDirectory}held-picture-${Date.now()}`;
+    let mimeType = null;
+    if (dataUrl) {
+      const m = /^data:([^;,]*)(;[^,]*)?,/.exec(dataUrl);
+      if (!m || !/;base64/i.test(m[2] || '')) throw new Error("this picture's format can't be saved");
+      mimeType = m[1];
+      await FileSystem.writeAsStringAsync(tempPath, dataUrl.slice(m[0].length), {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } else {
+      // The page is sent as Referer, since many sites refuse pictures
+      // requested without it.
+      const result = await FileSystem.downloadAsync(url, tempPath, {
+        headers: pageUrl ? { Referer: pageUrl } : undefined,
+      });
+      if (result.status < 200 || result.status >= 300) throw new Error(`the site returned HTTP ${result.status}`);
+      const headers = result.headers || {};
+      mimeType = result.mimeType || headers['Content-Type'] || headers['content-type'] || null;
+    }
+    const ext = pictureExtension(mimeType, url);
+    if (!ext) throw new Error("that isn't a picture the gallery can hold");
+    const base = `${label}_${timeStamp()}`.replace(/[^A-Za-z0-9_.-]+/g, '_');
+    finalPath = `${FileSystem.cacheDirectory}${base}.${ext}`;
+    await FileSystem.moveAsync({ from: tempPath, to: finalPath });
+    tempPath = null;
+    await saveFileToGallery(finalPath, folder);
+    return `${base}.${ext}`;
+  } finally {
+    if (tempPath) FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+    if (finalPath) FileSystem.deleteAsync(finalPath, { idempotent: true }).catch(() => {});
+  }
 }

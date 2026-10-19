@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Manga Tracker",
+  "name": "AniManga Tracker",
   "version": "1.0.0",
-  "description": "Records the manga, manhwa and anime you read to your Manga Tracker library on Google Drive, like the app's tabs.",
+  "description": "Records the manga, manhwa and anime you read to your AniManga Tracker library on Google Drive, like the app's tabs.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAi1VeN2Y/60G2v/PL/bkVO7f5xfbTW8zMBxpXU9SqCYwA20Qi0w9TwZnYOXg5pWGGL34drLHqYB88W3fkXKA2tcBzn++rp1+Mpf90l+aTokfp29qCUTzElSUBO/WswtJgq+G8oKWqXfBqSWZysF144Opgy/+r7NkDdWeMbYD5sscY4r0h0M8/ZRYEJalwfm/0gmw8NFU8qB5iq3aD9nJmHrfS1t1AJ5YdpKfdZa1KRCUTwuudsy7zVjxfYkdwJ41IFfzghNqhLuwgT+K8ceuRWcdQhshiGZ3g0g0g+9KCqamYkapvV3PkCgbE3E+jaVxxAmIg1zUnCszQHNgUqBJDvwIDAQAB",
   "background": {
     "service_worker": "background.js",
@@ -11,7 +11,7 @@
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Manga Tracker",
+    "default_title": "AniManga Tracker",
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   },
   "options_page": "options.html",

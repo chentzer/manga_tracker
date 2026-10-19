@@ -17,7 +17,7 @@ import './sites.generated.js';
 import './rules.js';
 import { parseCsv, toCsv } from './csv.js';
 import { connect, disconnect, isConnected, readTextFile, writeTextFile, uploadCover, NotSignedInError } from './drive.js';
-import { findRow, findImported, progressDecision, hasAdultGenre, applyChange } from './library.js';
+import { findRow, findImported, progressDecision, recordProgress, hasAdultGenre, applyChange } from './library.js';
 
 const CONTENT_SCRIPT_ID = 'manga-tracker-pages';
 const FLUSH_ALARM = 'manga-tracker-flush';
@@ -37,7 +37,7 @@ function timer(label) {
     },
     end(step = 'done') {
       this.mark(step);
-      console.log(`[Manga Tracker] ${label}: ${parts.join(', ')} — total ${Math.round(performance.now() - start)}ms`);
+      console.log(`[AniManga Tracker] ${label}: ${parts.join(', ')} — total ${Math.round(performance.now() - start)}ms`);
     },
   };
 }
@@ -124,8 +124,8 @@ async function showSyncState() {
   await chrome.action
     .setTitle({
       title: waiting
-        ? `Manga Tracker — ${waiting} change${waiting === 1 ? '' : 's'} waiting to sync${lastError ? ` (${lastError})` : ''}`
-        : 'Manga Tracker',
+        ? `AniManga Tracker — ${waiting} change${waiting === 1 ? '' : 's'} waiting to sync${lastError ? ` (${lastError})` : ''}`
+        : 'AniManga Tracker',
     })
     .catch(() => {});
 }
@@ -226,9 +226,17 @@ async function flush() {
     } catch (err) {
       failures++;
       lastError = err instanceof NotSignedInError ? 'not connected to Drive' : err.message || String(err);
-      console.warn('[Manga Tracker] sync failed, will retry:', lastError);
+      console.warn('[AniManga Tracker] sync failed, will retry:', lastError);
     }
-    await withOutbox((current) => current.filter((c) => !done.has(c.id)));
+    // The pages the changes came from hear about a failed write once
+    // ("Not in Drive yet"), and again when it's in ("Now in Drive").
+    const delayed = lastError ? list.filter((c) => !done.has(c.id) && c.tabId != null && !c.told) : [];
+    notifyTabs(delayed, { type: 'saveDelayed', error: lastError });
+    notifyTabs(list.filter((c) => done.has(c.id) && c.told), { type: 'saveDone' });
+    const told = new Set(delayed.map((c) => c.id));
+    await withOutbox((current) =>
+      current.filter((c) => !done.has(c.id)).map((c) => (told.has(c.id) ? { ...c, told: true } : c))
+    );
     const left = (await outbox()).length;
     if (left) {
       // Retried while the worker is awake; the alarm wakes it otherwise.
@@ -245,6 +253,32 @@ async function flush() {
   } finally {
     flushing = null;
   }
+}
+
+// One message per page and title.
+function notifyTabs(changes, message) {
+  const seen = new Set();
+  changes.forEach((c) => {
+    const key = `${c.tabId}:${c.title}`;
+    if (!c.title || seen.has(key)) return;
+    seen.add(key);
+    // A page that's gone, or has no content script, can't be told.
+    Promise.resolve()
+      .then(() => chrome.tabs.sendMessage(c.tabId, { ...message, title: c.title }))
+      .catch(() => {});
+  });
+}
+
+// A change with the page and title it came from (for notifyTabs).
+const from = (change, tabId, title) => ({ ...change, tabId: tabId ?? null, title: title || change.sourceId });
+
+// "Chapter 12 recorded: …" when a visit moved the progress on, else a
+// short "Already in …" so it's clear the extension saw the page.
+function seenToast(mediaType, title, progress, recorded) {
+  const { unit } = labels(mediaType);
+  return recorded
+    ? { toast: `${unit[0].toUpperCase()}${unit.slice(1)} ${progress} recorded: ${title}` }
+    : { toast: `Already in AniManga Tracker: ${title}`, brief: true };
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -383,12 +417,18 @@ async function handleVisit({ mediaType, sourceId, url, progress }, tabId) {
     return { need: 'details', isNew: true };
   }
   await rememberTab(tabId, mediaType, sourceId);
+  const title = row.title || sourceId;
   let result = {};
+  let recorded = false;
   if (progress !== null && progress !== undefined) {
     const a = await progressAnswer(mediaType, row, progress, url);
-    if (a.change) await enqueue(mediaType, a.change);
+    if (a.change) {
+      recorded = !!recordProgress({ ...row }, a.change.number, null);
+      await enqueue(mediaType, from(a.change, tabId, title));
+    }
     result = a.question ? { question: a.question } : {};
   }
+  if (!result.question) result = seenToast(mediaType, title, progress, recorded);
   t.end(outcome(result));
   return row.mal_id ? result : { ...result, need: 'details', isNew: false };
 }
@@ -397,7 +437,7 @@ const outcome = (result) => (result.question ? 'asked' : 'answered');
 
 // The page's details (title, cover, author, MAL id; and for pages without
 // their series in the address, the series and chapter).
-async function handleDetails({ mediaType, sourceId, url, progress, payload, image }, tabId) {
+async function handleDetails({ mediaType, sourceId, url, progress, payload, image, fromPage }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
   const t = timer(`details ${mediaType} ${sourceId}`);
   const rows = await view(mediaType);
@@ -405,15 +445,23 @@ async function handleDetails({ mediaType, sourceId, url, progress, payload, imag
   const existing = findRow(rows, sourceId);
   if (existing) {
     await rememberTab(tabId, mediaType, sourceId);
+    const title = existing.title || sourceId;
     const changes = [];
     if (!existing.mal_id && payload.malId) changes.push({ kind: 'malId', sourceId, malId: payload.malId });
     let result = {};
+    let recorded = false;
     if (progress !== null && progress !== undefined) {
       const a = await progressAnswer(mediaType, existing, progress, url);
-      if (a.change) changes.push(a.change);
+      if (a.change) {
+        recorded = !!recordProgress({ ...existing }, a.change.number, null);
+        changes.push(a.change);
+      }
       if (a.question) result = { question: a.question };
     }
-    if (changes.length) await enqueue(mediaType, ...changes);
+    if (changes.length) await enqueue(mediaType, ...changes.map((c) => from(c, tabId, title)));
+    // Pages that name their series themselves had no visit answer, so
+    // they're told here.
+    if (fromPage && !result.question) result = seenToast(mediaType, title, progress, recorded);
     t.end(outcome(result));
     return result;
   }
@@ -448,26 +496,29 @@ async function handleDetails({ mediaType, sourceId, url, progress, payload, imag
     progress === null || progress === undefined
       ? {}
       : await progressAnswer(mediaType, row, progress, url, { fresh: !imported });
-  await enqueue(mediaType, add, ...(a.change ? [a.change] : []));
+  const added = payload.title || sourceId;
+  await enqueue(mediaType, ...[add, ...(a.change ? [a.change] : [])].map((c) => from(c, tabId, added)));
   saveCoverSoon(mediaType, sourceId, payload.title, image, payload.imageUrl);
   await rememberTab(tabId, mediaType, sourceId);
   const title = row.title || sourceId;
   t.end('queued');
   return {
     ...(a.question ? { question: a.question } : {}),
-    toast: imported ? `Linked "${title}" to your MyAnimeList entry.` : `Added "${title}" to Manga Tracker.`,
+    toast: imported ? `Linked "${title}" to your MyAnimeList entry.` : `Added "${title}" to AniManga Tracker.`,
   };
 }
 
 // An answer to a question shown on the page.
-async function handleAnswer({ mediaType, sourceId, url, answer: reply }) {
+async function handleAnswer({ mediaType, sourceId, url, answer: reply }, tabId) {
   const key = `${mediaType}:${sourceId}`;
   if (reply.kind === 'snooze') {
     await chrome.storage.local.set({ [`repeatSnooze:${key}`]: Date.now() + 60 * 60 * 1000 });
     return {};
   }
   if (reply.kind === 'keep') return {};
-  await enqueue(mediaType, { kind: reply.kind === 'repeat' ? 'repeat' : 'record', sourceId, number: reply.number, url });
+  const change = { kind: reply.kind === 'repeat' ? 'repeat' : 'record', sourceId, number: reply.number, url };
+  const row = findRow(await view(mediaType), sourceId);
+  await enqueue(mediaType, from(change, tabId, row && row.title));
   return {};
 }
 
@@ -497,7 +548,7 @@ async function handleEdit({ mediaType, sourceId, fields }) {
 const handlers = {
   visit: (msg, sender) => handleVisit(msg, sender.tab && sender.tab.id),
   details: (msg, sender) => handleDetails(msg, sender.tab && sender.tab.id),
-  answer: (msg) => handleAnswer(msg),
+  answer: (msg, sender) => handleAnswer(msg, sender.tab && sender.tab.id),
   leftPage: (msg, sender) => forgetTab(sender.tab && sender.tab.id).then(() => ({})),
   tabEntry: (msg) => handleTabEntry(msg),
   edit: (msg) => handleEdit(msg),

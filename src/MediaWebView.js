@@ -33,11 +33,12 @@ import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
+import { snoozeUntil, snoozeLabel } from './snooze';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
-import { IMAGE_HOLD_JS, pictureExtension, timeStamp } from './imageHold';
+import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
-import { galleryFolderFor, saveFileToGallery, safeFileName } from './gallery';
+import { galleryFolderFor, safeFileName } from './gallery';
 
 // Asks the page for what a screenshot's file name needs (App.js →
 // getScreenshotInfo): its URL, the page title, and the current position
@@ -501,6 +502,23 @@ const MediaWebView = forwardRef(function MediaWebView({
   // script to run once it has loaded — on the page whose URL contains
   // `expect` — that moves on to the wanted episode/chapter or reports it
   // doesn't exist yet (see openNext in mediaTypes.js).
+  // The sites a title is searched on, one at a time (the "Next ›" bar):
+  // the type's titleSearch, else its own search page. A request with
+  // `search` (a title highlighted in another app, or an imported title
+  // from the Library) opens the first one's results.
+  const [searchSites] = useState(() =>
+    config.titleSearch ||
+    (config.buildSearchUrl
+      ? [{ name: config.siteName || getHostname(config.startUrl), buildSearchUrl: config.buildSearchUrl }]
+      : null)
+  );
+  const requestUrl = (request) =>
+    request.search && searchSites ? searchSites[0].buildSearchUrl(request.search) : request.url;
+  // The title search being shown: { query, index } into searchSites, or
+  // null. Kept until closed or another search starts.
+  const [titleSearch, setTitleSearch] = useState(() =>
+    openRequest?.search && searchSites ? { query: openRequest.search, index: 0 } : null
+  );
   const handledOpenId = useRef(openRequest ? openRequest.id : null);
   const pendingOpenCheck = useRef(
     openRequest?.checkJs ? { js: openRequest.checkJs, expect: openRequest.expect } : null
@@ -515,7 +533,9 @@ const MediaWebView = forwardRef(function MediaWebView({
   // First page: initialUrl (the page this tab was on before Data saver
   // unloaded it — App.js) or the type's start page. Fixed at mount; a new
   // source would reload the page.
-  const [startSource] = useState(() => ({ uri: openRequest?.url || initialUrl || config.startUrl }));
+  const [startSource] = useState(() => ({
+    uri: (openRequest && requestUrl(openRequest)) || initialUrl || config.startUrl,
+  }));
   // Latest onPageChange, for the navigation handler below.
   const pageChangeRef = useRef(onPageChange);
   pageChangeRef.current = onPageChange;
@@ -574,7 +594,7 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   // After a chapter update on a site whose pages don't show volume
   // numbers (promptForVolumes in mediaTypes.js): says volumes read wasn't
-  // changed, unless snoozed for the hour.
+  // changed, unless snoozed (for Settings → Snooze chapter questions).
   const promptVolumes = useCallback((entry, chapter) => {
     if (Date.now() < Number(getSetting('volumePromptSnoozedUntil', '0'))) return;
     const volumes = entry.total_volumes
@@ -585,8 +605,8 @@ const MediaWebView = forwardRef(function MediaWebView({
       `"${entry.title || entry.source_id}" is now at chapter ${chapter}. This site doesn't show volume numbers, so volumes read (${volumes}) wasn't changed. Update it in the Library if needed.`,
       [
         {
-          text: 'Snooze 1 hour',
-          onPress: () => setSetting('volumePromptSnoozedUntil', String(Date.now() + 60 * 60 * 1000)),
+          text: `Snooze ${snoozeLabel()}`,
+          onPress: () => setSetting('volumePromptSnoozedUntil', String(snoozeUntil())),
         },
         {
           text: 'Edit',
@@ -657,9 +677,11 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   // Opening an episode/chapter page (extractProgress in mediaTypes.js):
   // - a completed series asks whether you're starting a rewatch/reread
-  //   ("Just looking" stops asking about that series for an hour);
+  //   ("Just looking" stops asking about that series for a while —
+  //   Settings → Snooze chapter questions, src/snooze.js);
   // - more than one ahead of your record (stopped at 4, opened 7) asks
-  //   first: go to the next one (5), record this one, or keep the record;
+  //   first: go to the next one (5), record this one, or keep the record
+  //   (which stops asking about that series for the same while);
   // - otherwise it's recorded (recordProgress). `fresh` is for a series
   //   recorded just now, which has no record to be ahead of.
   const applyProgress = useCallback(
@@ -682,7 +704,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Just looking',
-            onPress: () => setSetting(snoozeKey, String(Date.now() + 60 * 60 * 1000)),
+            onPress: () => setSetting(snoozeKey, String(snoozeUntil())),
           },
           {
             text: `Start ${verb}`,
@@ -701,7 +723,9 @@ const MediaWebView = forwardRef(function MediaWebView({
       const ahead = !fresh && number > current + 1 && !(repeating && current === 0);
       if (ahead) {
         const asked = `${key}:${number}`;
+        const snoozeKey = `aheadSnooze:${key}`;
         if (askedRef.current.has(asked)) return;
+        if (Date.now() < Number(getSetting(snoozeKey, '0'))) return;
         askedRef.current.add(asked);
         const nextOne = current + 1;
         Alert.alert(
@@ -714,7 +738,11 @@ const MediaWebView = forwardRef(function MediaWebView({
                 }`
           }, but this is ${unit} ${number}.`,
           [
-            { text: `Keep ${current}`, style: 'cancel' },
+            {
+              text: `Keep ${current}`,
+              style: 'cancel',
+              onPress: () => setSetting(snoozeKey, String(snoozeUntil())),
+            },
             {
               text: `Go to ${unit} ${nextOne}`,
               onPress: () => {
@@ -862,10 +890,28 @@ const MediaWebView = forwardRef(function MediaWebView({
       pendingOpenCheck.current = openRequest.checkJs
         ? { js: openRequest.checkJs, expect: openRequest.expect }
         : null;
-      webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(openRequest.url)}; true;`);
+      setTitleSearch(openRequest.search && searchSites ? { query: openRequest.search, index: 0 } : null);
+      webviewRef.current?.injectJavaScript(
+        `window.location.href = ${JSON.stringify(requestUrl(openRequest))}; true;`
+      );
     }
     onOpenHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRequest, onOpenHandled]);
+
+  // Opens one site's search results for the title search; Next moves the
+  // same search on to the next site.
+  const openTitleSearch = useCallback(
+    (query, index) => {
+      const site = searchSites[index];
+      setTitleSearch({ query, index });
+      logDebug(`Title search: "${query}" on ${site.name}`);
+      webviewRef.current?.injectJavaScript(
+        `window.location.href = ${JSON.stringify(site.buildSearchUrl(query))}; true;`
+      );
+    },
+    [searchSites, logDebug]
+  );
 
   // Blocks navigation to any domain other than the site's own (or, for
   // a multi-source type, any of its sources' domains) — this is what
@@ -995,65 +1041,29 @@ const MediaWebView = forwardRef(function MediaWebView({
   );
 
   // Saves a held picture (src/imageHold.js) to this tab's gallery folder
-  // (e.g. Pictures/Manga Tracker/Manga/, gallery.js), named
+  // (e.g. Pictures/AniManga Tracker/Manga/, gallery.js), named
   // "<code>_<time>" on a title's page (e.g. "12345_20261014_220215"),
   // else "<site>_<time>".
   const savingHeldPicture = useRef(false);
   const saveHeldPicture = useCallback(
-    async ({ url, dataUrl }, pageUrl) => {
+    async (picture, pageUrl) => {
       if (savingHeldPicture.current) return;
       savingHeldPicture.current = true;
       const toast = (text, long = false) =>
         Platform.OS === 'android' && ToastAndroid.show(text, long ? ToastAndroid.LONG : ToastAndroid.SHORT);
-      let tempPath = null;
-      let finalPath = null;
       try {
-        // The permission dialog briefly counts as leaving the app (AppLock).
-        suppressNextRelock();
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status !== 'granted') {
-          toast('Allow photo access to save pictures.');
-          return;
-        }
-        tempPath = `${FileSystem.cacheDirectory}held-picture-${Date.now()}`;
-        let mimeType = null;
-        if (dataUrl) {
-          const m = /^data:([^;,]*)(;[^,]*)?,/.exec(dataUrl);
-          if (!m || !/;base64/i.test(m[2] || '')) throw new Error("this picture's format can't be saved");
-          mimeType = m[1];
-          await FileSystem.writeAsStringAsync(tempPath, dataUrl.slice(m[0].length), {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-        } else {
-          // The page is sent as Referer, since many sites refuse pictures
-          // requested without it.
-          const result = await FileSystem.downloadAsync(url, tempPath, {
-            headers: pageUrl ? { Referer: pageUrl } : undefined,
-          });
-          if (result.status < 200 || result.status >= 300) throw new Error(`the site returned HTTP ${result.status}`);
-          const headers = result.headers || {};
-          mimeType = result.mimeType || headers['Content-Type'] || headers['content-type'] || null;
-        }
-        const ext = pictureExtension(mimeType, url);
-        if (!ext) throw new Error("that isn't a picture the gallery can hold");
-
         const resolved = pageUrl ? resolveSource(config, pageUrl) : null;
         const label = (resolved && resolved.source.extractId(resolved.match)) || getHostname(pageUrl) || 'picture';
-        const base = `${label}_${timeStamp()}`.replace(/[^A-Za-z0-9_.-]+/g, '_');
-        finalPath = `${FileSystem.cacheDirectory}${base}.${ext}`;
-        await FileSystem.moveAsync({ from: tempPath, to: finalPath });
-        tempPath = null;
         const folder = galleryFolderFor(config.label);
-        await saveFileToGallery(finalPath, folder);
+        const name = await saveHeldPictureToGallery(picture, pageUrl, folder, label);
         toast(`Saved to ${folder}`);
-        logDebug(`Hold to save: saved "${base}.${ext}".`);
+        logDebug(`Hold to save: saved "${name}".`);
       } catch (err) {
-        toast(`Couldn't save the picture (${err.message}).`, true);
+        if (err.message === 'denied') toast('Allow photo access to save pictures.');
+        else toast(`Couldn't save the picture (${err.message}).`, true);
         logDebug(`Hold to save FAILED: ${err.message}`);
       } finally {
         savingHeldPicture.current = false;
-        if (tempPath) FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
-        if (finalPath) FileSystem.deleteAsync(finalPath, { idempotent: true }).catch(() => {});
       }
     },
     [config, logDebug]
@@ -1399,6 +1409,12 @@ const MediaWebView = forwardRef(function MediaWebView({
   const currentSiteIndex = siteIndexFor(sites, pageUrl || startSource.uri);
   const openSite = (site) => {
     setSiteMenuVisible(false);
+    // During a title search, a site with a search shows its results.
+    const searchIndex = titleSearch ? searchSites.findIndex((t) => t.name === site.name) : -1;
+    if (searchIndex >= 0) {
+      openTitleSearch(titleSearch.query, searchIndex);
+      return;
+    }
     logDebug(`Site list: opening ${site.name}`);
     webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(site.homeUrl)}; true;`);
   };
@@ -1414,6 +1430,27 @@ const MediaWebView = forwardRef(function MediaWebView({
   return (
     <View style={styles.container}>
       {siteButton ? <View style={styles.manualBar}>{siteButton}</View> : null}
+      {titleSearch ? (
+        <View style={styles.titleSearchBar}>
+          <Text style={styles.titleSearchText} numberOfLines={1}>
+            “{titleSearch.query}” on {searchSites[titleSearch.index].name}
+            {searchSites.length > 1 ? ` (${titleSearch.index + 1}/${searchSites.length})` : ''}
+          </Text>
+          {titleSearch.index + 1 < searchSites.length ? (
+            <TouchableOpacity
+              style={[styles.manualButton, styles.siteButton]}
+              onPress={() => openTitleSearch(titleSearch.query, titleSearch.index + 1)}
+            >
+              <Text style={styles.manualButtonText} numberOfLines={1}>
+                Next: {searchSites[titleSearch.index + 1].name} ›
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={8}>
+            <Text style={styles.titleSearchClose}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {currentEntryKey ? (
         <TouchableOpacity
           style={styles.viewInLibraryButton}
@@ -1584,6 +1621,17 @@ const styles = StyleSheet.create({
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
   siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
+  // Title search: which site's results are showing, and Next.
+  titleSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#16213e',
+  },
+  titleSearchText: { flex: 1, color: '#ddd', fontSize: 13 },
+  titleSearchClose: { color: '#aaa', fontSize: 18, paddingHorizontal: 4 },
   // The site list drops down from the top left, under its button.
   siteMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', paddingTop: 96, paddingHorizontal: 8 },
   siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4 },

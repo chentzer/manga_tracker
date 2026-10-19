@@ -4,13 +4,13 @@ import { safeFileName, saveFileToGallery } from './gallery';
 import { suppressNextRelock } from './relockGuard';
 
 // Files phone screenshots taken in the app into the gallery:
-//   a browsing tab (Manga, Anime, ...) -> Pictures/Manga Tracker/<tab>/
-//   Library tab (incl. Notepad)        -> Pictures/Manga Tracker/
+//   a browsing tab (Manga, Anime, ...) -> Pictures/AniManga Tracker/<tab>/
+//   Library tab (incl. Notepad)        -> Pictures/AniManga Tracker/
 // An app can't change where Android saves a screenshot, so this reacts
 // after the fact (App.js listens for the screenshot): it finds the image
 // Android just saved in its Screenshots folder, copies it into the
 // folder above under a descriptive name, then deletes the original —
-// Android asks "Allow Manga Tracker to delete…?" each time, since the
+// Android asks "Allow AniManga Tracker to delete…?" each time, since the
 // app didn't create that file, unless "Media management" access is on
 // (Settings → Delete screenshots without asking). Declining just leaves
 // both copies.
@@ -56,9 +56,10 @@ function mediaStoreNumber(id) {
 
 // A screenshot: in a "Screenshots" folder (DCIM/Screenshots on Samsung,
 // Pictures/Screenshots on most others) or named "Screenshot_…" — and
-// never one of this app's own filed copies (in Manga Tracker/).
+// never one of this app's own filed copies (in AniManga Tracker/, or
+// Manga Tracker/ from before the rename).
 function isScreenshot(uri, filename) {
-  if (/\/Manga Tracker\//i.test(uri || '')) return false;
+  if (/\/(Ani)?Manga Tracker\//i.test(uri || '')) return false;
   return /\/screenshots\//i.test(uri || '') || /^screenshot/i.test(filename || '');
 }
 

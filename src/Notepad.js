@@ -261,7 +261,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
           ListEmptyComponent={
             <Text style={styles.empty}>
               {selectedId == null
-                ? 'Nothing here yet. Add text or a link above, or select text or a link in another app and tap Share › Manga Tracker — it lands here without unlocking. Then use Move to file it into a note.'
+                ? 'Nothing here yet. Add text or a link above, or select text or a link in another app and tap Share › AniManga Tracker — it lands here without unlocking. Then use Move to file it into a note.'
                 : 'This note is empty. Add items above, or move them here from the Inbox.'}
             </Text>
           }
