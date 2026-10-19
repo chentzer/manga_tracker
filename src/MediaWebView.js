@@ -34,10 +34,10 @@ import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService'
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
-import { IMAGE_HOLD_JS, pictureExtension, timeStamp } from './imageHold';
+import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
-import { galleryFolderFor, saveFileToGallery, safeFileName } from './gallery';
+import { galleryFolderFor, safeFileName } from './gallery';
 
 // Asks the page for what a screenshot's file name needs (App.js →
 // getScreenshotInfo): its URL, the page title, and the current position
@@ -1037,60 +1037,24 @@ const MediaWebView = forwardRef(function MediaWebView({
   // else "<site>_<time>".
   const savingHeldPicture = useRef(false);
   const saveHeldPicture = useCallback(
-    async ({ url, dataUrl }, pageUrl) => {
+    async (picture, pageUrl) => {
       if (savingHeldPicture.current) return;
       savingHeldPicture.current = true;
       const toast = (text, long = false) =>
         Platform.OS === 'android' && ToastAndroid.show(text, long ? ToastAndroid.LONG : ToastAndroid.SHORT);
-      let tempPath = null;
-      let finalPath = null;
       try {
-        // The permission dialog briefly counts as leaving the app (AppLock).
-        suppressNextRelock();
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status !== 'granted') {
-          toast('Allow photo access to save pictures.');
-          return;
-        }
-        tempPath = `${FileSystem.cacheDirectory}held-picture-${Date.now()}`;
-        let mimeType = null;
-        if (dataUrl) {
-          const m = /^data:([^;,]*)(;[^,]*)?,/.exec(dataUrl);
-          if (!m || !/;base64/i.test(m[2] || '')) throw new Error("this picture's format can't be saved");
-          mimeType = m[1];
-          await FileSystem.writeAsStringAsync(tempPath, dataUrl.slice(m[0].length), {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-        } else {
-          // The page is sent as Referer, since many sites refuse pictures
-          // requested without it.
-          const result = await FileSystem.downloadAsync(url, tempPath, {
-            headers: pageUrl ? { Referer: pageUrl } : undefined,
-          });
-          if (result.status < 200 || result.status >= 300) throw new Error(`the site returned HTTP ${result.status}`);
-          const headers = result.headers || {};
-          mimeType = result.mimeType || headers['Content-Type'] || headers['content-type'] || null;
-        }
-        const ext = pictureExtension(mimeType, url);
-        if (!ext) throw new Error("that isn't a picture the gallery can hold");
-
         const resolved = pageUrl ? resolveSource(config, pageUrl) : null;
         const label = (resolved && resolved.source.extractId(resolved.match)) || getHostname(pageUrl) || 'picture';
-        const base = `${label}_${timeStamp()}`.replace(/[^A-Za-z0-9_.-]+/g, '_');
-        finalPath = `${FileSystem.cacheDirectory}${base}.${ext}`;
-        await FileSystem.moveAsync({ from: tempPath, to: finalPath });
-        tempPath = null;
         const folder = galleryFolderFor(config.label);
-        await saveFileToGallery(finalPath, folder);
+        const name = await saveHeldPictureToGallery(picture, pageUrl, folder, label);
         toast(`Saved to ${folder}`);
-        logDebug(`Hold to save: saved "${base}.${ext}".`);
+        logDebug(`Hold to save: saved "${name}".`);
       } catch (err) {
-        toast(`Couldn't save the picture (${err.message}).`, true);
+        if (err.message === 'denied') toast('Allow photo access to save pictures.');
+        else toast(`Couldn't save the picture (${err.message}).`, true);
         logDebug(`Hold to save FAILED: ${err.message}`);
       } finally {
         savingHeldPicture.current = false;
-        if (tempPath) FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
-        if (finalPath) FileSystem.deleteAsync(finalPath, { idempotent: true }).catch(() => {});
       }
     },
     [config, logDebug]

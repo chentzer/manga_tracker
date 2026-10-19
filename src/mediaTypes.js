@@ -575,13 +575,12 @@ export const MEDIA_TYPES = {
       checkJs: OPEN_FIRST_CHAPTER_JS,
     }),
     buildSearchUrl: (title) => `${MANGA_SITE_URL}/search?search=${encodeURIComponent(title)}`,
-    // If your site shows popup/redirect ads, uncomment this to block
-    // any navigation attempt to a domain other than the one above —
-    // stops window.open popups, redirects, and hijacks regardless of
-    // the exact mechanism the ad uses. Off by default since some sites
-    // legitimately link out (e.g. to a Discord/Twitter) and you may not
-    // want that blocked.
-    // blockExternalNavigation: true,
+    // Pages can't leave the two sites: blocks any navigation to another
+    // domain — stops window.open popups, redirects, and hijacks
+    // regardless of the exact mechanism the ad uses (the second site
+    // redirects to ads). Links out (e.g. to a Discord/Twitter) are
+    // blocked too.
+    blockExternalNavigation: true,
     // Domain-blocking alone can miss same-domain ad-redirect endpoints
     // some sites run specifically to defeat it (e.g.
     // example.com/pop?url=<encoded-ad-destination> — technically still

@@ -23,6 +23,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import { initDb, getSetting, setSetting, addNote, getAllEntries, clearAllEntries } from './src/db';
 import MediaWebView from './src/MediaWebView';
+import BrowserTab from './src/BrowserTab';
 import EntryList from './src/EntryList';
 import { signInToGoogle, restoreGoogleSession } from './src/GoogleDriveService';
 import {
@@ -60,8 +61,14 @@ import { suppressNextRelock, isRelockSuppressed } from './src/relockGuard';
 // updates when a type is added) + a unified library at the end.
 // Browsing tabs (everything but the Library), for Data saver's tab loading.
 const SITE_TAB_KEYS = MEDIA_TYPE_LIST.map((m) => m.key);
+// …plus the Browser tab (src/BrowserTab.js), any site, nothing recorded.
+const BROWSING_TAB_KEYS = [...SITE_TAB_KEYS, 'browser'];
 
-const TABS = [...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label })), { key: 'library', label: 'Library' }];
+const TABS = [
+  ...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label })),
+  { key: 'browser', label: 'Browser' },
+  { key: 'library', label: 'Library' },
+];
 
 export default function App() {
   // Bumped whenever a note arrives via the share sheet, so an already
@@ -287,8 +294,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     const subscription = addScreenshotListener(() => {
       const tabKey = tabRef.current;
       const mediaConfig = MEDIA_TYPE_LIST.find((m) => m.key === tabKey);
-      const webview = mediaConfig ? webviewRefs.current[tabKey] : null;
-      const folder = galleryFolderFor(mediaConfig ? mediaConfig.label : null);
+      const tabLabel = mediaConfig ? mediaConfig.label : tabKey === 'browser' ? 'Browser' : null;
+      const webview = tabLabel ? webviewRefs.current[tabKey] : null;
+      const folder = galleryFolderFor(tabLabel);
       // Step-by-step details go to a debug log (Settings → Show debug
       // tools): the current tab's own, or — on the Library — the first
       // browsing tab's, labelled with where it came from.
@@ -297,7 +305,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
           ? { tab: webview, prefix: '' }
           : {
               tab: MEDIA_TYPE_LIST.map((m) => webviewRefs.current[m.key]).find((w) => w && w.logDebug),
-              prefix: `[${mediaConfig ? mediaConfig.label : 'Library'} tab] `,
+              prefix: `[${tabLabel || 'Library'} tab] `,
             };
       const onLog = (message) => logTarget.tab && logTarget.tab.logDebug(logTarget.prefix + message);
       fileScreenshot({
@@ -361,7 +369,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const handleTabBarActivity = useCallback(
     (tabKey, kind) => {
       if (tabKey !== tabRef.current) return; // a tab in the background
-      if (kind === 'pullTop') {
+      if (kind === 'library') {
+        setTab('library'); // pulled up past the bottom of the page
+      } else if (kind === 'pullTop') {
         setTabBarHiddenAnimated(false);
         scheduleTabBarHide();
       } else if (kind === 'scroll' && !tabBarHiddenRef.current) {
@@ -379,13 +389,13 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   // "Load tabs only when opened" a tab joins on its first visit; with
   // "Unload background tabs" only the first two stay. Each tab reports its
   // page (onPageChange) so an unloaded one reopens where it was.
-  const [loadedTabs, setLoadedTabs] = useState(() => (dataSaver.lazyTabs ? [tab] : SITE_TAB_KEYS));
+  const [loadedTabs, setLoadedTabs] = useState(() => (dataSaver.lazyTabs ? [tab] : BROWSING_TAB_KEYS));
   const loadedTabsRef = useRef(loadedTabs);
   const lastUrls = useRef({});
   useEffect(() => {
     const current = loadedTabsRef.current;
-    let next = SITE_TAB_KEYS.includes(tab) ? [tab, ...current.filter((k) => k !== tab)] : [...current];
-    if (!dataSaver.lazyTabs) next = [...next, ...SITE_TAB_KEYS.filter((k) => !next.includes(k))];
+    let next = BROWSING_TAB_KEYS.includes(tab) ? [tab, ...current.filter((k) => k !== tab)] : [...current];
+    if (!dataSaver.lazyTabs) next = [...next, ...BROWSING_TAB_KEYS.filter((k) => !next.includes(k))];
     if (dataSaver.unloadBackgroundTabs) next = next.slice(0, 2);
     if (next.length === current.length && next.every((k, i) => k === current[i])) return;
     loadedTabsRef.current = next;
@@ -824,6 +834,21 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             ) : null}
           </View>
         ))}
+        <View style={[styles.tabPane, { display: tab === 'browser' ? 'flex' : 'none' }]}>
+          {loadedTabs.includes('browser') ? (
+            <BrowserTab
+              ref={(r) => {
+                webviewRefs.current.browser = r;
+              }}
+              blockAds={blockAds}
+              onTabBarActivity={(kind) => handleTabBarActivity('browser', kind)}
+              initialUrl={lastUrls.current.browser || null}
+              onPageChange={(url) => {
+                lastUrls.current.browser = url;
+              }}
+            />
+          ) : null}
+        </View>
         <View style={[styles.tabPane, { display: tab === 'library' ? 'flex' : 'none' }]}>
           <EntryList
             active={tab === 'library'}

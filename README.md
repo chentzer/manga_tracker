@@ -498,6 +498,8 @@ so nothing renders blank.
   it passes, even though its whole purpose is hijacking the page into
   an ad) — an optional `blockedUrlPatterns` (array of regexes, see
   `mediaTypes.js`) is checked regardless of domain to catch these.
+  The Manga and Manhwa tabs have it on, so their pages can't leave
+  their two sites (links out to other sites don't open either).
   `setSupportMultipleWindows={false}` is also set unconditionally as a
   light extra defense against popups specifically. `allowsFullscreenVideo`,
   `allowsInlineMediaPlayback`, and `mediaPlaybackRequiresUserAction={false}`
@@ -647,6 +649,16 @@ so nothing renders blank.
   networks, links to them and the usual ad boxes are blocked or hidden.
   Frames from other sites can still show their own ads; the debug log
   lists what was blocked.
+- **Browser tab** (`src/BrowserTab.js`) — a plain browser for any site,
+  between Anime and the Library: type an address or search words (a
+  Google search) in its bar, with ‹ › and ⟳. Nothing there is recorded
+  in the Library. A page can't send you to another site by itself
+  (redirects, pop-unders): moving to another site is only allowed within
+  4 seconds of you touching the page or opening an address, and anything
+  else is stopped with a bar showing where it tried to go and **Open**
+  in case you wanted it. Block ads, hold to save (into
+  Pictures/AniManga Tracker/Browser/), screenshot filing and pull to
+  refresh work as on the other tabs.
 - **No jumping to other apps** — links in a page that would open
   another app (`market:`, `intent:`, `whatsapp:`, `tg:` …, e.g. an ad
   sending you to the Play Store) are always blocked, on every tab: only
@@ -777,8 +789,13 @@ so nothing renders blank.
   comes back when you pull down at the very top of the page. Pulling
   further (about 160px) and letting go reloads the page, with a small
   "Pull to refresh" / "Release to refresh" pill at the top meanwhile
-  (Android's web view has no pull-to-refresh of its own).
-  `src/tabBarWatch.js`, run inside each page, handles both and reports
+  (Android's web view has no pull-to-refresh of its own). At the very
+  bottom of a page, putting your finger down and pulling up about 160px
+  opens the **Library** ("Pull up for Library" / "Release for Library"
+  pill at the bottom). The pull has to start with the page already at
+  the bottom, so a swipe that only reaches the end of a chapter on the
+  way never jumps away by itself.
+  `src/tabBarWatch.js`, run inside each page, handles these and reports
   scrolling; the bar always shows on the Library tab.
   All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
