@@ -9,7 +9,11 @@ export default {
     version: '1.0.0',
     orientation: 'portrait',
     userInterfaceStyle: 'automatic',
+    // An open book with a play button: manga and anime.
+    icon: './assets/icon.png',
     splash: {
+      image: './assets/splash-icon.png',
+      resizeMode: 'contain',
       backgroundColor: '#1a1a2e',
     },
     assetBundlePatterns: ['**/*'],
@@ -22,6 +26,10 @@ export default {
     },
     android: {
       package: 'com.chentzer.mangatracker',
+      adaptiveIcon: {
+        foregroundImage: './assets/adaptive-icon.png',
+        backgroundColor: '#1a1a2e',
+      },
       permissions: [
         'INTERNET',
         'android.permission.READ_MEDIA_IMAGES',
