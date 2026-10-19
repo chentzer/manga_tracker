@@ -39,6 +39,7 @@ import {
 } from './artists';
 import FocusImage from './FocusImage';
 import { themed, themeColor, useDarkMode } from './theme';
+import Marquee from './Marquee';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -348,16 +349,20 @@ function ConflictReview({ entry, onResolve }) {
 
 // Groups for types with `groupField` (Manga, Anime): entries saved one by
 // one (volumes, parts, sequels) put together under a name you choose. The
-// detail sheet of any entry in a group lists the whole group, in an order
-// you change with ▲ / ▼, and each one opens from there (src/groups.js).
+// detail sheet of any entry in a group lists the whole group, each opening
+// from there; tapping the group's name opens its own page (GroupModal),
+// whose Edit renames, sorts and reorders it (src/groups.js).
 function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen }) {
   // The open panel: 'join' (put this entry in a group), 'add' (add other
   // entries to its group) or 'rename'; and that panel's text box.
   const [mode, setMode] = useState(null);
   const [text, setText] = useState('');
+  // The group's own page (GroupModal): null, 'view' or 'edit'.
+  const [groupView, setGroupView] = useState(null);
   useEffect(() => {
     setMode(null);
     setText('');
+    setGroupView(null);
   }, [entry.source_id, entry.media_type]);
   const name = entry.group_name;
 
@@ -402,7 +407,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
 
   const toggle = (panel) => {
     setMode(mode === panel ? null : panel);
-    setText(panel === 'rename' ? name || '' : '');
+    setText('');
   };
   // Puts this entry into the group called `groupName` (a new one, or the
   // existing one with that name), at the end.
@@ -469,110 +474,246 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
     );
   }
 
-  // Entries that can be added: the rest of this type, matching the search
-  // (or, with nothing typed, the ones whose title looks like this group's).
-  const query = groupKey(text);
-  const candidates =
-    mode === 'add'
-      ? sameType
-          .filter((e) => groupKey(e.group_name) !== groupKey(name))
-          .filter((e) =>
-            query
-              ? groupKey(e.title).includes(query) || groupKey(e.source_id).includes(query)
-              : groupKey(guessGroup(e.title)?.name) === groupKey(name)
-          )
-          .slice(0, 15)
-      : [];
+  // In a group: its name (tap it, or ›, to open the group's own page —
+  // GroupModal — where Edit renames, sorts, reorders, removes and adds),
+  // and the entries in it, each opening from here.
   return (
     <>
       <Text style={styles.detailLabel}>Group</Text>
-      <View style={styles.groupHeader}>
-        <Text style={styles.groupName} numberOfLines={2}>
+      <TouchableOpacity style={styles.groupHeader} onPress={() => setGroupView('view')}>
+        <Marquee style={styles.groupName} containerStyle={styles.groupNameBox}>
           {name}
-        </Text>
-        <TouchableOpacity onPress={() => toggle('rename')} hitSlop={6}>
-          <Text style={styles.groupLink}>{mode === 'rename' ? 'Cancel' : 'Rename'}</Text>
-        </TouchableOpacity>
-      </View>
-      {mode === 'rename' ? (
-        <View style={[styles.tagInputRow, styles.groupPanel]}>
-          <TextInput
-            style={styles.tagInput}
-            value={text}
-            onChangeText={setText}
-            placeholder="Group name"
-            placeholderTextColor={themeColor('#999')}
-            autoFocus
-          />
-          <TouchableOpacity
-            style={[styles.tagAddButton, !text.trim() && styles.groupButtonOff]}
-            disabled={!text.trim()}
-            onPress={() => {
-              onWriteGroup(members, text.trim());
-              setMode(null);
-            }}
-          >
-            <Text style={styles.tagAddButtonText}>Save</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      <Text style={styles.detailLabel}>In this group ({members.length})</Text>
+        </Marquee>
+        <Text style={styles.groupOpen}>{members.length} ›</Text>
+      </TouchableOpacity>
       {members.map((p, i) => {
         const isThis = p.source_id === entry.source_id;
-        const move = (to) => {
-          const next = [...members];
-          [next[i], next[to]] = [next[to], next[i]];
-          onWriteGroup(next, name);
-        };
         return (
-          <View key={p.source_id} style={[styles.groupRow, isThis && styles.groupRowThis]}>
-            <TouchableOpacity style={styles.groupRowMain} onPress={() => !isThis && onOpen(p)} disabled={isThis}>
-              <Text style={styles.groupRowNumber}>{i + 1}</Text>
-              <Text style={[styles.groupRowTitle, isThis && styles.groupRowTitleThis]} numberOfLines={1}>
-                {p.title || p.source_id}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => move(i - 1)} disabled={i === 0} hitSlop={6}>
-              <Text style={[styles.groupArrow, i === 0 && styles.groupArrowOff]}>▲</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => move(i + 1)} disabled={i === members.length - 1} hitSlop={6}>
-              <Text style={[styles.groupArrow, i === members.length - 1 && styles.groupArrowOff]}>▼</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            key={p.source_id}
+            style={[styles.groupRow, isThis && styles.groupRowThis]}
+            onPress={() => !isThis && onOpen(p)}
+            disabled={isThis}
+          >
+            <Text style={styles.groupRowNumber}>{i + 1}</Text>
+            <Marquee style={[styles.groupRowTitle, isThis && styles.groupRowTitleThis]} containerStyle={styles.groupTitleBox}>
+              {p.title || p.source_id}
+            </Marquee>
+          </TouchableOpacity>
         );
       })}
       <View style={styles.groupActions}>
-        <TouchableOpacity onPress={() => toggle('add')}>
-          <Text style={styles.groupLink}>{mode === 'add' ? 'Done adding' : '+ Add more'}</Text>
+        <TouchableOpacity onPress={() => setGroupView('edit')}>
+          <Text style={styles.groupLink}>✎ Edit group</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => onLeave(entry)}>
           <Text style={[styles.groupLink, styles.groupLeave]}>Remove this from group</Text>
         </TouchableOpacity>
       </View>
-      {mode === 'add' ? (
-        <View style={styles.groupPanel}>
-          <TextInput
-            style={styles.tagInput}
-            value={text}
-            onChangeText={setText}
-            placeholder="Search titles…"
-            placeholderTextColor={themeColor('#999')}
-          />
-          {candidates.map((e) => (
-            <TouchableOpacity key={e.source_id} style={styles.groupRow} onPress={() => onWriteGroup([...members, e], name)}>
-              <Text style={styles.groupRowNumber}>+</Text>
-              <Text style={styles.groupRowTitle} numberOfLines={1}>
-                {e.title || e.source_id}
-                {e.group_name ? `  (in “${e.group_name}”)` : ''}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          {!candidates.length ? (
-            <Text style={styles.groupHint}>{query ? 'Nothing matches.' : 'Type part of a title to find entries to add.'}</Text>
-          ) : null}
-        </View>
-      ) : null}
+      <GroupModal
+        visible={!!groupView}
+        editing={groupView === 'edit'}
+        onEditing={(on) => setGroupView(on ? 'edit' : 'view')}
+        name={name}
+        members={members}
+        sameType={sameType}
+        currentId={entry.source_id}
+        onClose={() => setGroupView(null)}
+        onOpen={(p) => {
+          setGroupView(null);
+          if (p.source_id !== entry.source_id) onOpen(p);
+        }}
+        onWriteGroup={onWriteGroup}
+        onLeave={onLeave}
+      />
     </>
+  );
+}
+
+// Ways Edit can sort a group in one tap (then ▲ / ▼ fine-tune it).
+const GROUP_SORTS = [
+  { key: 'part', label: '# Part number' },
+  { key: 'title', label: 'A–Z Title' },
+  { key: 'added', label: '🕒 Date added' },
+];
+function sortGroup(members, how) {
+  const partNumber = (e) => {
+    const guess = guessGroup(e.title);
+    const n = parseFloat(guess ? guess.part : String(e.title || '').match(/\d+(?:\.\d+)?/)?.[0]);
+    return Number.isFinite(n) ? n : Infinity;
+  };
+  const byTitle = (a, b) =>
+    String(a.title || a.source_id).localeCompare(String(b.title || b.source_id), undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  const sorted = [...members];
+  if (how === 'part') sorted.sort((a, b) => partNumber(a) - partNumber(b) || byTitle(a, b));
+  if (how === 'title') sorted.sort(byTitle);
+  if (how === 'added') sorted.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  return sorted;
+}
+
+// A group's own page: its name and every entry in it with its cover, each
+// opening on tap. Edit turns it into the editor: rename, sort in one tap
+// (part number, title, date added), move entries with ▲ / ▼, take one out
+// with ✕, and add more of the same type.
+function GroupModal({ visible, editing, onEditing, name, members, sameType, currentId, onClose, onOpen, onWriteGroup, onLeave }) {
+  const [rename, setRename] = useState(name || '');
+  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    setRename(name || '');
+    setAdding(false);
+    setSearch('');
+  }, [name, editing, visible]);
+  if (!visible) return null;
+
+  const query = groupKey(search);
+  const candidates = adding
+    ? sameType
+        .filter((e) => groupKey(e.group_name) !== groupKey(name))
+        .filter((e) =>
+          query
+            ? groupKey(e.title).includes(query) || groupKey(e.source_id).includes(query)
+            : groupKey(guessGroup(e.title)?.name) === groupKey(name)
+        )
+        .slice(0, 15)
+    : [];
+  const move = (i, to) => {
+    const next = [...members];
+    [next[i], next[to]] = [next[to], next[i]];
+    onWriteGroup(next, name);
+  };
+  const saveName = () => {
+    const trimmed = rename.trim();
+    if (trimmed && trimmed !== name) onWriteGroup(members, trimmed);
+  };
+
+  return (
+    <Modal visible animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailCard}>
+          <View style={styles.groupPageHeader}>
+            <Marquee style={styles.groupPageTitle} containerStyle={styles.groupNameBox}>
+              {name}
+            </Marquee>
+            <TouchableOpacity
+              style={[styles.groupEditButton, editing && styles.groupEditButtonOn]}
+              onPress={() => {
+                if (editing) saveName();
+                onEditing(!editing);
+              }}
+            >
+              <Text style={[styles.groupEditText, editing && styles.groupEditTextOn]}>{editing ? 'Done' : '✎ Edit'}</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.groupHint}>
+            {members.length} in this group{editing ? ' · editing' : ''}
+          </Text>
+
+          {editing ? (
+            <>
+              <Text style={styles.detailLabel}>Name</Text>
+              <View style={styles.tagInputRow}>
+                <TextInput
+                  style={styles.tagInput}
+                  value={rename}
+                  onChangeText={setRename}
+                  onSubmitEditing={saveName}
+                  onBlur={saveName}
+                  placeholder="Group name"
+                  placeholderTextColor={themeColor('#999')}
+                  returnKeyType="done"
+                />
+              </View>
+              <Text style={styles.detailLabel}>Sort</Text>
+              <View style={styles.tagWrap}>
+                {GROUP_SORTS.map((o) => (
+                  <TouchableOpacity key={o.key} style={styles.tagChip} onPress={() => onWriteGroup(sortGroup(members, o.key), name)}>
+                    <Text style={styles.tagChipText}>{o.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.groupHint}>Or move one with ▲ / ▼. ✕ takes it out of the group.</Text>
+            </>
+          ) : null}
+
+          <ScrollView style={styles.groupPageList} keyboardShouldPersistTaps="handled">
+            {members.map((p, i) => (
+              <View key={p.source_id} style={[styles.groupPageRow, p.source_id === currentId && styles.groupRowThis]}>
+                <TouchableOpacity style={styles.groupPageMain} onPress={() => onOpen(p)} disabled={editing}>
+                  <Text style={styles.groupRowNumber}>{i + 1}</Text>
+                  {p.local_image_path ? (
+                    <Image source={{ uri: p.local_image_path }} style={styles.groupPageThumb} resizeMethod="resize" />
+                  ) : (
+                    <View style={[styles.groupPageThumb, styles.thumbPlaceholder]} />
+                  )}
+                  <View style={styles.groupPageText}>
+                    <Marquee style={styles.groupPageItemTitle} containerStyle={styles.groupTitleBox}>
+                      {p.title || p.source_id}
+                    </Marquee>
+                  </View>
+                </TouchableOpacity>
+                {editing ? (
+                  <View style={styles.groupPageTools}>
+                    <TouchableOpacity onPress={() => move(i, i - 1)} disabled={i === 0} hitSlop={6}>
+                      <Text style={[styles.groupArrow, i === 0 && styles.groupArrowOff]}>▲</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => move(i, i + 1)} disabled={i === members.length - 1} hitSlop={6}>
+                      <Text style={[styles.groupArrow, i === members.length - 1 && styles.groupArrowOff]}>▼</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => onLeave(p)} hitSlop={6}>
+                      <Text style={styles.groupRemove}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+
+            {editing ? (
+              <>
+                <View style={styles.groupActions}>
+                  <TouchableOpacity onPress={() => setAdding(!adding)}>
+                    <Text style={styles.groupLink}>{adding ? 'Done adding' : '+ Add more'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {adding ? (
+                  <View style={styles.groupPanel}>
+                    <TextInput
+                      style={styles.tagInput}
+                      value={search}
+                      onChangeText={setSearch}
+                      placeholder="Search titles…"
+                      placeholderTextColor={themeColor('#999')}
+                    />
+                    {candidates.map((e) => (
+                      <TouchableOpacity key={e.source_id} style={styles.groupRow} onPress={() => onWriteGroup([...members, e], name)}>
+                        <Text style={styles.groupRowNumber}>+</Text>
+                        <Marquee style={styles.groupRowTitle} containerStyle={styles.groupTitleBox}>
+                          {`${e.title || e.source_id}${e.group_name ? `  (in “${e.group_name}”)` : ''}`}
+                        </Marquee>
+                      </TouchableOpacity>
+                    ))}
+                    {!candidates.length ? (
+                      <Text style={styles.groupHint}>
+                        {query ? 'Nothing matches.' : 'Type part of a title to find entries to add.'}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.detailFooterRow}>
+            <TouchableOpacity style={styles.detailCloseButtonFlex} onPress={onClose}>
+              <Text style={styles.detailCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1398,6 +1539,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [sectionViews, setSectionViews] = useState({});
   const setSectionView = useCallback((type, view) => setSectionViews((v) => ({ ...v, [type]: view })), []);
   const showingArtists = !!filter && sectionViews[filter] === 'artists';
+  // Groups view (types with groups — groupField): one row per group, each
+  // opening its own page (GroupModal).
+  const showingGroups = !!MEDIA_TYPES[filter]?.groupField && sectionViews[filter] === 'groups';
+  // The group whose page is open: { type, name, editing }.
+  const [openGroup, setOpenGroup] = useState(null);
   // Favourite artists per type, as Sets of names.
   const loadAllFavorites = () => {
     const all = {};
@@ -1624,6 +1770,39 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     if (!name) return [];
     return sameTypeEntries.filter((e) => groupKey(e.group_name) === name).sort(groupOrder);
   }, [sameTypeEntries, selectedEntry]);
+  // Groups view: every entry of the type (the open group's too), every
+  // group in it A–Z with its entries in order, how many, and a cover.
+  const groupsType = showingGroups ? filter : openGroup?.type;
+  const groupsTypeEntries = useMemo(
+    () => (groupsType ? getAllEntries(groupsType) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groupsType, entries]
+  );
+  const groupList = useMemo(() => {
+    if (!showingGroups) return [];
+    const byKey = new Map();
+    groupsTypeEntries.forEach((e) => {
+      if (!e.group_name) return;
+      const key = groupKey(e.group_name);
+      const g = byKey.get(key) || byKey.set(key, { name: e.group_name, members: [] }).get(key);
+      g.members.push(e);
+    });
+    return [...byKey.values()]
+      .map((g) => {
+        const members = g.members.sort(groupOrder);
+        return { ...g, members, count: members.length, cover: members.find((m) => m.local_image_path)?.local_image_path || null };
+      })
+      .filter((g) => {
+        const words = peopleQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        return words.every((w) => g.name.toLowerCase().includes(w));
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [showingGroups, groupsTypeEntries, peopleQuery]);
+  const openGroupMembers = useMemo(
+    () =>
+      openGroup ? groupsTypeEntries.filter((e) => groupKey(e.group_name) === groupKey(openGroup.name)).sort(groupOrder) : [],
+    [openGroup, groupsTypeEntries]
+  );
 
   return (
     <View style={styles.container}>
@@ -1648,8 +1827,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           {[
             { key: 'items', label: '📚 Titles' },
             { key: 'artists', label: '🎭 Artists' },
+            ...(MEDIA_TYPES[filter]?.groupField ? [{ key: 'groups', label: '🗂 Groups' }] : []),
           ].map((v) => {
-            const active = showingArtists === (v.key === 'artists');
+            const active = (sectionViews[filter] || 'items') === v.key;
             return (
               <TouchableOpacity
                 key={v.key}
@@ -1663,7 +1843,61 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         </View>
       ) : null}
 
-      {showingArtists ? (
+      {showingGroups ? (
+        <>
+          <View style={styles.peopleSearchRow}>
+            <TextInput
+              style={[styles.tagInput, { flex: 1 }]}
+              value={peopleQuery}
+              onChangeText={setPeopleQuery}
+              placeholder="Search groups…"
+              placeholderTextColor={themeColor('#999')}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {peopleQuery ? (
+              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')}>
+                <Text style={styles.artistFilterClear}>✕</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <FlatList
+            extraData={dark}
+            style={styles.list}
+            data={groupList}
+            keyboardShouldPersistTaps="handled"
+            keyExtractor={(item) => groupKey(item.name)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.row}
+                onPress={() => setOpenGroup({ type: filter, name: item.name, editing: false })}
+                onLongPress={() => setOpenGroup({ type: filter, name: item.name, editing: true })}
+              >
+                {item.cover ? (
+                  <Image source={{ uri: item.cover }} style={styles.thumb} resizeMethod="resize" />
+                ) : (
+                  <View style={[styles.thumb, styles.thumbPlaceholder]} />
+                )}
+                <View style={styles.meta}>
+                  <Marquee style={styles.groupRowName} containerStyle={styles.groupRowNameBox}>
+                    {item.name}
+                  </Marquee>
+                  <Text style={styles.author} numberOfLines={1}>
+                    {titleCount(item.count)} · {item.members.map((m) => m.title || m.source_id).join(' · ')}
+                  </Text>
+                </View>
+                <Text style={styles.groupOpen}>›</Text>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                {peopleQuery ? 'No group matches.' : 'No groups yet — open a title and use Add to a group… in its details.'}
+              </Text>
+            }
+          />
+        </>
+      ) : showingArtists ? (
         <>
           <View style={styles.peopleSearchRow}>
             <TextInput
@@ -1908,6 +2142,27 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       />
         </>
       )}
+
+      {/* Groups view: the group whose row was tapped (held: opens in Edit). */}
+      <GroupModal
+        visible={!!openGroup && openGroupMembers.length > 0}
+        editing={!!openGroup?.editing}
+        onEditing={(on) => setOpenGroup((g) => (g ? { ...g, editing: on } : g))}
+        name={openGroup?.name}
+        members={openGroupMembers}
+        sameType={groupsTypeEntries}
+        currentId={null}
+        onClose={() => setOpenGroup(null)}
+        onOpen={(p) => {
+          setOpenGroup(null);
+          setSelectedKey(`${p.media_type}:${p.source_id}`);
+        }}
+        onWriteGroup={(ordered, name) => {
+          handleWriteGroup(ordered, name);
+          setOpenGroup((g) => (g ? { ...g, name } : g)); // follows a rename
+        }}
+        onLeave={handleLeaveGroup}
+      />
 
       <DetailModal
         entry={selectedEntry}
@@ -2382,8 +2637,27 @@ const styles = themed(StyleSheet.create({
   fullImage: { width: '100%', height: '100%' },
   groupLink: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },
   groupLeave: { color: '#c0392b' },
-  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  groupName: { flex: 1, fontSize: 15, fontWeight: '700', color: '#0f3460' },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 4 },
+  groupName: { fontSize: 15, fontWeight: '700', color: '#0f3460' },
+  groupNameBox: { flex: 1 },
+  groupOpen: { fontSize: 15, fontWeight: '700', color: '#1a73e8' },
+  groupTitleBox: { flex: 1 },
+  groupRowName: { fontSize: 15, fontWeight: '700', color: '#222' },
+  groupRowNameBox: { alignSelf: 'stretch' },
+  groupPageHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  groupPageTitle: { fontSize: 20, fontWeight: '700', color: '#222' },
+  groupEditButton: { borderWidth: 1, borderColor: '#0f3460', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6 },
+  groupEditButtonOn: { backgroundColor: '#0f3460' },
+  groupEditText: { color: '#0f3460', fontWeight: '700' },
+  groupEditTextOn: { color: '#fff' },
+  groupPageList: { marginTop: 10, maxHeight: 460 },
+  groupPageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4, borderRadius: 6 },
+  groupPageMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupPageThumb: { width: 44, height: 60, borderRadius: 4, backgroundColor: '#eee' },
+  groupPageText: { flex: 1 },
+  groupPageItemTitle: { color: '#333', fontSize: 14, fontWeight: '600' },
+  groupPageTools: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  groupRemove: { fontSize: 16, color: '#c0392b', fontWeight: '700' },
   groupActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 8 },
   groupPanel: { marginTop: 10 },
   groupHint: { fontSize: 13, color: '#888', marginTop: 8 },

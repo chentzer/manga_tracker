@@ -625,10 +625,18 @@ so nothing renders blank.
   picks an existing group or creates one with the name you type, and a
   chip suggests one from the title ("Summer Days 4" goes with "Summer
   Days", or makes a new group with the other parts already saved). In a
-  group the sheet shows its name (**Rename** renames it for every entry)
-  and every entry in it, which open with a tap and reorder with ▲ / ▼,
-  plus **+ Add more** (search the type) and **Remove this from group**.
-  The Library row shows the group's name. Stored as `group_name` /
+  group the sheet shows its name and every entry in it (each opens with a
+  tap), **✎ Edit group** and **Remove this from group**. Tapping the
+  group's name opens its own page (`GroupModal`): every entry with its
+  cover, opening on tap. Its **✎ Edit** button turns the page into the
+  editor: rename the group (for every entry), sort it in one tap (**Part
+  number**, **Title**, **Date added**), move an entry with ▲ / ▼, take one
+  out with ✕, and **+ Add more** (search the type). Long titles and group
+  names scroll sideways (`src/Marquee.js`) instead of being cut off. To
+  see groups only, pick **🗂 Groups** next to Titles / Artists: one row
+  per group (A–Z, searchable) with a cover, its name and how many it has;
+  tap a row to open the group's page, or hold it to open it in Edit. The
+  Library row shows the group's name. Stored as `group_name` /
   `group_order`, both in the Drive backup.
 - **Hold to save a picture** (`src/imageHold.js`) — on any browsing tab,
   hold a finger on a picture for about half a second (without moving) and
