@@ -501,6 +501,23 @@ const MediaWebView = forwardRef(function MediaWebView({
   // script to run once it has loaded — on the page whose URL contains
   // `expect` — that moves on to the wanted episode/chapter or reports it
   // doesn't exist yet (see openNext in mediaTypes.js).
+  // The sites a title is searched on, one at a time (the "Next ›" bar):
+  // the type's titleSearch, else its own search page. A request with
+  // `search` (a title highlighted in another app, or an imported title
+  // from the Library) opens the first one's results.
+  const [searchSites] = useState(() =>
+    config.titleSearch ||
+    (config.buildSearchUrl
+      ? [{ name: config.siteName || getHostname(config.startUrl), buildSearchUrl: config.buildSearchUrl }]
+      : null)
+  );
+  const requestUrl = (request) =>
+    request.search && searchSites ? searchSites[0].buildSearchUrl(request.search) : request.url;
+  // The title search being shown: { query, index } into searchSites, or
+  // null. Kept until closed or another search starts.
+  const [titleSearch, setTitleSearch] = useState(() =>
+    openRequest?.search && searchSites ? { query: openRequest.search, index: 0 } : null
+  );
   const handledOpenId = useRef(openRequest ? openRequest.id : null);
   const pendingOpenCheck = useRef(
     openRequest?.checkJs ? { js: openRequest.checkJs, expect: openRequest.expect } : null
@@ -515,7 +532,9 @@ const MediaWebView = forwardRef(function MediaWebView({
   // First page: initialUrl (the page this tab was on before Data saver
   // unloaded it — App.js) or the type's start page. Fixed at mount; a new
   // source would reload the page.
-  const [startSource] = useState(() => ({ uri: openRequest?.url || initialUrl || config.startUrl }));
+  const [startSource] = useState(() => ({
+    uri: (openRequest && requestUrl(openRequest)) || initialUrl || config.startUrl,
+  }));
   // Latest onPageChange, for the navigation handler below.
   const pageChangeRef = useRef(onPageChange);
   pageChangeRef.current = onPageChange;
@@ -862,10 +881,28 @@ const MediaWebView = forwardRef(function MediaWebView({
       pendingOpenCheck.current = openRequest.checkJs
         ? { js: openRequest.checkJs, expect: openRequest.expect }
         : null;
-      webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(openRequest.url)}; true;`);
+      setTitleSearch(openRequest.search && searchSites ? { query: openRequest.search, index: 0 } : null);
+      webviewRef.current?.injectJavaScript(
+        `window.location.href = ${JSON.stringify(requestUrl(openRequest))}; true;`
+      );
     }
     onOpenHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRequest, onOpenHandled]);
+
+  // Opens one site's search results for the title search; Next moves the
+  // same search on to the next site.
+  const openTitleSearch = useCallback(
+    (query, index) => {
+      const site = searchSites[index];
+      setTitleSearch({ query, index });
+      logDebug(`Title search: "${query}" on ${site.name}`);
+      webviewRef.current?.injectJavaScript(
+        `window.location.href = ${JSON.stringify(site.buildSearchUrl(query))}; true;`
+      );
+    },
+    [searchSites, logDebug]
+  );
 
   // Blocks navigation to any domain other than the site's own (or, for
   // a multi-source type, any of its sources' domains) — this is what
@@ -995,7 +1032,7 @@ const MediaWebView = forwardRef(function MediaWebView({
   );
 
   // Saves a held picture (src/imageHold.js) to this tab's gallery folder
-  // (e.g. Pictures/Manga Tracker/Manga/, gallery.js), named
+  // (e.g. Pictures/AniManga Tracker/Manga/, gallery.js), named
   // "<code>_<time>" on a title's page (e.g. "12345_20261014_220215"),
   // else "<site>_<time>".
   const savingHeldPicture = useRef(false);
@@ -1399,6 +1436,12 @@ const MediaWebView = forwardRef(function MediaWebView({
   const currentSiteIndex = siteIndexFor(sites, pageUrl || startSource.uri);
   const openSite = (site) => {
     setSiteMenuVisible(false);
+    // During a title search, a site with a search shows its results.
+    const searchIndex = titleSearch ? searchSites.findIndex((t) => t.name === site.name) : -1;
+    if (searchIndex >= 0) {
+      openTitleSearch(titleSearch.query, searchIndex);
+      return;
+    }
     logDebug(`Site list: opening ${site.name}`);
     webviewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(site.homeUrl)}; true;`);
   };
@@ -1414,6 +1457,27 @@ const MediaWebView = forwardRef(function MediaWebView({
   return (
     <View style={styles.container}>
       {siteButton ? <View style={styles.manualBar}>{siteButton}</View> : null}
+      {titleSearch ? (
+        <View style={styles.titleSearchBar}>
+          <Text style={styles.titleSearchText} numberOfLines={1}>
+            “{titleSearch.query}” on {searchSites[titleSearch.index].name}
+            {searchSites.length > 1 ? ` (${titleSearch.index + 1}/${searchSites.length})` : ''}
+          </Text>
+          {titleSearch.index + 1 < searchSites.length ? (
+            <TouchableOpacity
+              style={[styles.manualButton, styles.siteButton]}
+              onPress={() => openTitleSearch(titleSearch.query, titleSearch.index + 1)}
+            >
+              <Text style={styles.manualButtonText} numberOfLines={1}>
+                Next: {searchSites[titleSearch.index + 1].name} ›
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={8}>
+            <Text style={styles.titleSearchClose}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {currentEntryKey ? (
         <TouchableOpacity
           style={styles.viewInLibraryButton}
@@ -1584,6 +1648,17 @@ const styles = StyleSheet.create({
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
   siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
+  // Title search: which site's results are showing, and Next.
+  titleSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#16213e',
+  },
+  titleSearchText: { flex: 1, color: '#ddd', fontSize: 13 },
+  titleSearchClose: { color: '#aaa', fontSize: 18, paddingHorizontal: 4 },
   // The site list drops down from the top left, under its button.
   siteMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', paddingTop: 96, paddingHorizontal: 8 },
   siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4 },

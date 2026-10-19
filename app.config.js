@@ -4,7 +4,7 @@
 // real values there — see README.md's Google Drive setup section.
 export default {
   expo: {
-    name: 'Manga Tracker',
+    name: 'AniManga Tracker',
     slug: 'manga-tracker',
     version: '1.0.0',
     orientation: 'portrait',
@@ -42,12 +42,12 @@ export default {
       [
         'expo-media-library',
         {
-          photosPermission: 'Allow Manga Tracker to save images to your photo library.',
-          savePhotosPermission: 'Allow Manga Tracker to save images to your photo library.',
+          photosPermission: 'Allow AniManga Tracker to save images to your photo library.',
+          savePhotosPermission: 'Allow AniManga Tracker to save images to your photo library.',
           isAccessMediaLocationEnabled: true,
         },
       ],
-      // Share › Manga Tracker from other apps: selected text and links go
+      // Share › AniManga Tracker from other apps: selected text and links go
       // to the Notepad's Inbox (App.js).
       [
         'expo-share-intent',

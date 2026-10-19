@@ -35,9 +35,12 @@ import {
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import { syncNotepadToDrive } from './src/notepadSync';
+import ProcessText from './modules/process-text/src';
+import { classify } from './src/quickSearch';
+import QuickSearchPicker from './src/QuickSearchPicker';
 import { beginSync } from './src/syncStatus';
 import { keepAwakeWhileSyncing } from './src/keepAwake';
-import { exportMalList, pickAndImportMalList, MAL_LISTS } from './src/malList';
+import { exportMalList, pickAndImportMalList, MAL_LISTS, isImportedSourceId } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
   dataSaverSetting,
@@ -72,6 +75,29 @@ export default function App() {
   // is holding a locked phone; items get moved to a note in-app instead.
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
+  // A title to search for (quickSearch.js) — highlighted in another app →
+  // "Search AniManga Tracker" (modules/process-text), or shared here →
+  // Search. { query }, a new object each time so the same text can be
+  // searched twice. AppContent runs it once the app is unlocked (it only
+  // exists after that).
+  const [shareSearch, setShareSearch] = useState(null);
+  useEffect(() => {
+    if (!ProcessText) return undefined;
+    const take = () => {
+      const text = ProcessText.takeText();
+      if (text && text.trim()) setShareSearch({ query: text.trim() });
+    };
+    take(); // the text that started the app
+    const textListener = ProcessText.addListener('onText', take);
+    const appStateListener = AppState.addEventListener('change', (state) => {
+      if (state === 'active') take();
+    });
+    return () => {
+      textListener.remove();
+      appStateListener.remove();
+    };
+  }, []);
+
   // The database is ready before the share effect below runs, even for a
   // share that cold-launches the app: AppLock calls initDb during its
   // first render (it needs the App lock setting), and render comes before
@@ -79,7 +105,9 @@ export default function App() {
   useEffect(() => {
     if (!hasShareIntent) return;
     const shared = (shareIntent?.text || shareIntent?.webUrl || '').trim();
-    if (shared) {
+    resetShareIntent();
+    if (!shared) return;
+    const saveToNotepad = () => {
       addNote(shared); // no notebook = Inbox
       setNotepadRefreshKey((k) => k + 1);
       if (Platform.OS === 'android') {
@@ -88,8 +116,19 @@ export default function App() {
       // Only reaches Drive if this run of the app is already signed in;
       // otherwise AppContent catches it up once Drive is signed in.
       syncNotepadToDrive();
+    };
+    // A link is always a note. Text can instead be searched as a title
+    // (quickSearch.js picks the tab), after unlocking if App lock is on.
+    if (/^https?:\/\/\S+$/i.test(shared)) {
+      saveToNotepad();
+      return;
     }
-    resetShareIntent();
+    const preview = shared.length > 120 ? `${shared.slice(0, 120)}…` : shared;
+    Alert.alert('Shared text', `“${preview}”`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save to Notepad', onPress: saveToNotepad },
+      { text: 'Search', onPress: () => setShareSearch({ query: shared }) },
+    ]);
   }, [hasShareIntent, shareIntent, resetShareIntent]);
 
   return (
@@ -97,7 +136,11 @@ export default function App() {
     // SafeAreaView to work at all — without it, insets default to zero.
     <SafeAreaProvider>
       <AppLock>
-        <AppContent notepadRefreshKey={notepadRefreshKey} />
+        <AppContent
+          notepadRefreshKey={notepadRefreshKey}
+          shareSearch={shareSearch}
+          onShareSearchDone={() => setShareSearch(null)}
+        />
       </AppLock>
     </SafeAreaProvider>
   );
@@ -123,7 +166,7 @@ const BUTTON_SETTINGS = [
 
 // Opens Android's "Media management apps" screen (Android 12+). With that
 // access on, deleting the original screenshot no longer shows the
-// "Allow Manga Tracker to delete…?" dialog (needs MANAGE_MEDIA in
+// "Allow AniManga Tracker to delete…?" dialog (needs MANAGE_MEDIA in
 // app.config.js). Falls back to the app's own settings page if that
 // screen can't be opened.
 function openMediaManagementSettings() {
@@ -155,7 +198,7 @@ const DATA_SAVER_SETTINGS = [
 // How long a browsing tab's page sits still before the tab row hides.
 const TAB_BAR_HIDE_MS = 3000;
 
-function AppContent({ notepadRefreshKey }) {
+function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -224,7 +267,7 @@ function AppContent({ notepadRefreshKey }) {
   }, []);
 
   // Phone screenshots taken in the app are filed into the gallery under
-  // Pictures/Manga Tracker/<tab>/ (or Manga Tracker/ itself on the
+  // Pictures/AniManga Tracker/<tab>/ (or AniManga Tracker/ itself on the
   // Library tab) with a descriptive name — see src/screenshots.js. Only
   // runs while unlocked: AppLock shows nothing else while locked.
   useEffect(() => {
@@ -267,7 +310,7 @@ function AppContent({ notepadRefreshKey }) {
           ToastAndroid.show(`Screenshot saved to ${result.folder}`, ToastAndroid.SHORT);
         } else if (result.reason === 'permission') {
           ToastAndroid.show(
-            'Screenshot left in Screenshots — allow full photo access for Manga Tracker to file it.',
+            'Screenshot left in Screenshots — allow full photo access for AniManga Tracker to file it.',
             ToastAndroid.LONG
           );
         } else if (result.reason === 'not-found') {
@@ -405,6 +448,35 @@ function AppContent({ notepadRefreshKey }) {
   const clearOpenRequest = useCallback((mediaType) => {
     setOpenRequests((prev) => (prev[mediaType] ? { ...prev, [mediaType]: null } : prev));
   }, []);
+
+  // Quick search (a title highlighted or shared in another app): a
+  // Library entry named exactly opens that entry's page, a title found in
+  // one tab's entries opens that tab's search, and otherwise the picker
+  // asks which tab (quickSearch.js). Searches show the "Next ›" bar for
+  // the tab's other sites.
+  const [searchPick, setSearchPick] = useState(null);
+  const searchInTab = (key, query) => handleOpenInTab(key, { search: query });
+  useEffect(() => {
+    if (!shareSearch) return;
+    onShareSearchDone();
+    const result = classify(shareSearch.query, getAllEntries(), SITE_TAB_KEYS);
+    if (result.kind === 'entry') {
+      const entry = result.entry;
+      if (isImportedSourceId(entry.source_id) || !entry.source_url) {
+        searchInTab(entry.media_type, entry.alt_title || entry.title);
+      } else {
+        handleOpenInTab(entry.media_type, { url: entry.source_url });
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(`In your Library: ${entry.title || entry.alt_title}`, ToastAndroid.SHORT);
+        }
+      }
+    } else if (result.kind === 'search') {
+      searchInTab(result.key, result.query);
+    } else {
+      setSearchPick(result);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareSearch]);
 
   useEffect(() => {
     initDb();
@@ -696,7 +768,7 @@ function AppContent({ notepadRefreshKey }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.title}>Manga Tracker</Text>
+        <Text style={styles.title}>AniManga Tracker</Text>
         <View style={styles.headerRight}>
           {/* Backup / restore progress (src/SyncStatusPill.js). */}
           <SyncStatusPill />
@@ -769,6 +841,16 @@ function AppContent({ notepadRefreshKey }) {
       </View>
 
       <Notepad visible={notepadVisible} onClose={() => setNotepadVisible(false)} refreshKey={notepadRefreshKey} />
+
+      <QuickSearchPicker
+        pick={searchPick}
+        onClose={() => setSearchPick(null)}
+        onChoose={(key) => {
+          const query = searchPick.query;
+          setSearchPick(null);
+          searchInTab(key, query);
+        }}
+      />
 
       <Modal
         visible={settingsVisible}
@@ -880,7 +962,7 @@ function AppContent({ notepadRefreshKey }) {
                   <Text style={styles.settingsLabel}>Delete screenshots without asking</Text>
                   <Text style={styles.settingsHint}>
                     After filing a screenshot, Android asks before removing the original. Turn on
-                    "Media management" for Manga Tracker on the next screen to skip that question.
+                    "Media management" for AniManga Tracker on the next screen to skip that question.
                   </Text>
                 </View>
                 <TouchableOpacity style={styles.settingsSmallButton} onPress={openMediaManagementSettings}>

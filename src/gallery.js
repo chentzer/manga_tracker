@@ -1,14 +1,14 @@
 import { Album } from 'expo-media-library';
 
 // Everything the app saves to the phone's gallery goes under
-// Pictures/Manga Tracker/, with one subfolder per tab, e.g.
-// Pictures/Manga Tracker/Manga/. Used by "Save Page Image", hold to save
+// Pictures/AniManga Tracker/, with one subfolder per tab, e.g.
+// Pictures/AniManga Tracker/Manga/. Used by "Save Page Image", hold to save
 // (MediaWebView.js) and screenshot filing (screenshots.js).
 //
 // SDK 57 note: the old MediaLibrary functions (saveToLibraryAsync,
 // createAlbumAsync, …) now throw at runtime unless imported from
 // 'expo-media-library/legacy'; this uses the new Album API instead.
-export const GALLERY_ROOT = 'Manga Tracker';
+export const GALLERY_ROOT = 'AniManga Tracker';
 
 // Album names on Android may only contain letters, digits, '_', spaces,
 // hyphens and '/' (expo-media-library rejects anything else), so any
@@ -20,8 +20,8 @@ function cleanAlbumPart(text) {
     .trim();
 }
 
-// The gallery folder for a tab, e.g. 'Manga' -> "Manga Tracker/Manga";
-// no label (the Library) -> "Manga Tracker".
+// The gallery folder for a tab, e.g. 'Manga' -> "AniManga Tracker/Manga";
+// no label (the Library) -> "AniManga Tracker".
 export function galleryFolderFor(tabLabel) {
   const clean = cleanAlbumPart(tabLabel);
   return clean ? `${GALLERY_ROOT}/${clean}` : GALLERY_ROOT;

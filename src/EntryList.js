@@ -1346,7 +1346,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       // button opens the chapter itself from then on.
       if (isImportedSourceId(item.source_id)) {
         setSelectedKey(null);
-        onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle) });
+        // The tab's title search, with Next › for its other sites.
+        onOpenInTab?.(item.media_type, { url: config.buildSearchUrl(searchTitle), search: searchTitle });
         return;
       }
       setSelectedKey(null);
