@@ -6,6 +6,7 @@ import { PAUSE_MEDIA_JS } from './MediaWebView';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture } from './imageHold';
+import { themed, themeColor, useDarkMode } from './theme';
 
 // Turns what was typed in the address bar into a URL to open:
 //   "https://x.com/a"  -> as typed (already has a scheme)
@@ -69,6 +70,7 @@ const BrowserTab = forwardRef(function BrowserTab(
   { blockAds = true, onTabBarActivity, initialUrl = null, onPageChange },
   ref
 ) {
+  useDarkMode(); // redraws in the other colours when Dark mode is switched
   const webviewRef = useRef(null);
   // null until the first page is opened. initialUrl: the page this tab
   // was on before Data saver unloaded it (App.js), reopened as it mounts.
@@ -308,7 +310,7 @@ const BrowserTab = forwardRef(function BrowserTab(
 
 export default BrowserTab;
 
-const styles = StyleSheet.create({
+const styles = themed(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#1a1a2e' },
   toolbar: {
     flexDirection: 'row',
@@ -347,4 +349,4 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 10 },
   emptyText: { fontSize: 15, lineHeight: 23, color: '#8892b0', textAlign: 'center' },
-});
+}));

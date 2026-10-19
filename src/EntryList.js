@@ -38,6 +38,7 @@ import {
   parseAuthors,
 } from './artists';
 import FocusImage from './FocusImage';
+import { themed, themeColor, useDarkMode } from './theme';
 
 // MyAnimeList's 1-10 scale.
 const SCORES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -255,7 +256,7 @@ function TagEditor({ tags, onChange }) {
         <TextInput
           style={styles.tagInput}
           placeholder="Add a tag…"
-          placeholderTextColor="#999"
+          placeholderTextColor={themeColor('#999')}
           value={input}
           onChangeText={setInput}
           onSubmitEditing={addTag}
@@ -435,7 +436,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
                 value={text}
                 onChangeText={setText}
                 placeholder="New group name, or search"
-                placeholderTextColor="#999"
+                placeholderTextColor={themeColor('#999')}
                 onSubmitEditing={() => join(text)}
                 returnKeyType="done"
               />
@@ -500,7 +501,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
             value={text}
             onChangeText={setText}
             placeholder="Group name"
-            placeholderTextColor="#999"
+            placeholderTextColor={themeColor('#999')}
             autoFocus
           />
           <TouchableOpacity
@@ -555,7 +556,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
             value={text}
             onChangeText={setText}
             placeholder="Search titles…"
-            placeholderTextColor="#999"
+            placeholderTextColor={themeColor('#999')}
           />
           {candidates.map((e) => (
             <TouchableOpacity key={e.source_id} style={styles.groupRow} onPress={() => onWriteGroup([...members, e], name)}>
@@ -1068,6 +1069,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
 }
 
 export default function EntryList({ active = true, reloadKey = 0, focusKey = null, onFocusHandled, onOpenInTab }) {
+  const dark = useDarkMode(); // redraws in the other colours when Dark mode is switched
   const [entries, setEntries] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(null); // null = all types
@@ -1669,7 +1671,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               value={peopleQuery}
               onChangeText={setPeopleQuery}
               placeholder="Search artists…"
-              placeholderTextColor="#999"
+              placeholderTextColor={themeColor('#999')}
               autoCorrect={false}
               returnKeyType="search"
             />
@@ -1680,6 +1682,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             ) : null}
           </View>
           <FlatList
+            extraData={dark}
             style={styles.list}
             data={shownArtists}
             keyboardShouldPersistTaps="handled"
@@ -1852,6 +1855,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       ) : null}
 
       <FlatList
+        extraData={dark}
         style={styles.list}
         data={displayEntries}
         keyExtractor={(item) => `${item.media_type}:${item.source_id}`}
@@ -2002,7 +2006,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   filterBar: { flexDirection: 'row', padding: 10, gap: 8 },
   filterBarWrap: { flexWrap: 'wrap' },
@@ -2401,4 +2405,4 @@ const styles = StyleSheet.create({
   groupRowTitleThis: { fontWeight: '700' },
   groupArrow: { fontSize: 16, color: '#0f3460' },
   groupArrowOff: { color: '#ccc' },
-});
+}));

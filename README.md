@@ -816,7 +816,10 @@ so nothing renders blank.
   used to collide with the status bar/notch on Android phones. A gear
   icon at the top right of the header (on every tab) opens the Settings
   sheet: **Google Drive** (Connect/Reconnect, Backup Now, Restore),
-  **MyAnimeList** (export/import), then **App lock** (see `AppLock.js` below)
+  **MyAnimeList** (export/import), then **Dark mode** (off by default: the
+  Library, Notepad, Settings, Browser tab and pop-ups turn dark; websites
+  keep their own colours — `src/theme.js` swaps each file's light colours
+  for dark ones), **App lock** (see `AppLock.js` below)
   and **Show debug tools**, which controls whether each browsing tab
   shows its debug log bar and "Capture HTML" button (see
   `MediaWebView.js`; off by default so the normal UI stays clean), **Block

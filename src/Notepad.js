@@ -23,6 +23,7 @@ import {
   deleteNotebook,
 } from './db';
 import { syncNotepadToDrive, onNotepadSynced } from './notepadSync';
+import { themed, themeColor, useDarkMode } from './theme';
 
 // Splits text into plain and link parts so links inside a note (or a
 // note that's just a link) are tappable. Trailing punctuation is left
@@ -61,6 +62,7 @@ function LinkifiedText({ content, style, linkStyle }) {
 // refreshKey: bumped by App.js when something is shared in, so an
 // already open notepad reloads.
 export default function Notepad({ visible, onClose, refreshKey }) {
+  const dark = useDarkMode(); // redraws in the other colours when Dark mode is switched
   const [notebooks, setNotebooks] = useState([]);
   const [counts, setCounts] = useState({ inbox: 0 });
   const [selectedId, setSelectedId] = useState(null); // null = Inbox
@@ -243,7 +245,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
           <TextInput
             style={styles.input}
             placeholder={`Add to ${selectedTitle}… (text or a link)`}
-            placeholderTextColor="#999"
+            placeholderTextColor={themeColor('#999')}
             value={input}
             onChangeText={setInput}
             multiline
@@ -255,6 +257,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
 
         <FlatList
           data={items}
+          extraData={dark}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
@@ -289,7 +292,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
               <TextInput
                 style={styles.sheetInput}
                 placeholder="e.g. Grocery list"
-                placeholderTextColor="#999"
+                placeholderTextColor={themeColor('#999')}
                 value={newNoteTitle}
                 onChangeText={setNewNoteTitle}
                 onSubmitEditing={handleCreateNote}
@@ -347,7 +350,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   header: {
     flexDirection: 'row',
@@ -445,4 +448,4 @@ const styles = StyleSheet.create({
   moveRow: { paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
   moveRowText: { fontSize: 16, color: '#222' },
   moveHint: { color: '#888', fontSize: 13, paddingVertical: 12 },
-});
+}));

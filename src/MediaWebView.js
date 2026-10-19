@@ -39,6 +39,7 @@ import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './im
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName } from './gallery';
+import { themed, themeColor, useDarkMode } from './theme';
 
 // Asks the page for what a screenshot's file name needs (App.js →
 // getScreenshotInfo): its URL, the page title, and the current position
@@ -492,6 +493,7 @@ const MediaWebView = forwardRef(function MediaWebView({
   onOpenHandled,
   blockAds = true,
 }, ref) {
+  useDarkMode(); // redraws in the other colours when Dark mode is switched
   const webviewRef = useRef(null);
   // Pending getScreenshotInfo() calls, keyed by request id, resolved when
   // the page answers with a 'screenshotInfo' message.
@@ -1604,7 +1606,7 @@ const MediaWebView = forwardRef(function MediaWebView({
 
 export default MediaWebView;
 
-const styles = StyleSheet.create({
+const styles = themed(StyleSheet.create({
   container: { flex: 1 },
   manualBar: {
     flexDirection: 'row',
@@ -1710,4 +1712,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logClearButtonText: { color: '#fff', fontWeight: '600' },
-});
+}));

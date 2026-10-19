@@ -57,6 +57,7 @@ import AppLock, { useAppLockSetting } from './src/AppLock';
 import { galleryFolderFor } from './src/gallery';
 import { fileScreenshot, buildGalleryFileName } from './src/screenshots';
 import { suppressNextRelock, isRelockSuppressed } from './src/relockGuard';
+import { themed, useDarkMode, setDarkMode } from './src/theme';
 
 // Tabs = one per media type (from config, so this never needs manual
 // updates when a type is added) + a unified library at the end.
@@ -207,6 +208,8 @@ const DATA_SAVER_SETTINGS = [
 const TAB_BAR_HIDE_MS = 3000;
 
 function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
+  // Settings → Dark mode (theme.js); this redraws everything when it's switched.
+  const dark = useDarkMode();
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -981,6 +984,16 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             <Text style={styles.settingsSectionTitle}>App</Text>
             <View style={[styles.settingsRow, styles.settingsRowGap]}>
               <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Dark mode</Text>
+                <Text style={styles.settingsHint}>
+                  The Library, Notepad, Settings, the Browser tab and pop-ups turn dark. Websites keep
+                  their own colours.
+                </Text>
+              </View>
+              <Switch value={dark} onValueChange={setDarkMode} />
+            </View>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>App lock</Text>
                 <Text style={styles.settingsHint}>
                   Asks for your fingerprint or phone PIN when the app opens and whenever you come
@@ -1058,7 +1071,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#1a1a2e' },
   header: {
     flexDirection: 'row',
@@ -1160,4 +1173,4 @@ const styles = StyleSheet.create({
   settingsChoiceActive: { backgroundColor: '#16213e' },
   settingsChoiceText: { fontSize: 13, color: '#16213e' },
   settingsChoiceTextActive: { color: '#fff', fontWeight: '600' },
-});
+}));
