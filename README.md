@@ -330,11 +330,13 @@ finish date and sets progress to the total when the total is known.
   title (a total of 1 chapter), it counts as chapter 1.
 - **Ahead of your record.** Opening an episode more than one past your
   record (it says 4, you open 7) asks first: **Go to episode 5** (the
-  next one after your record), **Record 7**, or **Keep 4**. A series
-  recorded for the first time from that page isn't asked about.
+  next one after your record), **Record 7**, or **Keep 4** (which stops
+  asking about that series for the snooze time below, without recording
+  the episodes you open meanwhile). A series recorded for the first time
+  from that page isn't asked about.
 - **Rewatching / rereading.** Opening an episode of a Completed series
   asks whether you're starting a rewatch (**Just looking** stops asking
-  about that series for an hour). While rewatching, the status stays
+  about that series for the snooze time below). While rewatching, the status stays
   Completed (as on MAL), the Rewatching switch is on, and a separate
   rewatch position (`repeat_progress`; MAL's `my_rewatching_ep` for
   anime) moves forward as you watch, so your progress stays at the full
@@ -343,8 +345,12 @@ finish date and sets progress to the total when the total is known.
   switch off yourself asks whether to count it as a finished rewatch.
 - **Volumes (manga).** The manga site's pages don't show volume numbers,
   so after each chapter update a box says volumes read wasn't changed,
-  with **Edit** (opens the entry in the Library) and **Snooze 1 hour**
-  (no more of these boxes for an hour). Set by `promptForVolumes`.
+  with **Edit** (opens the entry in the Library) and **Snooze** (no more
+  of these boxes for the snooze time below). Set by `promptForVolumes`.
+- **Snooze time** — **Settings → Library → Snooze chapter questions**:
+  15 minutes, 1 hour (the default), 6 hours, 1 day or 1 week, for all
+  three questions above (`src/snooze.js`). The browser extension's own
+  "Not now" stays at an hour.
 - **▶ Start reading / ▶ Continue reading · ch N** (watching / ep for
   anime) in the detail sheet opens the first chapter, or the one after
   your progress (during a rewatch, after the rewatch

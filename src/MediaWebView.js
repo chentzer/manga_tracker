@@ -33,6 +33,7 @@ import { todayString } from './malFormat';
 import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
+import { snoozeUntil, snoozeLabel } from './snooze';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
@@ -593,7 +594,7 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   // After a chapter update on a site whose pages don't show volume
   // numbers (promptForVolumes in mediaTypes.js): says volumes read wasn't
-  // changed, unless snoozed for the hour.
+  // changed, unless snoozed (for Settings → Snooze chapter questions).
   const promptVolumes = useCallback((entry, chapter) => {
     if (Date.now() < Number(getSetting('volumePromptSnoozedUntil', '0'))) return;
     const volumes = entry.total_volumes
@@ -604,8 +605,8 @@ const MediaWebView = forwardRef(function MediaWebView({
       `"${entry.title || entry.source_id}" is now at chapter ${chapter}. This site doesn't show volume numbers, so volumes read (${volumes}) wasn't changed. Update it in the Library if needed.`,
       [
         {
-          text: 'Snooze 1 hour',
-          onPress: () => setSetting('volumePromptSnoozedUntil', String(Date.now() + 60 * 60 * 1000)),
+          text: `Snooze ${snoozeLabel()}`,
+          onPress: () => setSetting('volumePromptSnoozedUntil', String(snoozeUntil())),
         },
         {
           text: 'Edit',
@@ -676,9 +677,11 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   // Opening an episode/chapter page (extractProgress in mediaTypes.js):
   // - a completed series asks whether you're starting a rewatch/reread
-  //   ("Just looking" stops asking about that series for an hour);
+  //   ("Just looking" stops asking about that series for a while —
+  //   Settings → Snooze chapter questions, src/snooze.js);
   // - more than one ahead of your record (stopped at 4, opened 7) asks
-  //   first: go to the next one (5), record this one, or keep the record;
+  //   first: go to the next one (5), record this one, or keep the record
+  //   (which stops asking about that series for the same while);
   // - otherwise it's recorded (recordProgress). `fresh` is for a series
   //   recorded just now, which has no record to be ahead of.
   const applyProgress = useCallback(
@@ -701,7 +704,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Just looking',
-            onPress: () => setSetting(snoozeKey, String(Date.now() + 60 * 60 * 1000)),
+            onPress: () => setSetting(snoozeKey, String(snoozeUntil())),
           },
           {
             text: `Start ${verb}`,
@@ -720,7 +723,9 @@ const MediaWebView = forwardRef(function MediaWebView({
       const ahead = !fresh && number > current + 1 && !(repeating && current === 0);
       if (ahead) {
         const asked = `${key}:${number}`;
+        const snoozeKey = `aheadSnooze:${key}`;
         if (askedRef.current.has(asked)) return;
+        if (Date.now() < Number(getSetting(snoozeKey, '0'))) return;
         askedRef.current.add(asked);
         const nextOne = current + 1;
         Alert.alert(
@@ -733,7 +738,11 @@ const MediaWebView = forwardRef(function MediaWebView({
                 }`
           }, but this is ${unit} ${number}.`,
           [
-            { text: `Keep ${current}`, style: 'cancel' },
+            {
+              text: `Keep ${current}`,
+              style: 'cancel',
+              onPress: () => setSetting(snoozeKey, String(snoozeUntil())),
+            },
             {
               text: `Go to ${unit} ${nextOne}`,
               onPress: () => {

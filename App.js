@@ -39,6 +39,7 @@ import { syncNotepadToDrive } from './src/notepadSync';
 import ProcessText from './modules/process-text/src';
 import { classify } from './src/quickSearch';
 import QuickSearchPicker from './src/QuickSearchPicker';
+import { SNOOZE_CHOICES, snoozeMinutes, setSnoozeMinutes } from './src/snooze';
 import { beginSync } from './src/syncStatus';
 import { keepAwakeWhileSyncing } from './src/keepAwake';
 import { exportMalList, pickAndImportMalList, MAL_LISTS, isImportedSourceId } from './src/malList';
@@ -230,6 +231,13 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => subscription.remove();
   }, [tab]);
+
+  // Settings → Snooze chapter questions (src/snooze.js), in minutes.
+  const [snooze, setSnooze] = useState(() => snoozeMinutes());
+  const changeSnooze = (minutes) => {
+    setSnooze(minutes);
+    setSnoozeMinutes(minutes);
+  };
 
   // Settings → Block ads (src/adBlock.js). On unless turned off.
   const [blockAds, setBlockAds] = useState(() => getSetting('blockAds', '1') === '1');
@@ -937,6 +945,26 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             </TouchableOpacity>
 
             <Text style={styles.settingsSectionTitle}>Library</Text>
+            <View style={styles.settingsRowGap}>
+              <Text style={styles.settingsLabel}>Snooze chapter questions</Text>
+              <Text style={styles.settingsHint}>
+                How long "Just looking" (Start rereading?), "Keep" (Ahead of your record) and Snooze
+                (volumes) stop the question from coming back. Just looking and Keep only quiet that title.
+              </Text>
+              <View style={styles.settingsChoiceRow}>
+                {SNOOZE_CHOICES.map((choice) => (
+                  <TouchableOpacity
+                    key={choice.minutes}
+                    style={[styles.settingsChoice, snooze === choice.minutes && styles.settingsChoiceActive]}
+                    onPress={() => changeSnooze(choice.minutes)}
+                  >
+                    <Text style={[styles.settingsChoiceText, snooze === choice.minutes && styles.settingsChoiceTextActive]}>
+                      {choice.short}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
             <View style={[styles.settingsRow, styles.settingsRowGap]}>
               <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>Clear All</Text>
@@ -1121,4 +1149,15 @@ const styles = StyleSheet.create({
   settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
   settingsDangerButton: { backgroundColor: '#c0392b' },
   settingsRowSpaced: { marginTop: 16 },
+  settingsChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  settingsChoice: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#16213e',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  settingsChoiceActive: { backgroundColor: '#16213e' },
+  settingsChoiceText: { fontSize: 13, color: '#16213e' },
+  settingsChoiceTextActive: { color: '#fff', fontWeight: '600' },
 });
