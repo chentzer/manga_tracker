@@ -345,6 +345,16 @@ finish date and sets progress to the total when the total is known.
   asking about that series for the snooze time below, without recording
   the episodes you open meanwhile). A series recorded for the first time
   from that page isn't asked about.
+- **Finished → rate it** (`src/RatePrompt.js`). Opening the last episode
+  or chapter (when the total is known) asks **Finished "…"?** with MAL's
+  1–10 scores: tapping one marks the title Completed with that score (and
+  the finish date, full progress); **Not yet** leaves it. Marking a title
+  Completed in the Library, or finishing a rewatch/reread, asks for a
+  score the same way (the current one is shown chosen). A series still
+  coming out has no total, so for one with a MyAnimeList id and no total,
+  opening it asks AniList again (at most once a day): once the series has
+  ended AniList knows its total, and if the chapter you opened is the last
+  one the question comes up right away.
 - **Rewatching / rereading.** Opening an episode of a Completed series
   asks whether you're starting a rewatch (**Just looking** stops asking
   about that series for the snooze time below). While rewatching, the status stays

@@ -34,6 +34,7 @@ import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService'
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
 import { snoozeUntil, snoozeLabel } from './snooze';
+import RatePrompt from './RatePrompt';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
@@ -630,6 +631,10 @@ const MediaWebView = forwardRef(function MediaWebView({
   // page reported more than once doesn't ask twice.
   const askedRef = useRef(new Set());
 
+  // The score question shown when a title is finished (RatePrompt.js):
+  // { entry, heading, message, score, complete, closeLabel } or null.
+  const [ratePrompt, setRatePrompt] = useState(null);
+
   // Records `number` as how far you are: the rewatch/reread position while
   // repeating a completed series, otherwise its progress (setting it to
   // Reading/Watching and filling an empty start date). Only moves forward.
@@ -662,20 +667,94 @@ const MediaWebView = forwardRef(function MediaWebView({
       );
       maybeBackupLibraryToDrive();
 
+      const title = entry.title || entry.source_id;
+      // The last episode/chapter of a series (when the total is known):
+      // offers to mark it Completed, with a score (RatePrompt.js).
+      const reachesEnd = !repeating && entry.total > 0 && number >= entry.total && entry.read_status !== 'read';
       if (finishesRepeat) {
         const verb = config.key === 'anime' ? 'rewatching' : 'rereading';
-        Alert.alert(
-          `Finished ${verb}`,
-          `"${entry.title || entry.source_id}": ${verb} counted. Times ${
-            config.key === 'anime' ? 'rewatched' : 'reread'
-          }: ${fields.times_repeated}.`
-        );
+        setRatePrompt({
+          entry,
+          heading: `Finished ${verb}`,
+          message: `"${title}": ${verb} counted. Times ${config.key === 'anime' ? 'rewatched' : 'reread'}: ${
+            fields.times_repeated
+          }. Still the same score?`,
+          score: entry.score,
+        });
+      } else if (reachesEnd) {
+        setRatePrompt({
+          entry,
+          complete: true,
+          heading: `Finished "${title}"?`,
+          message: `That's the last ${unit} (${number} of ${entry.total}). Rate it to mark it Completed:`,
+          score: entry.score,
+          closeLabel: 'Not yet',
+        });
       } else if (!repeating && config.promptForVolumes && fields.progress) {
         promptVolumes(entry, number);
       }
     },
     [config, logDebug, promptVolumes]
   );
+
+  // A series still coming out has no total, so the app can't tell when it
+  // has ended. For a title with a MyAnimeList id and no total, opening it
+  // asks AniList again (at most once a day — needsAniList in malList.js);
+  // once the series has ended AniList has its total, and if the chapter
+  // just opened (`chapter`) is the last one, the Completed + score
+  // question comes up straight away.
+  const totalChecks = useRef(new Set()); // "<type>:<id>:<day>" asked this run
+  const learnTotal = useCallback(
+    (entry, chapter) => {
+      if (!entry || !entry.mal_id || entry.total) return;
+      const asked = `${entry.media_type}:${entry.source_id}:${todayString()}`;
+      if (totalChecks.current.has(asked)) return;
+      totalChecks.current.add(asked);
+      refreshFromAniList([entry])
+        .then(() => {
+          const now = getEntry(entry.source_id, entry.media_type);
+          if (!now || !now.total) return;
+          logDebug(`${entry.source_id}: AniList now has its total, ${now.total}.`);
+          maybeBackupLibraryToDrive();
+          if (chapter === null || chapter === undefined || now.read_status === 'read' || chapter < now.total) return;
+          const unit = config.key === 'anime' ? 'episode' : 'chapter';
+          setRatePrompt({
+            entry: now,
+            complete: true,
+            heading: `Finished "${now.title || now.source_id}"?`,
+            message: `It has ended — ${unit} ${now.total} is the last. Rate it to mark it Completed:`,
+            score: now.score,
+            closeLabel: 'Not yet',
+          });
+        })
+        .catch(() => {});
+    },
+    [config, logDebug]
+  );
+
+  // A score from RatePrompt; with `complete`, the title is also marked
+  // Completed the way the Library does it (finish date, full progress).
+  const finishRating = useCallback((prompt, score) => {
+    setRatePrompt(null);
+    const { entry } = prompt;
+    const fields = {};
+    if (score) fields.score = score;
+    if (prompt.complete) {
+      fields.read_status = 'read';
+      if (!entry.finish_date) fields.finish_date = todayString();
+      if (entry.total) fields.progress = entry.total;
+      if (entry.total_volumes) fields.progress_volumes = entry.total_volumes;
+    }
+    if (Object.keys(fields).length === 0) return;
+    updateEntryFields(entry.source_id, entry.media_type, fields);
+    maybeBackupLibraryToDrive();
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(
+        prompt.complete ? `Completed${score ? ` · ${score}/10` : ''}` : `Score: ${score}/10`,
+        ToastAndroid.SHORT
+      );
+    }
+  }, []);
 
   // Opening an episode/chapter page (extractProgress in mediaTypes.js):
   // - a completed series asks whether you're starting a rewatch/reread
@@ -823,7 +902,9 @@ const MediaWebView = forwardRef(function MediaWebView({
       // author: the page is read again just to fill those in.
       const existing = getEntry(sourceId, config.key);
       const extractProgress = source.extractProgress || config.extractProgress;
-      if (existing && extractProgress) applyProgress(existing, extractProgress(match, url), url);
+      const chapter = existing && extractProgress ? extractProgress(match, url) : null;
+      if (existing && extractProgress) applyProgress(existing, chapter, url);
+      if (existing) learnTotal(existing, chapter);
       if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
         setCurrentEntryKey(`${config.key}:${sourceId}`);
@@ -856,7 +937,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         webviewRef.current?.injectJavaScript(source.extractMetadataJs);
       }, 400);
     },
-    [config, logDebug, applyProgress]
+    [config, logDebug, applyProgress, learnTotal]
   );
 
   const handleNavigationStateChange = useCallback(
@@ -1243,6 +1324,8 @@ const MediaWebView = forwardRef(function MediaWebView({
           refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
           logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
           maybeBackupLibraryToDrive();
+        } else {
+          learnTotal(existing, payload.progress);
         }
         if (!payload.skip) {
           let coverPath = null;
@@ -1404,7 +1487,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         inFlightSourceIds.current.delete(sourceId);
       }
     },
-    [config, isSignedInToGoogle, checkUrlAndExtract, logDebug, applyProgress, saveHeldPicture]
+    [config, isSignedInToGoogle, checkUrlAndExtract, logDebug, applyProgress, saveHeldPicture, learnTotal]
   );
 
   // Site list: picks one of the tab's sites and opens its home page.
@@ -1508,6 +1591,11 @@ const MediaWebView = forwardRef(function MediaWebView({
           </Modal>
         </>
       ) : null}
+      <RatePrompt
+        prompt={ratePrompt}
+        onRate={(score) => finishRating(ratePrompt, score)}
+        onClose={() => setRatePrompt(null)}
+      />
       <Modal visible={siteMenuVisible} transparent animationType="fade" onRequestClose={() => setSiteMenuVisible(false)}>
         <TouchableOpacity style={styles.siteMenuOverlay} activeOpacity={1} onPress={() => setSiteMenuVisible(false)}>
           <View style={styles.siteMenu}>

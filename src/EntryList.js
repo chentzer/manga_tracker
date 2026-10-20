@@ -39,6 +39,7 @@ import {
   parseAuthors,
 } from './artists';
 import FocusImage from './FocusImage';
+import RatePrompt from './RatePrompt';
 import { themed, themeColor, useDarkMode } from './theme';
 import Marquee from './Marquee';
 
@@ -1395,6 +1396,13 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [load, backupSilently]
   );
 
+  // Asking for a score when a title is finished (RatePrompt.js): { item,
+  // heading, message } while it shows.
+  const [ratePrompt, setRatePrompt] = useState(null);
+  const askToRate = useCallback((item, message) => {
+    setRatePrompt({ item, heading: `Rate "${item.title || item.alt_title || item.source_id}"`, message });
+  }, []);
+
   const handleSetTags = useCallback(
     (item, newTags) => {
       setTags(item.source_id, item.media_type, newTags);
@@ -1422,8 +1430,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       updateEntryFields(item.source_id, item.media_type, settlingConflicts(item, fields));
       load();
       backupSilently();
+      // Just completed: how was it?
+      if (status === 'read' && item.read_status !== 'read') {
+        askToRate(item, `You've completed it${item.score ? ` — your score so far is ${item.score}` : ''}. How was it?`);
+      }
     },
-    [load, backupSilently]
+    [load, backupSilently, askToRate]
   );
 
   const handleUpdate = useCallback(
@@ -1537,10 +1549,16 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       Alert.alert(`Finished this ${noun}?`, `Count it in times ${noun === 'rewatch' ? 'rewatched' : 'reread'}?`, [
         { text: 'Cancel', style: 'cancel' },
         { text: 'No, just stop', onPress: () => stop(false) },
-        { text: 'Yes, count it', onPress: () => stop(true) },
+        {
+          text: 'Yes, count it',
+          onPress: () => {
+            stop(true);
+            askToRate(item, `${noun === 'rewatch' ? 'Rewatch' : 'Reread'} counted. Still the same score?`);
+          },
+        },
       ]);
     },
-    [handleUpdate]
+    [handleUpdate, askToRate]
   );
 
   // Artists view (artists.js): with a type chosen, 🎭 Artists shows one
@@ -2195,6 +2213,15 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onWriteGroup={handleWriteGroup}
         onLeaveGroup={handleLeaveGroup}
         onOpenEntry={(e) => setSelectedKey(`${e.media_type}:${e.source_id}`)}
+      />
+
+      <RatePrompt
+        prompt={ratePrompt && { ...ratePrompt, score: ratePrompt.item.score }}
+        onRate={(score) => {
+          rate(ratePrompt.item, score);
+          setRatePrompt(null);
+        }}
+        onClose={() => setRatePrompt(null)}
       />
 
       <ArtistDetailModal
