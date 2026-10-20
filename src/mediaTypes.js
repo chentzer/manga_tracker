@@ -26,6 +26,7 @@ const MANGA_SITE_2_URL = extra.mangaSite2Url || 'https://your-second-manga-site.
 const ANIME_SITE_URL = extra.animeSiteUrl || 'https://your-anime-site.example.com';
 const MANHWA_SITE_URL = extra.manhwaSiteUrl || 'https://your-manhwa-site.example.com';
 const MANHWA_SITE_2_URL = extra.manhwaSite2Url || 'https://your-second-manhwa-site.example.com';
+const MANHWA_SITE_3_URL = extra.manhwaSite3Url || 'https://your-third-manhwa-site.example.com';
 
 // "https://www.example.com/x" -> "example.com".
 function hostOf(url) {
@@ -42,6 +43,7 @@ const MANGA_HOST = hostOf(MANGA_SITE_URL);
 const MANGA_HOST_2 = hostOf(MANGA_SITE_2_URL);
 const MANHWA_HOST = hostOf(MANHWA_SITE_URL);
 const MANHWA_HOST_2 = hostOf(MANHWA_SITE_2_URL);
+const MANHWA_HOST_3 = hostOf(MANHWA_SITE_3_URL);
 
 // Scripts for "Watch next" / "Read next" (EntryList.js → MediaWebView.js).
 // Each runs on the page that was opened and either moves on to the wanted
@@ -146,7 +148,7 @@ function openChapterFromRowsJs(n) {
 // ("Start reading", "First Chapter", "Read First"): a link is followed,
 // anything else is pressed. If that doesn't open a chapter (some only
 // scroll to the list or re-sort it), the lowest-numbered chapter in the
-// list is opened, after any "Show N more" button is pressed.
+// list is opened, after any "Show N more" / "Show All" button is pressed.
 const OPEN_FIRST_CHAPTER_JS = `
   (function() {
     var start = location.href;
@@ -208,7 +210,7 @@ const OPEN_FIRST_CHAPTER_JS = `
       }
       if (!expanded) {
         var more = [].slice.call(document.querySelectorAll('button')).filter(function (b) {
-          return /show [0-9]+ more/i.test(b.textContent || '');
+          return /^show ([0-9]+ more|all)/i.test((b.textContent || '').trim());
         })[0];
         if (more) { expanded = true; more.click(); setTimeout(go, 600); return; }
       }
@@ -414,6 +416,61 @@ const WP_MANGA_SERIES_READER_JS = `
     }
     var parts = location.pathname.split('/').filter(Boolean);
     if (parts.length <= 2) return read(document);
+    fetch(location.origin + '/' + parts[0] + '/' + parts[1])
+      .then(function(r) { return r.text(); })
+      .then(function(html) { read(new DOMParser().parseFromString(html, 'text/html')); })
+      .catch(function() { send({ title: document.title || null }); });
+  })();
+  true;
+`;
+
+// Reads a series on a site with series at /series/<slug> and chapters at
+// /series/<slug>/chapter-<n>, whose series page is server-rendered: title
+// in <h1>, the cover as the page's schema.org ImageObject (else the "Cover
+// of …" picture), other names in a line under the title split by " / ",
+// labelled rows (<dt>Author</dt><dd>…</dd>) and genre links (?genres=).
+// The series page is always fetched, so chapter pages read the same.
+const SLUG_SERIES_READER_JS = `
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    function text(el) { return el ? el.textContent.replace(/\\s+/g, ' ').trim() : ''; }
+    function row(doc, label) {
+      var dts = doc.querySelectorAll('dt');
+      for (var i = 0; i < dts.length; i++) {
+        if (text(dts[i]).toLowerCase() !== label) continue;
+        var value = text(dts[i].nextElementSibling);
+        if (value && value !== '-') return value;
+      }
+      return null;
+    }
+    function read(doc) {
+      var h1 = doc.querySelector('h1');
+      var image = null;
+      try {
+        var graph = JSON.parse(doc.querySelector('script[type="application/ld+json"]').textContent)['@graph'] || [];
+        for (var i = 0; i < graph.length; i++) if (graph[i]['@type'] === 'ImageObject') image = graph[i].url;
+      } catch (e) {}
+      var cover = doc.querySelector('img[alt^="Cover of"]');
+      if (!image && cover) image = cover.getAttribute('src');
+      var alt = null;
+      var box = h1 && h1.parentElement && h1.parentElement.parentElement;
+      var leaves = box ? box.querySelectorAll('div, p, span') : [];
+      for (var j = 0; j < leaves.length; j++) {
+        if (leaves[j].children.length === 0 && / [/] /.test(leaves[j].textContent)) {
+          alt = text(leaves[j]).split(/ *[/] */).filter(Boolean).join(', ');
+          break;
+        }
+      }
+      var genres = [].slice.call(doc.querySelectorAll('a[href*="genres="]')).map(text).filter(Boolean);
+      send({
+        imageUrl: image,
+        title: text(h1) || document.title || null,
+        altTitle: alt,
+        author: row(doc, 'author') || row(doc, 'artist'),
+        genre: genres.join(', ') || null,
+      });
+    }
+    var parts = location.pathname.split('/').filter(Boolean);
     fetch(location.origin + '/' + parts[0] + '/' + parts[1])
       .then(function(r) { return r.text(); })
       .then(function(html) { read(new DOMParser().parseFromString(html, 'text/html')); })
@@ -699,17 +756,18 @@ export const MEDIA_TYPES = {
       dropped: 'Dropped',
       want: 'Want to Read',
     },
-    // Set MANHWA_SITE_URL and MANHWA_SITE_2_URL in .env.
+    // Set MANHWA_SITE_URL, MANHWA_SITE_2_URL and MANHWA_SITE_3_URL in .env.
     startUrl: MANHWA_SITE_URL,
-    // Pop-ups and redirects can't leave the two sites.
+    // Pop-ups and redirects can't leave the three sites.
     blockExternalNavigation: true,
-    // The two sites' names (for the ▾ site list) and title search pages.
+    // The three sites' names (for the ▾ site list) and title search pages.
     titleSearch: [
       { name: MANHWA_HOST, buildSearchUrl: (q) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(q)}` },
       {
         name: MANHWA_HOST_2,
         buildSearchUrl: (q) => `${MANHWA_SITE_2_URL}/?s=${encodeURIComponent(q)}&post_type=wp-manga`,
       },
+      { name: MANHWA_HOST_3, buildSearchUrl: (q) => `${MANHWA_SITE_3_URL}/series?searchTerm=${encodeURIComponent(q)}` },
     ],
     // For titles not opened on a site yet (imported from MAL).
     buildSearchUrl: (title) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(title)}`,
@@ -720,8 +778,9 @@ export const MEDIA_TYPES = {
     beforeLoadJs: keepWholeSearchJs(MANHWA_SITE_URL, '/browse', 'search'),
     // First site: series at /series/<id>, chapters at /series/<id>/<key>
     // (no chapter number in the address, so progress isn't tracked there).
-    // The code is the series id; on the second site it's the series slug,
-    // which always has letters, so the two can't clash.
+    // The code is the series id; on the second and third sites it's the
+    // series slug, which always has letters, so it can't clash with the
+    // first. A series with the same slug on both is one entry.
     urlRegex: new RegExp(`^https?://(?:www\\.)?${hostPattern(MANHWA_SITE_URL)}/series/(\\d+)`, 'i'),
     extractId: (match) => match[1],
     extractMetadataJs: NEXT_SERIES_READER_JS,
@@ -732,13 +791,13 @@ export const MEDIA_TYPES = {
         ? { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) }
         : { url: entry.source_url },
     // "Start reading" / "Reread" (Library): the series page's first chapter.
-    openFirst: (entry) => ({
-      url:
-        hostOf(entry.source_url || '') === MANHWA_HOST_2
-          ? `${MANHWA_SITE_2_URL}/serie/${entry.source_id}/`
-          : `${MANHWA_SITE_URL}/series/${entry.source_id}`,
-      checkJs: OPEN_FIRST_CHAPTER_JS,
-    }),
+    openFirst: (entry) => {
+      const host = hostOf(entry.source_url || '');
+      let url = `${MANHWA_SITE_URL}/series/${entry.source_id}`;
+      if (host === MANHWA_HOST_2) url = `${MANHWA_SITE_2_URL}/serie/${entry.source_id}/`;
+      if (host === MANHWA_HOST_3) url = `${MANHWA_SITE_3_URL}/series/${encodeURIComponent(entry.source_id)}`;
+      return { url, checkJs: OPEN_FIRST_CHAPTER_JS };
+    },
     extraSources: [
       {
         name: MANHWA_HOST_2,
@@ -753,6 +812,26 @@ export const MEDIA_TYPES = {
         extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
         extractMetadataJs: WP_MANGA_SERIES_READER_JS,
         beforeLoadJs: familyModeLockJs(MANHWA_SITE_2_URL),
+      },
+      {
+        name: MANHWA_HOST_3,
+        domain: MANHWA_HOST_3,
+        // Series at /series/<slug>, chapters at /series/<slug>/chapter-<n>.
+        // Slugs can hold ":" and "!" (written %3A in some links), so the
+        // code is the slug decoded.
+        urlRegex: new RegExp(
+          `^https?://(?:www\\.)?${hostPattern(MANHWA_SITE_3_URL)}/series/([^/?#]+)(?:/chapter-([\\d.]+))?`,
+          'i'
+        ),
+        extractId: (match) => {
+          try {
+            return decodeURIComponent(match[1]);
+          } catch (e) {
+            return match[1];
+          }
+        },
+        extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+        extractMetadataJs: SLUG_SERIES_READER_JS,
       },
     ],
   },

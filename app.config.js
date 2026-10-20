@@ -79,9 +79,10 @@ export default {
       // The Manga tab's second site (in its ▾ site list).
       mangaSite2Url: process.env.MANGA_SITE_2_URL || 'https://your-second-manga-site.example.com',
       animeSiteUrl: process.env.ANIME_SITE_URL || 'https://your-anime-site.example.com',
-      // The Manhwa tab's two sites (see the manhwa type in src/mediaTypes.js).
+      // The Manhwa tab's three sites (see the manhwa type in src/mediaTypes.js).
       manhwaSiteUrl: process.env.MANHWA_SITE_URL || 'https://your-manhwa-site.example.com',
       manhwaSite2Url: process.env.MANHWA_SITE_2_URL || 'https://your-second-manhwa-site.example.com',
+      manhwaSite3Url: process.env.MANHWA_SITE_3_URL || 'https://your-third-manhwa-site.example.com',
       // Links the project to its EAS (Expo) project for builds.
       eas: {
         projectId: '9e1ce939-48cf-49fa-8996-6b05d2cbed94',

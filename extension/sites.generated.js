@@ -8,7 +8,8 @@ self.MT_PLACEHOLDERS = {
   "mangaSite2Url": "https://manga-site-2.invalid",
   "animeSiteUrl": "https://anime-site-1.invalid",
   "manhwaSiteUrl": "https://manhwa-site-1.invalid",
-  "manhwaSite2Url": "https://manhwa-site-2.invalid"
+  "manhwaSite2Url": "https://manhwa-site-2.invalid",
+  "manhwaSite3Url": "https://manhwa-site-3.invalid"
 };
 self.MT_TYPES = [
   {
@@ -244,6 +245,69 @@ self.MT_TYPES = [
     }
     var parts = location.pathname.split('/').filter(Boolean);
     if (parts.length <= 2) return read(document);
+    fetch(location.origin + '/' + parts[0] + '/' + parts[1])
+      .then(function(r) { return r.text(); })
+      .then(function(html) { read(new DOMParser().parseFromString(html, 'text/html')); })
+      .catch(function() { send({ title: document.title || null }); });
+  })();
+  true;
+},
+      },
+      {
+        name: "manhwa-site-3.invalid",
+        pattern: "^https?:\\/\\/(?:www\\.)?manhwa-site-3\\.invalid\\/series\\/([^/?#]+)(?:\\/chapter-([\\d.]+))?",
+        flags: "i",
+        extractId: (match) => {
+          try {
+            return decodeURIComponent(match[1]);
+          } catch (e) {
+            return match[1];
+          }
+        },
+        extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+        seriesFromPage: false,
+        interstitialKeywords: null,
+        extractMetadata: function () {
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    function text(el) { return el ? el.textContent.replace(/\s+/g, ' ').trim() : ''; }
+    function row(doc, label) {
+      var dts = doc.querySelectorAll('dt');
+      for (var i = 0; i < dts.length; i++) {
+        if (text(dts[i]).toLowerCase() !== label) continue;
+        var value = text(dts[i].nextElementSibling);
+        if (value && value !== '-') return value;
+      }
+      return null;
+    }
+    function read(doc) {
+      var h1 = doc.querySelector('h1');
+      var image = null;
+      try {
+        var graph = JSON.parse(doc.querySelector('script[type="application/ld+json"]').textContent)['@graph'] || [];
+        for (var i = 0; i < graph.length; i++) if (graph[i]['@type'] === 'ImageObject') image = graph[i].url;
+      } catch (e) {}
+      var cover = doc.querySelector('img[alt^="Cover of"]');
+      if (!image && cover) image = cover.getAttribute('src');
+      var alt = null;
+      var box = h1 && h1.parentElement && h1.parentElement.parentElement;
+      var leaves = box ? box.querySelectorAll('div, p, span') : [];
+      for (var j = 0; j < leaves.length; j++) {
+        if (leaves[j].children.length === 0 && / [/] /.test(leaves[j].textContent)) {
+          alt = text(leaves[j]).split(/ *[/] */).filter(Boolean).join(', ');
+          break;
+        }
+      }
+      var genres = [].slice.call(doc.querySelectorAll('a[href*="genres="]')).map(text).filter(Boolean);
+      send({
+        imageUrl: image,
+        title: text(h1) || document.title || null,
+        altTitle: alt,
+        author: row(doc, 'author') || row(doc, 'artist'),
+        genre: genres.join(', ') || null,
+      });
+    }
+    var parts = location.pathname.split('/').filter(Boolean);
     fetch(location.origin + '/' + parts[0] + '/' + parts[1])
       .then(function(r) { return r.text(); })
       .then(function(html) { read(new DOMParser().parseFromString(html, 'text/html')); })

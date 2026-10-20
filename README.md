@@ -90,14 +90,21 @@ adapt to whatever you actually use:
    opened from inside the site (e.g. its search results) can still carry
    the previous page's `og:` tags, so those are only used once `og:url`
    names this title.
-4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL` and `MANHWA_SITE_2_URL`.
-   The ▾ site list at the top of the tab switches between them. The first
+4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL`, `MANHWA_SITE_2_URL` and
+   `MANHWA_SITE_3_URL`. The ▾ site list at the top of the tab switches
+   between them, and a title search's **Next ›** goes through them in that
+   order. The first
    is expected to be a Next.js comics site (series at `/series/<id>`,
    details in its `__NEXT_DATA__` JSON, search at `/browse?search=`); the
    second a site on the common WordPress manga theme (series at
    `/serie/<slug>`, chapters at `/serie/<slug>/chapter-<n>`, search at
-   `/?s=…&post_type=wp-manga`). A series is saved when you open it or any
-   of its chapters. The second site's **Family Mode stays on**: before
+   `/?s=…&post_type=wp-manga`); the third a site with series at
+   `/series/<slug>` and chapters at `/series/<slug>/chapter-<n>` (search
+   at `/series?searchTerm=`; title, cover, other names, author and genres
+   read from its server-rendered series page, `SLUG_SERIES_READER_JS`). A
+   series is saved when you open it or any of its chapters. The second and
+   third sites both use the series slug as its code, so a series with the
+   same slug on both is one entry. The second site's **Family Mode stays on**: before
    each page loads, `familyModeLockJs` removes its `<name>-mature` cookie,
    stops the page from setting it, and hides the Family Mode switch and
    the "I'm an adult" button. Adjust the paths in `mediaTypes.js` if your
@@ -505,7 +512,7 @@ so nothing renders blank.
   an ad) — an optional `blockedUrlPatterns` (array of regexes, see
   `mediaTypes.js`) is checked regardless of domain to catch these.
   The Manga and Manhwa tabs have it on, so their pages can't leave
-  their two sites (links out to other sites don't open either).
+  their own sites (links out to other sites don't open either).
   `setSupportMultipleWindows={false}` is also set unconditionally as a
   light extra defense against popups specifically. `allowsFullscreenVideo`,
   `allowsInlineMediaPlayback`, and `mediaPlaybackRequiresUserAction={false}`

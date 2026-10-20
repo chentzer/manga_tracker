@@ -24,6 +24,7 @@ export const PLACEHOLDERS = {
   animeSiteUrl: 'https://anime-site-1.invalid',
   manhwaSiteUrl: 'https://manhwa-site-1.invalid',
   manhwaSite2Url: 'https://manhwa-site-2.invalid',
+  manhwaSite3Url: 'https://manhwa-site-3.invalid',
 };
 
 const code = source
