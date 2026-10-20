@@ -85,7 +85,7 @@ export default {
       manhwaSite3Url: process.env.MANHWA_SITE_3_URL || 'https://your-third-manhwa-site.example.com',
       // Links the project to its EAS (Expo) project for builds.
       eas: {
-        projectId: '9e1ce939-48cf-49fa-8996-6b05d2cbed94',
+        projectId: '5c853069-d131-4906-ab59-4f689e5a9ac3',
       },
     },
   },
