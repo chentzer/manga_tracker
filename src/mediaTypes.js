@@ -773,7 +773,7 @@ export const MEDIA_TYPES = {
         name: MANHWA_HOST_2,
         buildSearchUrl: (q) => `${MANHWA_SITE_2_URL}/?s=${encodeURIComponent(q)}&post_type=wp-manga`,
       },
-      { name: MANHWA_HOST_3, buildSearchUrl: (q) => `${MANHWA_SITE_3_URL}/series?searchTerm=${encodeURIComponent(q)}` },
+      { name: MANHWA_HOST_3, buildSearchUrl: (q) => `${MANHWA_SITE_3_URL}/series/?searchTerm=${encodeURIComponent(q)}` },
     ],
     // For titles not opened on a site yet (imported from MAL).
     buildSearchUrl: (title) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(title)}`,

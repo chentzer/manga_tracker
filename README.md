@@ -100,7 +100,7 @@ adapt to whatever you actually use:
    `/serie/<slug>`, chapters at `/serie/<slug>/chapter-<n>`, search at
    `/?s=…&post_type=wp-manga`); the third a site with series at
    `/series/<slug>` and chapters at `/series/<slug>/chapter-<n>` (search
-   at `/series?searchTerm=`; title, cover, other names, author and genres
+   at `/series/?searchTerm=`; title, cover, other names, author and genres
    read from its server-rendered series page, `SLUG_SERIES_READER_JS`). A
    series is saved when you open it or any of its chapters. The second and
    third sites both use the series slug as its code, so a series with the
