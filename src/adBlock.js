@@ -9,6 +9,8 @@
 //     • stops pop-ups the page opens without you tapping anything
 //     • stops scripts, frames and images from known ad networks from
 //       loading, and removes any that get added to the page anyway
+//     • also stops "zone" ad scripts (isZoneScript) whatever domain they
+//       come from: those networks keep moving to new throwaway domains
 //     • stops the page's own requests to those networks
 //     • ignores taps on links that lead to them
 //     • hides the usual ad boxes
@@ -49,6 +51,14 @@ export const AD_DOMAINS = [
   'criteo.com',
   'taboola.com',
   'outbrain.com',
+  // Throwaway domains of "zone" pop-up networks seen on the tabs' sites
+  // (fake "unused bonus" boxes, full-page vignettes). New ones are caught
+  // by isZoneScript in AD_BLOCK_JS anyway.
+  'n6wxm.com',
+  'gizokraijaw.net',
+  'nap5k.com',
+  'ldrws.com',
+  'jhnwr.com',
 ];
 
 export function isAdUrl(url) {
@@ -91,6 +101,17 @@ export const AD_BLOCK_JS = `
       }
       return false;
     }
+    // A "zone" ad script: from another site, and either tagged with
+    // data-zone (how those networks pick the ad) or one of their loader
+    // names. Caught whatever throwaway domain it uses.
+    var ZONE_FILE = /\\/(vignette|tag)\\.min\\.js$/i;
+    function isZoneScript(el, url) {
+      if (!url || !el || el.tagName !== 'SCRIPT') return false;
+      var u;
+      try { u = new URL(String(url), location.href); } catch (e) { return false; }
+      if (u.hostname === location.hostname) return false;
+      return !!(el.dataset && el.dataset.zone) || ZONE_FILE.test(u.pathname);
+    }
     var reported = 0;
     function report(what, url) {
       if (reported++ > 50) return; // keep the debug log readable
@@ -119,7 +140,7 @@ export const AD_BLOCK_JS = `
         enumerable: desc.enumerable,
         get: desc.get,
         set: function (value) {
-          if (isAd(value)) { report(tag, value); return; }
+          if (isAd(value) || isZoneScript(this, value)) { report(tag, value); return; }
           desc.set.call(this, value);
         },
       });
@@ -130,7 +151,7 @@ export const AD_BLOCK_JS = `
     var realSetAttribute = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (name, value) {
       var n = String(name).toLowerCase();
-      if ((n === 'src' || (n === 'href' && this.tagName === 'LINK')) && isAd(value)) {
+      if ((n === 'src' || (n === 'href' && this.tagName === 'LINK')) && (isAd(value) || (n === 'src' && isZoneScript(this, value)))) {
         report(this.tagName.toLowerCase(), value);
         return;
       }
@@ -175,7 +196,7 @@ export const AD_BLOCK_JS = `
       for (var i = 0; i < nodes.length; i++) {
         var el = nodes[i];
         var url = el.tagName === 'A' ? el.href : el.src;
-        if (!isAd(url)) continue;
+        if (!isAd(url) && !isZoneScript(el, url)) continue;
         if (el.tagName === 'A') {
           // An ad link wrapped round real content: just unlink it.
           if (el.querySelector('img, iframe') || !el.textContent.trim()) { el.remove(); report('ad', url); }

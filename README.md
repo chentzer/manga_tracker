@@ -702,7 +702,9 @@ so nothing renders blank.
   on known ad networks never open, and in each page pop-ups that open
   without a tap, ad scripts/frames/images, the page's requests to ad
   networks, links to them and the usual ad boxes are blocked or hidden.
-  Frames from other sites can still show their own ads; the debug log
+  "Zone" ad scripts (a `data-zone` tag, or `vignette.min.js` /
+  `tag.min.js` from another site — the fake "unused bonus" boxes and
+  full-page ads) are stopped whatever throwaway domain they use. Frames from other sites can still show their own ads; the debug log
   lists what was blocked.
 - **Browser tab** (`src/BrowserTab.js`) — a plain browser for any site,
   between Anime and the Library: type an address or search words (a
