@@ -355,6 +355,16 @@ finish date and sets progress to the total when the total is known.
   opening it asks AniList again (at most once a day): once the series has
   ended AniList knows its total, and if the chapter you opened is the last
   one the question comes up right away.
+- **⭐ To rate** (`src/ToRate.js`) — a button beside 🎲 Random at the top
+  of the Library, shown only while something is waiting, with how many:
+  **Finished — not marked Completed yet** (you're at the last chapter or
+  episode of a Reading / On Hold title, e.g. a series you'd caught up on
+  that has since ended; rating it marks it Completed, or **Just mark
+  Completed**) and **Completed — no score**. **Skip** takes a title off
+  the list on this phone. So a series that ends after you've caught up is
+  noticed without opening it again, the Library asks AniList (each title
+  at most once a day) about Reading / On Hold titles with a MyAnimeList id
+  and no total whenever it's opened.
 - **Rewatching / rereading.** Opening an episode of a Completed series
   asks whether you're starting a rewatch (**Just looking** stops asking
   about that series for the snooze time below). While rewatching, the status stays

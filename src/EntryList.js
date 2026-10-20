@@ -25,7 +25,8 @@ import {
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
-import { isImportedSourceId } from './malList';
+import { isImportedSourceId, refreshFromAniList } from './malList';
+import ToRateModal, { findToRate, skipRating } from './ToRate';
 import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, todayString, malTypeOf } from './malFormat';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { groupKey, groupOrder, guessGroup } from './groups';
@@ -1234,11 +1235,40 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
   const [conflictsOnly, setConflictsOnly] = useState(false); // "⚠ to review" chip
 
+  // ⭐ To rate (ToRate.js): titles waiting for a score, across every type.
+  const [toRate, setToRate] = useState({ finished: [], unrated: [], count: 0 });
+  const [toRateVisible, setToRateVisible] = useState(false);
+  useEffect(() => {
+    if (toRateVisible && !toRate.count) setToRateVisible(false); // all rated or skipped
+  }, [toRateVisible, toRate.count]);
+
   const load = useCallback(() => {
     setEntries(getAllEntries(filter));
+    setToRate(findToRate(getAllEntries()));
   }, [filter]);
 
   useEffect(load, [load]);
+
+  // Series you're reading that are still coming out have no total. Opening
+  // the Library asks AniList about them again (each at most once a day —
+  // needsAniList in malList.js), so one that has ended gets its total, and
+  // if you're already at its last chapter it shows under ⭐ To rate.
+  useEffect(() => {
+    if (!active) return;
+    const ongoing = getAllEntries().filter(
+      (e) => e.mal_id && !e.total && ['reading', 'on_hold'].includes(e.read_status)
+    );
+    if (!ongoing.length) return;
+    refreshFromAniList(ongoing)
+      .then(() => {
+        if (ongoing.some((e) => e.total)) {
+          load();
+          backupSilently();
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // EntryList now stays mounted permanently (App.js toggles visibility
   // rather than mounting/unmounting on tab switches, so webviews keep
@@ -1402,6 +1432,24 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const askToRate = useCallback((item, message) => {
     setRatePrompt({ item, heading: `Rate "${item.title || item.alt_title || item.source_id}"`, message });
   }, []);
+  // A score (or null: none) from the question. With `complete` (⭐ To rate's
+  // finished titles) the title is also marked Completed, as the status
+  // button does.
+  const finishRatePrompt = (score) => {
+    const { item, complete } = ratePrompt;
+    setRatePrompt(null);
+    const fields = score ? { score } : {};
+    if (complete) {
+      fields.read_status = 'read';
+      if (!item.finish_date) fields.finish_date = todayString();
+      if (item.total) fields.progress = item.total;
+      if (item.total_volumes) fields.progress_volumes = item.total_volumes;
+    }
+    if (!Object.keys(fields).length) return;
+    updateEntryFields(item.source_id, item.media_type, settlingConflicts(item, fields));
+    load();
+    backupSilently();
+  };
 
   const handleSetTags = useCallback(
     (item, newTags) => {
@@ -1833,9 +1881,17 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.randomTopButton} onPress={openRandom}>
-        <Text style={styles.randomTopButtonText}>🎲 Random</Text>
-      </TouchableOpacity>
+      <View style={styles.topButtons}>
+        <TouchableOpacity style={[styles.randomTopButton, styles.topButton]} onPress={openRandom}>
+          <Text style={styles.randomTopButtonText}>🎲 Random</Text>
+        </TouchableOpacity>
+        {/* Only while something is waiting for a score (ToRate.js). */}
+        {toRate.count ? (
+          <TouchableOpacity style={[styles.toRateButton, styles.topButton]} onPress={() => setToRateVisible(true)}>
+            <Text style={styles.toRateButtonText}>⭐ To rate · {toRate.count}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       <View style={[styles.filterBar, styles.filterBarWrap]}>
         {FILTERS.map((f) => (
@@ -2215,12 +2271,40 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onOpenEntry={(e) => setSelectedKey(`${e.media_type}:${e.source_id}`)}
       />
 
-      <RatePrompt
-        prompt={ratePrompt && { ...ratePrompt, score: ratePrompt.item.score }}
-        onRate={(score) => {
-          rate(ratePrompt.item, score);
-          setRatePrompt(null);
+      <ToRateModal
+        visible={toRateVisible}
+        list={toRate}
+        onRate={(item, { complete }) =>
+          complete
+            ? setRatePrompt({
+                item,
+                complete: true,
+                heading: `Finished "${item.title || item.alt_title || item.source_id}"?`,
+                message: `You're at the last ${item.media_type === 'anime' ? 'episode' : 'chapter'} (${item.progress} of ${
+                  item.total
+                }). Rate it to mark it Completed:`,
+                closeLabel: 'Not yet',
+              })
+            : askToRate(item, 'How was it?')
+        }
+        onSkip={(item) => {
+          skipRating(item);
+          load();
         }}
+        onClose={() => setToRateVisible(false)}
+      />
+
+      <RatePrompt
+        prompt={
+          ratePrompt && {
+            ...ratePrompt,
+            score: ratePrompt.item.score,
+            actions: ratePrompt.complete
+              ? [{ label: 'Just mark Completed', onPress: () => finishRatePrompt(null) }]
+              : undefined,
+          }
+        }
+        onRate={finishRatePrompt}
         onClose={() => setRatePrompt(null)}
       />
 
@@ -2423,6 +2507,8 @@ const styles = themed(StyleSheet.create({
   },
   randomHint: { fontSize: 12, color: '#888', marginTop: 4 },
   randomPickButton: { backgroundColor: '#e94560' },
+  topButtons: { flexDirection: 'row', gap: 8, marginHorizontal: 10, marginTop: 8 },
+  topButton: { flex: 1, marginHorizontal: 0, marginTop: 0 },
   randomTopButton: {
     marginHorizontal: 10,
     marginTop: 8,
@@ -2431,6 +2517,8 @@ const styles = themed(StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#e94560',
   },
+  toRateButton: { paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#16213e' },
+  toRateButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   randomTopButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   pickAgainButton: {
     marginTop: 12,
