@@ -86,10 +86,16 @@ input[type='number'],
 select {
   font: inherit;
   color: var(--text);
-  background: transparent;
+  background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 8px;
+}
+/* The opened list is drawn by the browser; without its own colours it can
+   show light text on a white menu in dark mode. */
+option {
+  color: var(--text);
+  background: var(--bg);
 }
 code {
   font-size: 12px;
