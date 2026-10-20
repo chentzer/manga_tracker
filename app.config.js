@@ -43,6 +43,8 @@ export default {
     plugins: [
       '@react-native-google-signin/google-signin',
       'expo-local-authentication',
+      // The calendar for an entry's start / finish date (EntryList.js).
+      '@react-native-community/datetimepicker',
       './withGradleMemoryFix.js',
       // Keeps the app's content out of the Recents preview (Android 13+),
       // while still allowing screenshots.

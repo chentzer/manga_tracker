@@ -234,7 +234,7 @@ detail sheet:
 | Score 1–10 (MAL's wording: 10 Masterpiece … 1 Appalling) | `my_score` |
 | Episodes / chapters, of a total | `my_watched_episodes` / `my_read_chapters`, `series_episodes` / `manga_chapters` |
 | Volumes, of a total (manga) | `my_read_volumes`, `manga_volumes` |
-| Start / finish date (`YYYY-MM-DD`, `00` for an unknown month or day) | `my_start_date`, `my_finish_date` |
+| Start / finish date — tap 📅 for a calendar, or **Today** / ✕ (stored `YYYY-MM-DD`; MAL imports may have `00` for an unknown month or day) | `my_start_date`, `my_finish_date` |
 | Times rewatched / reread, and rewatching / rereading now | `my_times_watched` / `my_times_read`, `my_rewatching` / `my_rereading` |
 | Priority (Low / Medium / High) | `my_priority` |
 | Tags, comments | `my_tags`, `my_comments` |

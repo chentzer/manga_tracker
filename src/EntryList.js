@@ -26,7 +26,8 @@ import {
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId } from './malList';
-import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, normalizeDate, todayString, malTypeOf } from './malFormat';
+import { SCORE_LABELS, PRIORITIES, CONFLICT_FIELDS, todayString, malTypeOf } from './malFormat';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { groupKey, groupOrder, guessGroup } from './groups';
 import {
   buildArtistList,
@@ -151,27 +152,35 @@ function CountField({ value, onChange, total, onTotalChange }) {
   );
 }
 
-// YYYY-MM-DD (MAL allows 00 for an unknown month or day), with Today and
-// clear buttons.
+// A stored date (YYYY-MM-DD; MAL allows 00 for an unknown month or day)
+// as a Date for the calendar to open on — an unknown month/day opens on
+// the 1st — or today when there's none.
+function dateForPicker(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+  if (!m || m[1] === '0000') return new Date();
+  return new Date(Number(m[1]), Math.max(1, Number(m[2])) - 1, Math.max(1, Number(m[3])));
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// The date (tap it for a calendar), with Today and clear buttons.
 function DateField({ value, onChange }) {
+  const pick = () => {
+    DateTimePickerAndroid.open({
+      value: dateForPicker(value),
+      mode: 'date',
+      maximumDate: new Date(),
+      onChange: (event, date) => {
+        if (event.type !== 'set' || !date) return;
+        onChange(`${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`);
+      },
+    });
+  };
   return (
     <View style={styles.dateRow}>
-      <EditableText
-        style={styles.dateInput}
-        value={value || ''}
-        placeholder="YYYY-MM-DD"
-        keyboardType="numbers-and-punctuation"
-        maxLength={10}
-        onCommit={(t) => {
-          const date = normalizeDate(t);
-          if (t.trim() && !date) {
-            Alert.alert('Date not recognised', 'Use YYYY-MM-DD, e.g. 2026-10-16.');
-            return false;
-          }
-          onChange(date);
-          return true;
-        }}
-      />
+      <TouchableOpacity style={styles.dateInput} onPress={pick}>
+        <Text style={value ? styles.dateValue : styles.datePlaceholder}>📅 {value || 'Pick a date'}</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={styles.dateButton} onPress={() => onChange(todayString())}>
         <Text style={styles.dateButtonText}>Today</Text>
       </TouchableOpacity>
@@ -2501,13 +2510,14 @@ const styles = themed(StyleSheet.create({
   countOf: { fontSize: 13, color: '#888' },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dateInput: {
-    width: 120,
+    minWidth: 140,
     backgroundColor: '#f2f2f2',
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 14,
+    paddingVertical: 7,
   },
+  dateValue: { fontSize: 14, color: '#222' },
+  datePlaceholder: { fontSize: 14, color: '#999' },
   dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e3ecfa' },
   dateButtonText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
   switchRow: {
