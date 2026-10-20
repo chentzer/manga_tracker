@@ -48,19 +48,31 @@
     }).filter((type) => type.hosts.length > 0);
   }
 
-  // The type and source a page belongs to: { type, source, match }, or null.
-  function resolve(types, url) {
+  // Every type and source a page belongs to, in the types' order:
+  // [{ type, source, match }]. A site can be in more than one type (the
+  // Manga tab's second site is in Manhwa's list too).
+  function resolveAll(types, url) {
     const host = hostOf(url);
-    if (!host) return null;
+    if (!host) return [];
+    const found = [];
     for (const type of types) {
-      if (!type.hosts.some((h) => sameSite(host, h))) continue;
       for (const source of type.sources) {
-        if (source.host && !sameSite(host, source.host)) continue;
+        const onSite = source.host ? sameSite(host, source.host) : type.hosts.some((h) => sameSite(host, h));
+        if (!onSite) continue;
         const match = url.match(source.regex);
-        if (match) return { type, source, match };
+        if (match) {
+          found.push({ type, source, match });
+          break;
+        }
       }
     }
-    return null;
+    return found;
+  }
+
+  // The first type and source a page belongs to: { type, source, match },
+  // or null.
+  function resolve(types, url) {
+    return resolveAll(types, url)[0] || null;
   }
 
   // Every site's origin, for permissions and where the page script runs.
@@ -73,5 +85,5 @@
     return list;
   }
 
-  self.MTRules = { hostOf, build, resolve, origins };
+  self.MTRules = { hostOf, build, resolve, resolveAll, origins };
 })();

@@ -145,12 +145,17 @@
   const reading = new Set();
 
   async function onPage(url) {
-    const resolved = MTRules.resolve(types, url);
-    if (!resolved) {
+    const all = MTRules.resolveAll(types, url);
+    if (!all.length) {
       send({ type: 'leftPage' });
       return;
     }
-    const { type, source, match } = resolved;
+    const { type, source, match } = all[0];
+    // A site in more than one tab (the Manga tab's second site is in
+    // Manhwa's too): the background worker uses the tab the title is
+    // already saved under, else the first.
+    const otherTypes = all.slice(1).map((r) => r.type.key);
+    let mediaType = type.key;
     if (source.interstitialKeywords && source.interstitialKeywords.some((k) => url.includes(k))) return;
     const sourceId = source.extractId(match);
     const progress = source.extractProgress ? source.extractProgress(match, url) : null;
@@ -170,9 +175,10 @@
       });
       let visit = { need: 'details', isNew: true };
       if (sourceId) {
-        visit = await send({ type: 'visit', mediaType: type.key, sourceId, url, progress });
+        visit = await send({ type: 'visit', mediaType, otherTypes, sourceId, url, progress });
+        if (visit.mediaType) mediaType = visit.mediaType;
         console.debug(`[AniManga Tracker] library checked at ${ms()}`);
-        show(visit, { mediaType: type.key, sourceId, url });
+        show(visit, { mediaType, sourceId, url });
       }
       if (visit.notConnected || visit.error || visit.need !== 'details') return;
       const payload = await read;
@@ -182,7 +188,7 @@
       const pageProgress =
         payload.progress !== undefined && payload.progress !== null ? payload.progress : progress;
       const image = visit.isNew && !payload.skip ? await coverData(payload.imageUrl) : null;
-      const context = { mediaType: type.key, sourceId: id, url: pageUrl };
+      const context = { mediaType, sourceId: id, url: pageUrl };
       const result = await send({
         type: 'details',
         ...context,

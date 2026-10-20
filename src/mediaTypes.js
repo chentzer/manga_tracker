@@ -572,6 +572,95 @@ function keepWholeSearchJs(siteUrl, path, param) {
   `;
 }
 
+// The Manga tab's second site (MANGA_SITE_2_URL), which lists manhwa too:
+// it's in both tabs' site lists, and a page is recorded under the tab it
+// was opened in.
+const MANGA_SITE_2_SOURCE = {
+  name: MANGA_HOST_2,
+  domain: MANGA_HOST_2,
+  // Second site: .../title/<id>-<slug> (series page) and
+  // .../title/<id>-<slug>/<chapterId>-chapter-<n> (reader page), with
+  // or without the slug -> group 1 = the series id, group 2 = the
+  // chapter number on reader pages.
+  urlRegex: new RegExp(
+    `^https?://(?:www\\.)?${hostPattern(MANGA_SITE_2_URL)}/title/([a-z0-9]+)(?:-[^/?#]*)?(?:/\\d+-chapter-([\\d.]+))?`,
+    'i'
+  ),
+  extractId: (match) => match[1],
+  // Names a saved page "code -- chN" (e.g. "abc12 -- ch60").
+  extractPageNumber: (match) => (match[2] ? `ch${match[2]}` : null),
+  // The chapter a reader page is on (60.5 counts as 60), or null.
+  extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+  // Reader (chapter) pages don't show the cover or author, so this
+  // only records from the series page: deeper paths post `skip`, which
+  // tells MediaWebView not to save anything from this page. Many manga
+  // sites are single-page apps that render after the URL changes, so
+  // it waits until the <h1> and the cover image are there (and agree on
+  // the title) before reading anything.
+  //
+  // Selectors are generic guesses that suit many sites — adjust them to
+  // your site's DOM (right-click the element → Inspect):
+  // - title: the page's <h1>, then og:title
+  // - cover: an <img> inside an element whose class mentions "poster",
+  //   then og:image
+  // - altTitle: the first <li> inside an element whose class mentions
+  //   "alts" (alternative titles)
+  // - author: links into the site's author/artist search
+  // - malId: the number in the page's link to myanimelist.net/manga/<id>
+  //   (used to export/import MyAnimeList lists, see malList.js)
+  extractMetadataJs: `
+    (function() {
+      if (location.pathname.split('/').filter(Boolean).length > 2) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
+        return;
+      }
+      var attempts = 0;
+      function trySend() {
+        var h1 = document.querySelector('h1');
+        var poster = document.querySelector('[class*="poster"] img');
+        var h1Text = h1 ? h1.textContent.trim() : '';
+        var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
+
+        attempts++;
+        if (!ready && attempts < 20) {
+          setTimeout(trySend, 300);
+          return;
+        }
+
+        var ogTitle = document.querySelector('meta[property="og:title"]');
+        var ogImage = document.querySelector('meta[property="og:image"]');
+        var title = h1Text || (ogTitle && ogTitle.content) || null;
+        var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
+          (ogImage && ogImage.content) || null;
+
+        var altEl = document.querySelector('[class*="alts"] li');
+        var altTitle = altEl ? altEl.textContent.trim() : null;
+        if (altTitle === title) altTitle = null;
+
+        var names = [];
+        var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
+        for (var i = 0; i < links.length; i++) {
+          var name = links[i].textContent.trim();
+          if (name && names.indexOf(name) === -1) names.push(name);
+        }
+
+        var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
+        var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          imageUrl: imageUrl,
+          title: title,
+          altTitle: altTitle,
+          author: names.join(', ') || null,
+          malId: malMatch ? Number(malMatch[1]) : null,
+        }));
+      }
+      trySend();
+    })();
+    true;
+  `,
+};
+
 export const MEDIA_TYPES = {
   manga: {
     key: 'manga',
@@ -658,91 +747,7 @@ export const MEDIA_TYPES = {
     // version if needed:
     // userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
     extraSources: [
-      {
-        name: MANGA_HOST_2,
-        domain: MANGA_HOST_2,
-        // Second site: .../title/<id>-<slug> (series page) and
-        // .../title/<id>-<slug>/<chapterId>-chapter-<n> (reader page), with
-        // or without the slug -> group 1 = the series id, group 2 = the
-        // chapter number on reader pages.
-        urlRegex: new RegExp(
-          `^https?://(?:www\\.)?${hostPattern(MANGA_SITE_2_URL)}/title/([a-z0-9]+)(?:-[^/?#]*)?(?:/\\d+-chapter-([\\d.]+))?`,
-          'i'
-        ),
-        extractId: (match) => match[1],
-        // Names a saved page "code -- chN" (e.g. "abc12 -- ch60").
-        extractPageNumber: (match) => (match[2] ? `ch${match[2]}` : null),
-        // The chapter a reader page is on (60.5 counts as 60), or null.
-        extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
-        // Reader (chapter) pages don't show the cover or author, so this
-        // only records from the series page: deeper paths post `skip`, which
-        // tells MediaWebView not to save anything from this page. Many manga
-        // sites are single-page apps that render after the URL changes, so
-        // it waits until the <h1> and the cover image are there (and agree on
-        // the title) before reading anything.
-        //
-        // Selectors are generic guesses that suit many sites — adjust them to
-        // your site's DOM (right-click the element → Inspect):
-        // - title: the page's <h1>, then og:title
-        // - cover: an <img> inside an element whose class mentions "poster",
-        //   then og:image
-        // - altTitle: the first <li> inside an element whose class mentions
-        //   "alts" (alternative titles)
-        // - author: links into the site's author/artist search
-        // - malId: the number in the page's link to myanimelist.net/manga/<id>
-        //   (used to export/import MyAnimeList lists, see malList.js)
-        extractMetadataJs: `
-          (function() {
-            if (location.pathname.split('/').filter(Boolean).length > 2) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
-              return;
-            }
-            var attempts = 0;
-            function trySend() {
-              var h1 = document.querySelector('h1');
-              var poster = document.querySelector('[class*="poster"] img');
-              var h1Text = h1 ? h1.textContent.trim() : '';
-              var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
-
-              attempts++;
-              if (!ready && attempts < 20) {
-                setTimeout(trySend, 300);
-                return;
-              }
-
-              var ogTitle = document.querySelector('meta[property="og:title"]');
-              var ogImage = document.querySelector('meta[property="og:image"]');
-              var title = h1Text || (ogTitle && ogTitle.content) || null;
-              var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
-                (ogImage && ogImage.content) || null;
-
-              var altEl = document.querySelector('[class*="alts"] li');
-              var altTitle = altEl ? altEl.textContent.trim() : null;
-              if (altTitle === title) altTitle = null;
-
-              var names = [];
-              var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
-              for (var i = 0; i < links.length; i++) {
-                var name = links[i].textContent.trim();
-                if (name && names.indexOf(name) === -1) names.push(name);
-              }
-
-              var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
-              var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
-
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                imageUrl: imageUrl,
-                title: title,
-                altTitle: altTitle,
-                author: names.join(', ') || null,
-                malId: malMatch ? Number(malMatch[1]) : null,
-              }));
-            }
-            trySend();
-          })();
-          true;
-        `,
-      },
+      MANGA_SITE_2_SOURCE,
     ],
   },
 
@@ -758,7 +763,8 @@ export const MEDIA_TYPES = {
     },
     // Set MANHWA_SITE_URL, MANHWA_SITE_2_URL and MANHWA_SITE_3_URL in .env.
     startUrl: MANHWA_SITE_URL,
-    // Pop-ups and redirects can't leave the three sites.
+    // MANGA_SITE_2_URL is in this tab's site list too (MANGA_SITE_2_SOURCE).
+    // Pop-ups and redirects can't leave the four sites.
     blockExternalNavigation: true,
     // The three sites' names (for the ▾ site list) and title search pages.
     titleSearch: [
@@ -786,16 +792,20 @@ export const MEDIA_TYPES = {
     extractMetadataJs: NEXT_SERIES_READER_JS,
     // "Read next" (Library): from the last chapter you opened, its Next
     // button; otherwise the series page.
-    openNext: (entry, n) =>
-      entry.last_progress_url
-        ? { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) }
-        : { url: entry.source_url },
+    openNext: (entry, n) => {
+      if (entry.last_progress_url) return { url: entry.last_progress_url, checkJs: clickNextChapterJs(n) };
+      if (hostOf(entry.source_url || '') === MANGA_HOST_2) {
+        return { url: `${MANGA_SITE_2_URL}/title/${entry.source_id}`, checkJs: openChapterFromListJs(n) };
+      }
+      return { url: entry.source_url };
+    },
     // "Start reading" / "Reread" (Library): the series page's first chapter.
     openFirst: (entry) => {
       const host = hostOf(entry.source_url || '');
       let url = `${MANHWA_SITE_URL}/series/${entry.source_id}`;
       if (host === MANHWA_HOST_2) url = `${MANHWA_SITE_2_URL}/serie/${entry.source_id}/`;
       if (host === MANHWA_HOST_3) url = `${MANHWA_SITE_3_URL}/series/${encodeURIComponent(entry.source_id)}`;
+      if (host === MANGA_HOST_2) url = `${MANGA_SITE_2_URL}/title/${entry.source_id}`;
       return { url, checkJs: OPEN_FIRST_CHAPTER_JS };
     },
     extraSources: [
@@ -833,6 +843,7 @@ export const MEDIA_TYPES = {
         extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
         extractMetadataJs: SLUG_SERIES_READER_JS,
       },
+      MANGA_SITE_2_SOURCE,
     ],
   },
 

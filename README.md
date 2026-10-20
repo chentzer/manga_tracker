@@ -104,7 +104,11 @@ adapt to whatever you actually use:
    read from its server-rendered series page, `SLUG_SERIES_READER_JS`). A
    series is saved when you open it or any of its chapters. The second and
    third sites both use the series slug as its code, so a series with the
-   same slug on both is one entry. The second site's **Family Mode stays on**: before
+   same slug on both is one entry. The Manga tab's second site
+   (`MANGA_SITE_2_URL`, which lists manhwa too) is in this tab's ▾ site list
+   as well (`MANGA_SITE_2_SOURCE`, shared by both tabs): a title is saved
+   under the tab you opened it in. It isn't part of the title search's
+   **Next ›**. The second site's **Family Mode stays on**: before
    each page loads, `familyModeLockJs` removes its `<name>-mature` cookie,
    stops the page from setting it, and hides the Family Mode switch and
    the "I'm an adult" button. Adjust the paths in `mediaTypes.js` if your
@@ -943,6 +947,10 @@ connected; the toolbar badge shows **…** while changes wait and **!** when
 writing them failed, and the popup says how many wait, why, with **Sync
 now**. A new title's cover uploads alongside; a failed cover upload goes
 in the outbox too. Until a change is written, the app can't see it.
+
+A site that's in two tabs (the Manga tab's second site, also in Manhwa's
+list) records under the tab the title is already saved in; a title not
+saved yet goes under Manga.
 
 Cards (bottom right of the page): **Added "…"**, **Chapter 12 recorded:
 …**, or on a page that's already saved a short **Already in AniManga

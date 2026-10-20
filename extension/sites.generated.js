@@ -91,56 +91,56 @@ self.MT_TYPES = [
         seriesFromPage: false,
         interstitialKeywords: null,
         extractMetadata: function () {
-          (function() {
-            if (location.pathname.split('/').filter(Boolean).length > 2) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
-              return;
-            }
-            var attempts = 0;
-            function trySend() {
-              var h1 = document.querySelector('h1');
-              var poster = document.querySelector('[class*="poster"] img');
-              var h1Text = h1 ? h1.textContent.trim() : '';
-              var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
+    (function() {
+      if (location.pathname.split('/').filter(Boolean).length > 2) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
+        return;
+      }
+      var attempts = 0;
+      function trySend() {
+        var h1 = document.querySelector('h1');
+        var poster = document.querySelector('[class*="poster"] img');
+        var h1Text = h1 ? h1.textContent.trim() : '';
+        var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
 
-              attempts++;
-              if (!ready && attempts < 20) {
-                setTimeout(trySend, 300);
-                return;
-              }
+        attempts++;
+        if (!ready && attempts < 20) {
+          setTimeout(trySend, 300);
+          return;
+        }
 
-              var ogTitle = document.querySelector('meta[property="og:title"]');
-              var ogImage = document.querySelector('meta[property="og:image"]');
-              var title = h1Text || (ogTitle && ogTitle.content) || null;
-              var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
-                (ogImage && ogImage.content) || null;
+        var ogTitle = document.querySelector('meta[property="og:title"]');
+        var ogImage = document.querySelector('meta[property="og:image"]');
+        var title = h1Text || (ogTitle && ogTitle.content) || null;
+        var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
+          (ogImage && ogImage.content) || null;
 
-              var altEl = document.querySelector('[class*="alts"] li');
-              var altTitle = altEl ? altEl.textContent.trim() : null;
-              if (altTitle === title) altTitle = null;
+        var altEl = document.querySelector('[class*="alts"] li');
+        var altTitle = altEl ? altEl.textContent.trim() : null;
+        if (altTitle === title) altTitle = null;
 
-              var names = [];
-              var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
-              for (var i = 0; i < links.length; i++) {
-                var name = links[i].textContent.trim();
-                if (name && names.indexOf(name) === -1) names.push(name);
-              }
+        var names = [];
+        var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
+        for (var i = 0; i < links.length; i++) {
+          var name = links[i].textContent.trim();
+          if (name && names.indexOf(name) === -1) names.push(name);
+        }
 
-              var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
-              var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+        var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
+        var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
 
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                imageUrl: imageUrl,
-                title: title,
-                altTitle: altTitle,
-                author: names.join(', ') || null,
-                malId: malMatch ? Number(malMatch[1]) : null,
-              }));
-            }
-            trySend();
-          })();
-          true;
-        },
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          imageUrl: imageUrl,
+          title: title,
+          altTitle: altTitle,
+          author: names.join(', ') || null,
+          malId: malMatch ? Number(malMatch[1]) : null,
+        }));
+      }
+      trySend();
+    })();
+    true;
+  },
       }
     ],
   },
@@ -315,6 +315,66 @@ self.MT_TYPES = [
   })();
   true;
 },
+      },
+      {
+        name: "manga-site-2.invalid",
+        pattern: "^https?:\\/\\/(?:www\\.)?manga-site-2\\.invalid\\/title\\/([a-z0-9]+)(?:-[^/?#]*)?(?:\\/\\d+-chapter-([\\d.]+))?",
+        flags: "i",
+        extractId: (match) => match[1],
+        extractProgress: (match) => (match[2] ? Math.floor(Number(match[2])) : null),
+        seriesFromPage: false,
+        interstitialKeywords: null,
+        extractMetadata: function () {
+    (function() {
+      if (location.pathname.split('/').filter(Boolean).length > 2) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ skip: 'reader page' }));
+        return;
+      }
+      var attempts = 0;
+      function trySend() {
+        var h1 = document.querySelector('h1');
+        var poster = document.querySelector('[class*="poster"] img');
+        var h1Text = h1 ? h1.textContent.trim() : '';
+        var ready = h1Text && poster && (!poster.alt || poster.alt.trim() === h1Text);
+
+        attempts++;
+        if (!ready && attempts < 20) {
+          setTimeout(trySend, 300);
+          return;
+        }
+
+        var ogTitle = document.querySelector('meta[property="og:title"]');
+        var ogImage = document.querySelector('meta[property="og:image"]');
+        var title = h1Text || (ogTitle && ogTitle.content) || null;
+        var imageUrl = (poster && (poster.currentSrc || poster.src)) ||
+          (ogImage && ogImage.content) || null;
+
+        var altEl = document.querySelector('[class*="alts"] li');
+        var altTitle = altEl ? altEl.textContent.trim() : null;
+        if (altTitle === title) altTitle = null;
+
+        var names = [];
+        var links = document.querySelectorAll('a[href*="authors="], a[href*="artists="]');
+        for (var i = 0; i < links.length; i++) {
+          var name = links[i].textContent.trim();
+          if (name && names.indexOf(name) === -1) names.push(name);
+        }
+
+        var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
+        var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          imageUrl: imageUrl,
+          title: title,
+          altTitle: altTitle,
+          author: names.join(', ') || null,
+          malId: malMatch ? Number(malMatch[1]) : null,
+        }));
+      }
+      trySend();
+    })();
+    true;
+  },
       }
     ],
   },

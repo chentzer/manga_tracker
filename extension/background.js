@@ -407,10 +407,22 @@ async function forgetTab(tabId) {
 
 // A page with its series in the address: { need: 'details' } when the page
 // has to be read (series not recorded, or still missing its MAL id).
-async function handleVisit({ mediaType, sourceId, url, progress }, tabId) {
+async function handleVisit({ mediaType, otherTypes = [], sourceId, url, progress }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
   const t = timer(`visit ${mediaType} ${sourceId}`);
-  const row = findRow(await view(mediaType), sourceId);
+  let row = findRow(await view(mediaType), sourceId);
+  // A site in more than one tab: the tab the title is already saved under
+  // (the answer's mediaType tells the page to use it from here on).
+  let switched = null;
+  for (const other of row ? [] : otherTypes) {
+    const found = findRow(await view(other), sourceId);
+    if (found) {
+      row = found;
+      switched = other;
+      mediaType = other;
+      break;
+    }
+  }
   t.mark('library');
   if (!row) {
     t.end('new title');
@@ -429,6 +441,7 @@ async function handleVisit({ mediaType, sourceId, url, progress }, tabId) {
     result = a.question ? { question: a.question } : {};
   }
   if (!result.question) result = seenToast(mediaType, title, progress, recorded);
+  if (switched) result = { ...result, mediaType: switched };
   t.end(outcome(result));
   return row.mal_id ? result : { ...result, need: 'details', isNew: false };
 }
