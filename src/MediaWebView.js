@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   ToastAndroid,
+  Keyboard,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -100,7 +101,7 @@ export const PAUSE_MEDIA_JS = `
 // Which optional controls to show (Settings → Buttons). Each also needs
 // the type to support it: several sites for the site list, savePageImage
 // in mediaTypes.js.
-const ALL_BUTTONS = { siteMenu: true, savePageImage: true };
+const ALL_BUTTONS = { searchBox: true, siteMenu: true, savePageImage: true };
 
 // Finds the largest image currently rendered on the page — for a manga
 // reader this is almost always the actual page being read, not a logo
@@ -519,6 +520,8 @@ const MediaWebView = forwardRef(function MediaWebView({
     request.search && searchSites ? searchSites[0].buildSearchUrl(request.search) : request.url;
   // The title search being shown: { query, index } into searchSites, or
   // null. Kept until closed or another search starts.
+  // What's typed in the search bar (showSearchBox below).
+  const [searchText, setSearchText] = useState('');
   const [titleSearch, setTitleSearch] = useState(() =>
     openRequest?.search && searchSites ? { query: openRequest.search, index: 0 } : null
   );
@@ -1512,9 +1515,40 @@ const MediaWebView = forwardRef(function MediaWebView({
       </TouchableOpacity>
     );
 
+  // The search bar at the top (Settings → Buttons → Search box): a title
+  // typed here opens the first site's results with the Next › bar.
+  const showSearchBox = !!searchSites && buttons.searchBox !== false;
+  const submitSearch = () => {
+    const query = searchText.replace(/\s+/g, ' ').trim();
+    if (!query) return;
+    Keyboard.dismiss();
+    openTitleSearch(query, 0);
+  };
+
   return (
     <View style={styles.container}>
-      {siteButton ? <View style={styles.manualBar}>{siteButton}</View> : null}
+      {siteButton || showSearchBox ? (
+        <View style={styles.manualBar}>
+          {siteButton}
+          {showSearchBox ? (
+            <>
+              <TextInput
+                style={styles.manualInput}
+                value={searchText}
+                onChangeText={setSearchText}
+                onSubmitEditing={submitSearch}
+                placeholder={`Search ${config.label} titles…`}
+                placeholderTextColor="#8892b0"
+                returnKeyType="search"
+                autoCorrect={false}
+              />
+              <TouchableOpacity style={styles.manualButton} onPress={submitSearch}>
+                <Text style={styles.manualButtonText}>Search</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+        </View>
+      ) : null}
       {titleSearch ? (
         <View style={styles.titleSearchBar}>
           <Text style={styles.titleSearchText} numberOfLines={1}>
@@ -1710,6 +1744,16 @@ const styles = themed(StyleSheet.create({
     justifyContent: 'center',
   },
   manualButtonText: { color: '#fff', fontWeight: '600' },
+  manualInput: {
+    flex: 1,
+    minHeight: 34,
+    backgroundColor: '#1a1a2e',
+    color: '#fff',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+  },
   siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
   // Title search: which site's results are showing, and Next.
   titleSearchBar: {

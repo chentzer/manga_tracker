@@ -418,6 +418,16 @@ finish date and sets progress to the total when the total is known.
   the rest). The Filters' score row has **♥ Favourites** to show only
   those.
 
+## Search box
+
+Each browsing tab has a bar at the top: the ▾ site list (on tabs with
+more than one site), a **Search … titles** box and **Search**. A title
+typed there opens the tab's first site's search results with the
+**Next: <site> ›** bar for its other sites (the tab's `titleSearch` in
+`src/mediaTypes.js`, else its `buildSearchUrl`). Settings → Buttons →
+**Search box** hides it. (Adding by code and Reverse image search, which
+the bar used to have, aren't in this app.)
+
 ## Search a title from any app
 
 To look up a manga, manhwa or anime title fast: highlight it in any app
@@ -863,8 +873,8 @@ so nothing renders blank.
   shows its debug log bar and "Capture HTML" button (see
   `MediaWebView.js`; off by default so the normal UI stays clean), **Block
   ads** and **Delete screenshots without asking** (Android 12+). Under
-  **Buttons**, switches hide the **Site list** and **Save Page Image** on
-  the tabs that have them (all
+  **Buttons**, switches hide the **Search box**, **Site list** and **Save
+  Page Image** on the tabs that have them (all
   shown by default;
   `BUTTON_SETTINGS` in App.js). The sheet scrolls when it doesn't fit.
   Under **Data saver** (`src/dataSaver.js`): **Load tabs only when

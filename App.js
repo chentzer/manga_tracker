@@ -160,6 +160,12 @@ export default function App() {
 // tabs whose type supports it (see MediaWebView.js / mediaTypes.js).
 const BUTTON_SETTINGS = [
   {
+    key: 'searchBox',
+    setting: 'showSearchBox',
+    label: 'Search box',
+    hint: 'The "Search … titles" box at the top of each tab: searches the tab\'s sites, with Next › for the others.',
+  },
+  {
     key: 'siteMenu',
     setting: 'showSiteMenu',
     label: 'Site list',
@@ -436,7 +442,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const [notepadVisible, setNotepadVisible] = useState(false);
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
-  const [buttons, setButtons] = useState({ siteMenu: true, savePageImage: true });
+  const [buttons, setButtons] = useState({ searchBox: true, siteMenu: true, savePageImage: true });
   // Settings → App lock; the setting lives in AppLock (src/AppLock.js).
   const { lockEnabled, changeLockEnabled } = useAppLockSetting();
   // Set when a "View in Library" button is tapped from a browsing tab —
