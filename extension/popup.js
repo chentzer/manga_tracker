@@ -10,6 +10,9 @@ document.getElementById('settings').addEventListener('click', (e) => {
 });
 
 const send = (message) => chrome.runtime.sendMessage(message);
+// Unsaved changes go to the background worker over this port; it saves
+// them when the popup closes (background.js, 'popupDrafts').
+const drafts = chrome.runtime.connect({ name: 'popupDrafts' });
 
 const STATUSES = (anime) => [
   ['reading', anime ? 'Watching' : 'Reading'],
@@ -69,16 +72,35 @@ function render(where, entry) {
   const repeatProgress = el('input', { type: 'number', min: '0', value: entry.repeat_progress || '0' });
   const saved = el('span', { class: 'saved' });
 
+  const fieldsNow = () => ({
+    read_status: status.value,
+    score: score.value || null,
+    progress: progress.value,
+    repeating: repeat.checked ? 1 : 0,
+    repeat_progress: repeat.checked ? repeatProgress.value : 0,
+  });
+  const start = JSON.stringify(fieldsNow());
+  let lastSaved = start;
+  // Every change (each key typed too) is handed to the background worker,
+  // which saves it when the popup closes — no need to press Save or
+  // click elsewhere first.
+  const draft = () => {
+    const fields = fieldsNow();
+    const changed = JSON.stringify(fields) !== lastSaved;
+    drafts.postMessage(changed ? { mediaType: where.mediaType, sourceId: where.sourceId, fields } : { clear: true });
+    if (changed) saved.textContent = 'Saved when you close this';
+  };
+  [status, score, progress, repeat, repeatProgress].forEach((input) => {
+    input.addEventListener('input', draft);
+    input.addEventListener('change', draft);
+  });
+
   const save = async () => {
     saved.textContent = 'Saving…';
-    const fields = {
-      read_status: status.value,
-      score: score.value || null,
-      progress: progress.value,
-      repeating: repeat.checked ? 1 : 0,
-      repeat_progress: repeat.checked ? repeatProgress.value : 0,
-    };
+    const fields = fieldsNow();
+    drafts.postMessage({ clear: true });
     const result = await send({ type: 'edit', mediaType: where.mediaType, sourceId: where.sourceId, fields });
+    if (!(result && result.error)) lastSaved = JSON.stringify(fields);
     saved.textContent = result && result.error ? `Not saved: ${result.error}` : 'Saved — syncing to Drive';
   };
 

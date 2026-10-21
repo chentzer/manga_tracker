@@ -402,6 +402,10 @@ function getTabSites(config) {
   ];
 }
 
+// 18+ titles you chose not to add (`type:code`), so they aren't asked
+// about again on every page until the app restarts.
+const declinedAdult = new Set();
+
 // Index into `sites` of the site `url` is on, or -1.
 function siteIndexFor(sites, url) {
   const host = getHostname(url);
@@ -1382,18 +1386,35 @@ const MediaWebView = forwardRef(function MediaWebView({
         return;
       }
 
-      // 18+ titles aren't recorded (site genres, or AniList by MAL id).
+      // 18+ titles (site genres, or AniList by MAL id) are only recorded
+      // if you say so; a "Don't add" isn't asked again until the app
+      // restarts.
       if (
         !(payload.malId && getEntryByMalId(payload.malId, config.key)) &&
         (await isAdultTitle({ malId: payload.malId, mediaType: config.key, genres: payload.genre }))
       ) {
-        logDebug(`Matched ${sourceId} — NSFW (18+), not recording it.`);
-        const text = `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.`;
-        if (Platform.OS === 'android') ToastAndroid.show(text, ToastAndroid.LONG);
-        else Alert.alert('NSFW', text);
-        clearPending();
-        inFlightSourceIds.current.delete(sourceId);
-        return;
+        const adultKey = `${config.key}:${sourceId}`;
+        const add =
+          !declinedAdult.has(adultKey) &&
+          (await new Promise((resolve) =>
+            Alert.alert(
+              '18+ title',
+              `"${payload.title || sourceId}" is marked 18+. Add it to the library anyway?`,
+              [
+                { text: "Don't add", style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Add', onPress: () => resolve(true) },
+              ],
+              { cancelable: true, onDismiss: () => resolve(false) }
+            )
+          ));
+        if (!add) {
+          declinedAdult.add(adultKey);
+          logDebug(`Matched ${sourceId} — 18+, not recording it.`);
+          clearPending();
+          inFlightSourceIds.current.delete(sourceId);
+          return;
+        }
+        logDebug(`Matched ${sourceId} — 18+, recording it as asked.`);
       }
 
       // A missing/failed thumbnail no longer blocks saving the entry —
@@ -1555,13 +1576,14 @@ const MediaWebView = forwardRef(function MediaWebView({
             “{titleSearch.query}” on {searchSites[titleSearch.index].name}
             {searchSites.length > 1 ? ` (${titleSearch.index + 1}/${searchSites.length})` : ''}
           </Text>
-          {titleSearch.index + 1 < searchSites.length ? (
+          {/* The next site, round to the first again after the last. */}
+          {searchSites.length > 1 ? (
             <TouchableOpacity
               style={[styles.manualButton, styles.siteButton]}
-              onPress={() => openTitleSearch(titleSearch.query, titleSearch.index + 1)}
+              onPress={() => openTitleSearch(titleSearch.query, (titleSearch.index + 1) % searchSites.length)}
             >
               <Text style={styles.manualButtonText} numberOfLines={1}>
-                Next: {searchSites[titleSearch.index + 1].name} ›
+                Next: {searchSites[(titleSearch.index + 1) % searchSites.length].name} ›
               </Text>
             </TouchableOpacity>
           ) : null}

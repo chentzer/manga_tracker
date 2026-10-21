@@ -68,14 +68,24 @@
     if (!buttons.length) card.timer = setTimeout(() => (card.host.style.display = 'none'), brief ? 2500 : 4000);
   }
 
-  // Shows what the background worker said about this page.
-  function show(result, context) {
+  // 18+ titles you chose not to add on this page (`type:code`), so they
+  // aren't asked about again while you read on.
+  const declinedAdult = new Set();
+
+  // Shows what the background worker said about this page. `again` sends
+  // the page's details once more, allowing an 18+ title (its "Add").
+  function show(result, context, again) {
     if (!result) return;
     if (result.error && result.error !== 'notConnected') console.warn('AniManga Tracker:', result.error);
     if (result.question) {
-      showCard(result.question.text, result.question.buttons, (answer) =>
-        send({ type: 'answer', ...context, answer }).then((r) => show(r, context))
-      );
+      const adultKey = `${context.mediaType}:${context.sourceId}`;
+      const asksAdult = result.question.buttons.some((b) => b.answer.kind === 'addAdult');
+      if (asksAdult && declinedAdult.has(adultKey)) return;
+      showCard(result.question.text, result.question.buttons, (answer) => {
+        if (answer.kind === 'skipAdult') declinedAdult.add(adultKey);
+        else if (answer.kind === 'addAdult') again && again().then((r) => show(r, context));
+        else send({ type: 'answer', ...context, answer }).then((r) => show(r, context));
+      });
     } else if (result.toast) {
       showCard(result.toast, [], null, !!result.brief);
     }
@@ -189,16 +199,17 @@
         payload.progress !== undefined && payload.progress !== null ? payload.progress : progress;
       const image = visit.isNew && !payload.skip ? await coverData(payload.imageUrl) : null;
       const context = { mediaType, sourceId: id, url: pageUrl };
-      const result = await send({
+      const details = {
         type: 'details',
         ...context,
         progress: pageProgress,
         payload,
         image,
         fromPage: !sourceId,
-      });
+      };
+      const result = await send(details);
       console.debug(`[AniManga Tracker] saved at ${ms()}`);
-      show(result, context);
+      show(result, context, () => send({ ...details, allowAdult: true }));
     } finally {
       reading.delete(url);
     }

@@ -21,6 +21,7 @@ const source = fs.readFileSync(path.join(here, '..', 'src', 'mediaTypes.js'), 'u
 export const PLACEHOLDERS = {
   mangaSiteUrl: 'https://manga-site-1.invalid',
   mangaSite2Url: 'https://manga-site-2.invalid',
+  mangaSite3Url: 'https://manga-site-3.invalid',
   animeSiteUrl: 'https://anime-site-1.invalid',
   manhwaSiteUrl: 'https://manhwa-site-1.invalid',
   manhwaSite2Url: 'https://manhwa-site-2.invalid',

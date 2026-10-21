@@ -6,6 +6,7 @@
 self.MT_PLACEHOLDERS = {
   "mangaSiteUrl": "https://manga-site-1.invalid",
   "mangaSite2Url": "https://manga-site-2.invalid",
+  "mangaSite3Url": "https://manga-site-3.invalid",
   "animeSiteUrl": "https://anime-site-1.invalid",
   "manhwaSiteUrl": "https://manhwa-site-1.invalid",
   "manhwaSite2Url": "https://manhwa-site-2.invalid",
@@ -32,7 +33,9 @@ self.MT_TYPES = [
     var tries = 0;
     function read(seriesId, progress) {
       var seriesUrl = location.origin + '/manga/' + seriesId;
-      fetch(seriesUrl)
+      // Without Accept: text/html the site answers with a short stub
+      // instead of the page (no title, which then showed as the code).
+      fetch(seriesUrl, { headers: { Accept: 'text/html' } })
         .then(function(r) { return r.text(); })
         .then(function(html) {
           var doc = new DOMParser().parseFromString(html, 'text/html');
@@ -141,6 +144,79 @@ self.MT_TYPES = [
     })();
     true;
   },
+      },
+      {
+        name: "manga-site-3.invalid",
+        pattern: "^https?:\\/\\/(?:www\\.)?manga-site-3\\.invalid\\/(title|chapter)\\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        flags: "i",
+        extractId: (match) => (match[1].toLowerCase() === 'title' ? match[2].toLowerCase() : null),
+        extractProgress: () => null,
+        seriesFromPage: true,
+        interstitialKeywords: null,
+        extractMetadata: function () {
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    var host = location.hostname.replace(/^www[.]/, '');
+    var api = 'https://api.' + host;
+    var parts = location.pathname.split('/').filter(Boolean);
+    var pageUrl = location.href;
+    function pick(names) {
+      if (!names) return null;
+      return names.en || names['ja-ro'] || names[Object.keys(names)[0]] || null;
+    }
+    function read(id, progress) {
+      var seriesUrl = location.origin + '/title/' + id;
+      fetch(api + '/manga/' + id + '?includes[]=cover_art&includes[]=author&includes[]=artist')
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          var m = json.data;
+          var a = m.attributes;
+          var title = pick(a.title);
+          var alts = (a.altTitles || []).map(function(t) { return t.en; }).filter(function(t) { return t && t !== title; });
+          var names = [];
+          var cover = null;
+          (m.relationships || []).forEach(function(r) {
+            if (!r.attributes) return;
+            if ((r.type === 'author' || r.type === 'artist') && names.indexOf(r.attributes.name) === -1) names.push(r.attributes.name);
+            if (r.type === 'cover_art') cover = 'https://uploads.' + host + '/covers/' + id + '/' + r.attributes.fileName + '.512.jpg';
+          });
+          var genres = (a.tags || []).filter(function(t) { return t.attributes.group === 'genre'; }).map(function(t) { return t.attributes.name.en; });
+          if (a.contentRating === 'erotica' || a.contentRating === 'pornographic') genres.push('Adult');
+          var mal = a.links && a.links.mal;
+          send({
+            sourceId: id,
+            sourceUrl: seriesUrl,
+            pageUrl: pageUrl,
+            progress: progress,
+            imageUrl: cover,
+            title: title,
+            altTitle: alts[0] || null,
+            author: names.join(', ') || null,
+            malId: mal && /^[0-9]+$/.test(mal) ? Number(mal) : null,
+            genre: genres.join(', ') || null,
+          });
+        })
+        .catch(function() { send({ sourceId: id, sourceUrl: seriesUrl, pageUrl: pageUrl, progress: progress, title: null }); });
+    }
+    if (parts[0] === 'title' && parts[1]) {
+      read(parts[1], null);
+    } else if (parts[0] === 'chapter' && parts[1]) {
+      fetch(api + '/chapter/' + parts[1])
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          var c = json.data;
+          var manga = (c.relationships || []).filter(function(r) { return r.type === 'manga'; })[0];
+          if (!manga) { send({ skip: 'no series for this chapter', pageUrl: pageUrl }); return; }
+          var n = parseFloat(c.attributes.chapter);
+          read(manga.id, isNaN(n) ? null : Math.floor(n));
+        })
+        .catch(function() { send({ skip: 'chapter not readable', pageUrl: pageUrl }); });
+    } else {
+      send({ skip: 'not a series or chapter page', pageUrl: pageUrl });
+    }
+  })();
+  true;
+},
       }
     ],
   },

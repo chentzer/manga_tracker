@@ -450,7 +450,7 @@ const outcome = (result) => (result.question ? 'asked' : 'answered');
 
 // The page's details (title, cover, author, MAL id; and for pages without
 // their series in the address, the series and chapter).
-async function handleDetails({ mediaType, sourceId, url, progress, payload, image, fromPage }, tabId) {
+async function handleDetails({ mediaType, sourceId, url, progress, payload, image, fromPage, allowAdult }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
   const t = timer(`details ${mediaType} ${sourceId}`);
   const rows = await view(mediaType);
@@ -483,12 +483,22 @@ async function handleDetails({ mediaType, sourceId, url, progress, payload, imag
     return {};
   }
 
-  // 18+ titles aren't recorded (the site's genres, or AniList by MAL id).
+  // 18+ titles (the site's genres, or AniList by MAL id) are only added
+  // if you say so: the card asks, and "Add" sends the details again with
+  // allowAdult (content.js).
   const info = await aniListInfo(payload.malId, mediaType);
   t.mark('anilist');
-  if (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres)))) {
-    t.end('nsfw');
-    return { toast: `NSFW (18+): "${payload.title || sourceId}" wasn't added to the library.` };
+  if (!allowAdult && (hasAdultGenre(payload.genre) || (info && (info.isAdult || hasAdultGenre(info.genres))))) {
+    t.end('asked');
+    return {
+      question: {
+        text: `"${payload.title || sourceId}" is marked 18+. Add it to AniManga Tracker anyway?`,
+        buttons: [
+          { label: "Don't add", answer: { kind: 'skipAdult' } },
+          { label: 'Add', answer: { kind: 'addAdult' } },
+        ],
+      },
+    };
   }
 
   const imported = findImported(rows, payload.malId, [payload.title, payload.altTitle]);
@@ -589,6 +599,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(`tab:${tabId}`));
+
+// The popup's unsaved changes (popup.js): the latest one is saved when the
+// popup closes, so closing it is enough.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'popupDrafts') return;
+  let draft = null;
+  port.onMessage.addListener((msg) => {
+    draft = msg && msg.fields ? msg : null;
+  });
+  port.onDisconnect.addListener(() => {
+    if (draft) handleEdit(draft).catch((err) => console.warn('AniManga Tracker: popup save failed', err));
+  });
+});
 
 // Whatever was waiting when the worker last stopped.
 flushSoon(1000);

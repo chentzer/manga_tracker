@@ -23,6 +23,7 @@ import Constants from 'expo-constants';
 const extra = Constants.expoConfig?.extra || {};
 const MANGA_SITE_URL = extra.mangaSiteUrl || 'https://your-manga-site.example.com';
 const MANGA_SITE_2_URL = extra.mangaSite2Url || 'https://your-second-manga-site.example.com';
+const MANGA_SITE_3_URL = extra.mangaSite3Url || 'https://your-third-manga-site.example.com';
 const ANIME_SITE_URL = extra.animeSiteUrl || 'https://your-anime-site.example.com';
 const MANHWA_SITE_URL = extra.manhwaSiteUrl || 'https://your-manhwa-site.example.com';
 const MANHWA_SITE_2_URL = extra.manhwaSite2Url || 'https://your-second-manhwa-site.example.com';
@@ -41,6 +42,7 @@ function hostPattern(url) {
 
 const MANGA_HOST = hostOf(MANGA_SITE_URL);
 const MANGA_HOST_2 = hostOf(MANGA_SITE_2_URL);
+const MANGA_HOST_3 = hostOf(MANGA_SITE_3_URL);
 const MANHWA_HOST = hostOf(MANHWA_SITE_URL);
 const MANHWA_HOST_2 = hostOf(MANHWA_SITE_2_URL);
 const MANHWA_HOST_3 = hostOf(MANHWA_SITE_3_URL);
@@ -274,7 +276,9 @@ const SERIES_BY_PAGE_READER_JS = `
     var tries = 0;
     function read(seriesId, progress) {
       var seriesUrl = location.origin + '/manga/' + seriesId;
-      fetch(seriesUrl)
+      // Without Accept: text/html the site answers with a short stub
+      // instead of the page (no title, which then showed as the code).
+      fetch(seriesUrl, { headers: { Accept: 'text/html' } })
         .then(function(r) { return r.text(); })
         .then(function(html) {
           var doc = new DOMParser().parseFromString(html, 'text/html');
@@ -320,6 +324,78 @@ const SERIES_BY_PAGE_READER_JS = `
     }
     if (parts[0] === 'manga') read(parts[1], null);
     else readChapter();
+  })();
+  true;
+`;
+
+// Reads a series on a site with series at /title/<uuid>[/<slug>] and
+// chapters at /chapter/<uuid>, from the site's public API at api.<site>:
+// title, other names, cover (uploads.<site>), author and artist, genres and MyAnimeList id. A title the site rates erotica or
+// pornographic gets the "Adult" genre, so it's asked about like other 18+
+// titles. On a chapter page the series and chapter number come from the
+// API's chapter; both are sent (`sourceId`, `progress`) since the address
+// has neither (seriesFromPage).
+const UUID_API_READER_JS = `
+  (function() {
+    function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+    var host = location.hostname.replace(/^www[.]/, '');
+    var api = 'https://api.' + host;
+    var parts = location.pathname.split('/').filter(Boolean);
+    var pageUrl = location.href;
+    function pick(names) {
+      if (!names) return null;
+      return names.en || names['ja-ro'] || names[Object.keys(names)[0]] || null;
+    }
+    function read(id, progress) {
+      var seriesUrl = location.origin + '/title/' + id;
+      fetch(api + '/manga/' + id + '?includes[]=cover_art&includes[]=author&includes[]=artist')
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          var m = json.data;
+          var a = m.attributes;
+          var title = pick(a.title);
+          var alts = (a.altTitles || []).map(function(t) { return t.en; }).filter(function(t) { return t && t !== title; });
+          var names = [];
+          var cover = null;
+          (m.relationships || []).forEach(function(r) {
+            if (!r.attributes) return;
+            if ((r.type === 'author' || r.type === 'artist') && names.indexOf(r.attributes.name) === -1) names.push(r.attributes.name);
+            if (r.type === 'cover_art') cover = 'https://uploads.' + host + '/covers/' + id + '/' + r.attributes.fileName + '.512.jpg';
+          });
+          var genres = (a.tags || []).filter(function(t) { return t.attributes.group === 'genre'; }).map(function(t) { return t.attributes.name.en; });
+          if (a.contentRating === 'erotica' || a.contentRating === 'pornographic') genres.push('Adult');
+          var mal = a.links && a.links.mal;
+          send({
+            sourceId: id,
+            sourceUrl: seriesUrl,
+            pageUrl: pageUrl,
+            progress: progress,
+            imageUrl: cover,
+            title: title,
+            altTitle: alts[0] || null,
+            author: names.join(', ') || null,
+            malId: mal && /^[0-9]+$/.test(mal) ? Number(mal) : null,
+            genre: genres.join(', ') || null,
+          });
+        })
+        .catch(function() { send({ sourceId: id, sourceUrl: seriesUrl, pageUrl: pageUrl, progress: progress, title: null }); });
+    }
+    if (parts[0] === 'title' && parts[1]) {
+      read(parts[1], null);
+    } else if (parts[0] === 'chapter' && parts[1]) {
+      fetch(api + '/chapter/' + parts[1])
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          var c = json.data;
+          var manga = (c.relationships || []).filter(function(r) { return r.type === 'manga'; })[0];
+          if (!manga) { send({ skip: 'no series for this chapter', pageUrl: pageUrl }); return; }
+          var n = parseFloat(c.attributes.chapter);
+          read(manga.id, isNaN(n) ? null : Math.floor(n));
+        })
+        .catch(function() { send({ skip: 'chapter not readable', pageUrl: pageUrl }); });
+    } else {
+      send({ skip: 'not a series or chapter page', pageUrl: pageUrl });
+    }
   })();
   true;
 `;
@@ -680,8 +756,9 @@ export const MEDIA_TYPES = {
       dropped: 'Dropped',
       want: 'Want to Read',
     },
-    // Two sites, set in .env: MANGA_SITE_URL (opened first) and
-    // MANGA_SITE_2_URL (in the ▾ site list, see extraSources below).
+    // Three sites, set in .env: MANGA_SITE_URL (opened first),
+    // MANGA_SITE_2_URL and MANGA_SITE_3_URL (in the ▾ site list, see
+    // extraSources below).
     startUrl: MANGA_SITE_URL,
     siteName: MANGA_HOST,
     // Shows the "⬇ Save Page Image" button (the largest image on screen,
@@ -709,17 +786,27 @@ export const MEDIA_TYPES = {
       if (hostOf(entry.source_url || '') === MANGA_HOST_2) {
         return { url: `${MANGA_SITE_2_URL}/title/${entry.source_id}`, checkJs: openChapterFromListJs(n) };
       }
+      // Third site: its series page, to pick the chapter there.
+      if (hostOf(entry.source_url || '') === MANGA_HOST_3) return { url: `${MANGA_SITE_3_URL}/title/${entry.source_id}` };
       return { url: `${MANGA_SITE_URL}/manga/${entry.source_id}`, checkJs: openChapterFromRowsJs(n) };
     },
     // For titles not opened on a site yet (imported from MAL).
     // "Start reading" / "Reread" (Library): the series page's first chapter.
-    openFirst: (entry) => ({
-      url:
-        hostOf(entry.source_url || '') === MANGA_HOST_2
-          ? `${MANGA_SITE_2_URL}/title/${entry.source_id}`
-          : `${MANGA_SITE_URL}/manga/${entry.source_id}`,
-      checkJs: OPEN_FIRST_CHAPTER_JS,
-    }),
+    openFirst: (entry) => {
+      const host = hostOf(entry.source_url || '');
+      if (host === MANGA_HOST_3) return { url: `${MANGA_SITE_3_URL}/title/${entry.source_id}` };
+      return {
+        url: host === MANGA_HOST_2 ? `${MANGA_SITE_2_URL}/title/${entry.source_id}` : `${MANGA_SITE_URL}/manga/${entry.source_id}`,
+        checkJs: OPEN_FIRST_CHAPTER_JS,
+      };
+    },
+    // A title searched from the search bar (or highlighted in another
+    // app) opens on the first site, with Next › for the others.
+    titleSearch: [
+      { name: MANGA_HOST, buildSearchUrl: (q) => `${MANGA_SITE_URL}/search?search=${encodeURIComponent(q)}` },
+      { name: MANGA_HOST_2, buildSearchUrl: (q) => `${MANGA_SITE_2_URL}/browse?q=${encodeURIComponent(q)}` },
+      { name: MANGA_HOST_3, buildSearchUrl: (q) => `${MANGA_SITE_3_URL}/search?q=${encodeURIComponent(q)}` },
+    ],
     buildSearchUrl: (title) => `${MANGA_SITE_URL}/search?search=${encodeURIComponent(title)}`,
     // Pages can't leave the two sites: blocks any navigation to another
     // domain — stops window.open popups, redirects, and hijacks
@@ -748,6 +835,21 @@ export const MEDIA_TYPES = {
     // userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
     extraSources: [
       MANGA_SITE_2_SOURCE,
+      {
+        name: MANGA_HOST_3,
+        domain: MANGA_HOST_3,
+        // Series at /title/<uuid>[/<slug>], chapters at /chapter/<uuid>
+        // (which doesn't say the series: the page script asks the site's
+        // API, seriesFromPage).
+        urlRegex: new RegExp(
+          `^https?://(?:www\\.)?${hostPattern(MANGA_SITE_3_URL)}/(title|chapter)/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`,
+          'i'
+        ),
+        extractId: (match) => (match[1].toLowerCase() === 'title' ? match[2].toLowerCase() : null),
+        extractProgress: () => null,
+        seriesFromPage: true,
+        extractMetadataJs: UUID_API_READER_JS,
+      },
     ],
   },
 
@@ -774,6 +876,7 @@ export const MEDIA_TYPES = {
         buildSearchUrl: (q) => `${MANHWA_SITE_2_URL}/?s=${encodeURIComponent(q)}&post_type=wp-manga`,
       },
       { name: MANHWA_HOST_3, buildSearchUrl: (q) => `${MANHWA_SITE_3_URL}/series/?searchTerm=${encodeURIComponent(q)}` },
+      { name: MANGA_HOST_2, buildSearchUrl: (q) => `${MANGA_SITE_2_URL}/browse?q=${encodeURIComponent(q)}` },
     ],
     // For titles not opened on a site yet (imported from MAL).
     buildSearchUrl: (title) => `${MANHWA_SITE_URL}/browse?search=${encodeURIComponent(title)}`,

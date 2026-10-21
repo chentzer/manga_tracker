@@ -55,7 +55,10 @@ adapt to whatever you actually use:
 1. **Your sites, in `.env`** — copy `.env.example` to `.env` (git-ignored,
    never committed) and set `MANGA_SITE_URL` and `ANIME_SITE_URL` to the
    sites each tab should open, without a trailing slash. The Manga tab
-   has a second site too, `MANGA_SITE_2_URL`, in its ▾ site list. `app.config.js`
+   has a second and third site too, `MANGA_SITE_2_URL` and `MANGA_SITE_3_URL`
+   (a site with series at `/title/<uuid>` and chapters at `/chapter/<uuid>`,
+   read from its API at `api.<site>`), in its ▾ site list.
+   A title search goes through all three with **Next ›**. `app.config.js`
    passes them to `mediaTypes.js`; without them the tabs open the
    placeholder `*.example.com` domains. Restart `expo start` after
    changing `.env`.
@@ -404,7 +407,8 @@ finish date and sets progress to the total when the total is known.
   that haven't been opened on the site show 🔍 on the button and search
   the site for the title instead; opening it from the results links it.
   The search shows a bar with **Next: <site> ›** to try the tab's other
-  sites (Manhwa has two).
+  sites (Manga and Manhwa have several); after the last one it starts
+  again at the first.
 - **🎲 Random** (the button at the top of the Library) picks one entry by
   category (Manga / Manhwa / Anime), status (Read/Watched, Want to
   Read/Watch, Reading/Watching) and rating (♥ Favourite, ★10 … ★6, ★1–5,
@@ -743,10 +747,12 @@ so nothing renders blank.
   again for a few seconds in case the page redraws the box (until you
   type or tap). This is what makes searches from the Library (e.g. **Read
   ch 1** on a title imported from MyAnimeList) show their results there.
-- **No NSFW titles** — a title isn't recorded when it's 18+: the site's
-  own genres include Hentai, Adult, Smut, 18+ or R-18, or AniList (by its
-  MyAnimeList id) marks it adult or Hentai (`isAdultTitle` in
-  `src/malList.js`). A toast says "NSFW (18+)" and that it wasn't added.
+- **18+ titles are asked about** — when a title is 18+ (the site's own
+  genres include Hentai, Adult, Smut, 18+ or R-18, or AniList by its
+  MyAnimeList id marks it adult or Hentai; `isAdultTitle` in
+  `src/malList.js`), the app asks "Add it to the library anyway?" before
+  recording it. **Don't add** isn't asked again for that title until the
+  app restarts.
   If AniList can't be reached, only the site's genres count. MyAnimeList
   imports leave such titles out too, and the import summary says how
   many.
@@ -922,13 +928,15 @@ so nothing renders blank.
 `extension/` is a Chromium extension that does on your computer what the
 app's tabs do: on your sites it records the titles you open and your
 chapter / episode progress, with the same questions (start rereading?
-ahead of your record?), links titles imported from MyAnimeList, skips
-NSFW (18+) titles, and uploads covers. It writes straight to the same
+ahead of your record?), links titles imported from MyAnimeList, asks
+before adding 18+ titles (its card: **Don't add** / **Add**), and uploads
+covers. It writes straight to the same
 Drive files (`MangaTracker/<type>-backup.csv`, covers in
 `MangaTracker/<type>/`), stamping `updated_at`, and the app picks the
 changes up on its next sync ("Two-way sync" above). Its toolbar button
 shows a ✓ on a recorded title's page, and its popup shows that entry:
-status, score, progress and rereading, saved to Drive.
+status, score, progress and rereading, saved to Drive — with **Save**, or
+just by closing the popup (what you changed is saved when it closes).
 
 It recognises pages exactly as the app does: `extension/sites.generated.js`
 is built from `src/mediaTypes.js` (patterns, codes, chapter numbers and
