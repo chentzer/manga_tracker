@@ -394,8 +394,10 @@ function getTabSites(config) {
       homeUrl: i === 0 ? config.startUrl : `https://${s.domain}/`,
     }));
   }
-  const mainName = config.siteName || config.titleSearch?.[0]?.name;
-  if (!config.extraSources || !mainName) return [];
+  // The tab's own site is named after its siteName or title search's first
+  // site, or after the tab when it has neither.
+  const mainName = config.siteName || config.titleSearch?.[0]?.name || config.label;
+  if (!config.extraSources || !config.extraSources.length) return [];
   return [
     { name: mainName, domain: getHostname(config.startUrl), homeUrl: config.startUrl },
     ...config.extraSources.map((s) => ({ name: s.name, domain: s.domain, homeUrl: `https://${s.domain}/` })),
@@ -1291,6 +1293,16 @@ const MediaWebView = forwardRef(function MediaWebView({
       };
       let sourceId = selfNamed ? null : pendingSourceId.current;
       const pageUrl = selfNamed ? payload.pageUrl : pendingPageUrl.current;
+
+      // A site you added (customSites.js): its general reader found that
+      // this page isn't one title's page (home, search, a tag list…).
+      if (payload.notAnEntry) {
+        logDebug(`${sourceId || pageUrl} isn't a title's page — not saved.`);
+        if (sourceId) inFlightSourceIds.current.delete(sourceId);
+        if (pageUrl) inFlightSourceIds.current.delete(pageUrl);
+        clearPending();
+        return;
+      }
 
       if (selfNamed) {
         inFlightSourceIds.current.delete(pageUrl);

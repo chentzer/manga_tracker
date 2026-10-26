@@ -9,6 +9,7 @@ import {
   BackHandler,
   Modal,
   Switch,
+  TextInput,
   ScrollView,
   LayoutAnimation,
   Platform,
@@ -53,6 +54,7 @@ import {
   takeDriveSyncDeferred,
 } from './src/dataSaver';
 import { MEDIA_TYPE_LIST } from './src/mediaTypes';
+import { loadCustomSites, saveCustomSites, domainOf, withCustomSites } from './src/customSites';
 import AppLock, { useAppLockSetting } from './src/AppLock';
 import { galleryFolderFor } from './src/gallery';
 import { fileScreenshot, buildGalleryFileName } from './src/screenshots';
@@ -437,6 +439,56 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const [isSignedInToGoogle, setIsSignedInToGoogle] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
+  // Settings → Sites: sites you added to the tabs (customSites.js), and
+  // the Add form's address and tab.
+  const [customSites, setCustomSites] = useState(() => loadCustomSites());
+  const [newSite, setNewSite] = useState({ address: '', type: MEDIA_TYPE_LIST[0].key });
+  // Each tab's config with your sites for it added.
+  const tabConfigs = React.useMemo(() => MEDIA_TYPE_LIST.map((m) => withCustomSites(m, customSites)), [customSites]);
+  // A tab reloads (its page starts again) when its added sites change.
+  const sitesVersion = (key) =>
+    customSites
+      .filter((x) => x.type === key)
+      .map((x) => x.domain)
+      .join('|');
+  const addSite = () => {
+    const domain = domainOf(newSite.address);
+    const type = MEDIA_TYPE_LIST.find((m) => m.key === newSite.type);
+    if (!domain || !type) {
+      Alert.alert('Check the address', 'Type a website, e.g. example.com');
+      return;
+    }
+    const own = withCustomSites(type, []);
+    const ownDomains = [own.startUrl, ...(own.extraSources || []), ...(own.sources || [])]
+      .map((x) => (typeof x === 'string' ? domainOf(x) : x && x.domain))
+      .filter(Boolean);
+    if (ownDomains.includes(domain) || customSites.some((x) => x.domain === domain && x.type === type.key)) {
+      Alert.alert('Already there', `${domain} is already one of ${type.label}'s sites.`);
+      return;
+    }
+    const next = [...customSites, { domain, type: type.key, name: domain }];
+    saveCustomSites(next);
+    setCustomSites(next);
+    setNewSite((n) => ({ ...n, address: '' }));
+  };
+  const removeSite = (site) => {
+    Alert.alert(
+      'Remove this site?',
+      `${site.domain} is taken out of ${MEDIA_TYPE_LIST.find((m) => m.key === site.type)?.label}. Entries already saved from it stay in your Library.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            const next = customSites.filter((x) => !(x.domain === site.domain && x.type === site.type));
+            saveCustomSites(next);
+            setCustomSites(next);
+          },
+        },
+      ]
+    );
+  };
   const [settingsVisible, setSettingsVisible] = useState(false);
   // The Notepad (src/Notepad.js), opened from the 📝 button on the Library.
   const [notepadVisible, setNotepadVisible] = useState(false);
@@ -822,7 +874,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             recreated the webview's native view — losing scroll
             position and navigation history — every single time you
             switched away and back, including via the Library tab. */}
-        {MEDIA_TYPE_LIST.map((mediaConfig) => (
+        {tabConfigs.map((mediaConfig) => (
           <View
             key={mediaConfig.key}
             style={[styles.tabPane, { display: tab === mediaConfig.key ? 'flex' : 'none' }]}
@@ -831,6 +883,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 until the tab is opened (loadedTabs). */}
             {loadedTabs.includes(mediaConfig.key) ? (
               <MediaWebView
+                key={sitesVersion(mediaConfig.key)}
                 ref={(r) => {
                   webviewRefs.current[mediaConfig.key] = r;
                 }}
@@ -952,6 +1005,53 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             <TouchableOpacity style={styles.settingsWideButton} onPress={handleMalImport} disabled={malBusy}>
               <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : '⬇ Import MAL list'}</Text>
             </TouchableOpacity>
+
+            <Text style={styles.settingsSectionTitle}>Sites</Text>
+            <Text style={[styles.settingsHint, styles.settingsRowGap]}>
+              Add a website to a tab: it joins that tab's site list, and its pages are saved like the tab's own
+              sites (title, picture, author and tags read from the page; home, search and tag pages are left out).
+              The tab reloads when you add or remove one.
+            </Text>
+            {customSites.map((site) => (
+              <View key={`${site.type}:${site.domain}`} style={[styles.settingsRow, styles.settingsRowGap]}>
+                <View style={styles.settingsRowText}>
+                  <Text style={styles.settingsLabel}>{site.domain}</Text>
+                  <Text style={styles.settingsHint}>{MEDIA_TYPE_LIST.find((m) => m.key === site.type)?.label}</Text>
+                </View>
+                <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={() => removeSite(site)}>
+                  <Text style={styles.settingsSmallButtonText}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <View style={styles.settingsRowGap}>
+              <View style={styles.siteChoiceRow}>
+                {MEDIA_TYPE_LIST.map((m) => (
+                  <TouchableOpacity
+                    key={m.key}
+                    style={[styles.siteChoice, newSite.type === m.key && styles.siteChoiceOn]}
+                    onPress={() => setNewSite((n) => ({ ...n, type: m.key }))}
+                  >
+                    <Text style={styles.settingsSmallButtonText}>{m.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.siteAddRow}>
+                <TextInput
+                  style={styles.siteInput}
+                  value={newSite.address}
+                  onChangeText={(address) => setNewSite((n) => ({ ...n, address }))}
+                  placeholder="Website, e.g. example.com"
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  onSubmitEditing={addSite}
+                />
+                <TouchableOpacity style={styles.settingsSmallButton} onPress={addSite}>
+                  <Text style={styles.settingsSmallButtonText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
             <Text style={styles.settingsSectionTitle}>Library</Text>
             <View style={styles.settingsRowGap}>
@@ -1167,6 +1267,20 @@ const styles = themed(StyleSheet.create({
   },
   settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
   settingsDangerButton: { backgroundColor: '#c0392b' },
+  siteChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  siteChoice: { backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
+  siteChoiceOn: { backgroundColor: '#0f3460', borderWidth: 1, borderColor: '#5b8def' },
+  siteAddRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  siteInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: '#222',
+    backgroundColor: '#fff',
+  },
   settingsRowSpaced: { marginTop: 16 },
   settingsChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   settingsChoice: {

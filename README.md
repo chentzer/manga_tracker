@@ -490,6 +490,18 @@ so nothing renders blank.
   (URL pattern, ID extraction, thumbnail-capture JS, start URL). Adding a
   third type (e.g. articles) means adding one entry here — no other file
   needs to change.
+- `src/customSites.js` — **Settings → Sites**: add a website to a tab
+  (pick the tab, type the address, Add). It becomes one more of that
+  tab's sites (`extraSources`, or `sources` for a tab with several): it's
+  in the tab's site list, the redirect blocker lets you move to it, and
+  its pages are saved automatically like the tab's own sites. With no
+  site-specific reader, `GENERIC_READER_JS` reads the page's preview
+  details (title, picture, author, keywords / tags) and leaves out pages
+  that aren't one title's page (home, search, tag, category, account
+  pages, or no title / picture). Codes are `web-` + the address as one
+  word (`web-example.com-title-12345`). Kept in the `customSites`
+  setting; the tab reloads when its sites change. Remove takes a site out
+  again (its saved entries stay).
 - `src/MediaWebView.js` — one generic webview component parameterized by a
   media type config; used for both the manga and anime tabs. Detects URL
   matches two ways: native navigation events, and a polling script injected
