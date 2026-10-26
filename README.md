@@ -809,7 +809,8 @@ so nothing renders blank.
   filter chips (All / Manga
   / Anime). Everything below them folds away into one **⚙︎ Filters** bar
   (tap to open; it lists what's on, e.g. "⚙︎ Filters · ♥ · #action", and
-  ✕ clears it all): a Newest/Top Rated sort toggle, a **Filter by Artist**
+  ✕ clears it all): a Last updated / Newest / Top Rated sort (Last
+  updated — the latest change to an entry first — is the default), a **Filter by Artist**
   button that opens a modal listing every distinct artist across the
   whole library — grouped under a header per media type (only types
   with at least one saved artist show up), sorted alphabetically, tap a

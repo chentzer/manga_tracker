@@ -973,6 +973,7 @@ function DetailModal({
 
 const FILTERS = [{ key: null, label: 'All' }, ...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label }))];
 const SORTS = [
+  { key: 'updated', label: 'Last updated' },
   { key: 'newest', label: 'Newest' },
   { key: 'rating', label: 'Top Rated' },
 ];
@@ -1225,7 +1226,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [entries, setEntries] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(null); // null = all types
-  const [sort, setSort] = useState('newest');
+  const [sort, setSort] = useState('updated');
   const [artistFilter, setArtistFilter] = useState('');
   const [artistModalVisible, setArtistModalVisible] = useState(false);
   const [minRating, setMinRating] = useState(null);
@@ -1339,10 +1340,20 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     return true;
   });
 
+  // Last updated: the entry's updated_at (any change to it, here, in the
+  // extension or from Drive), newest first; entries without one fall
+  // back to when they were added.
+  // (created_at is SQLite's "YYYY-MM-DD HH:MM:SS", in UTC.)
+  const updatedTime = (e) => {
+    const t = String(e.updated_at || e.created_at || '').replace(' ', 'T');
+    return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t}Z`) || 0;
+  };
   const displayEntries =
     sort === 'rating'
       ? [...filteredEntries].sort((a, b) => (b.score || 0) - (a.score || 0))
-      : filteredEntries;
+      : sort === 'updated'
+        ? [...filteredEntries].sort((a, b) => updatedTime(b) - updatedTime(a))
+        : filteredEntries;
 
   // Every distinct tag currently in use, for the filter chip row —
   // computed from the (type-filtered) entries list, so it naturally
