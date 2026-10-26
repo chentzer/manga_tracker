@@ -708,8 +708,13 @@ so nothing renders blank.
   networks, links to them and the usual ad boxes are blocked or hidden.
   "Zone" ad scripts (a `data-zone` tag, or `vignette.min.js` /
   `tag.min.js` from another site — the fake "unused bonus" boxes and
-  full-page ads) are stopped whatever throwaway domain they use. Frames from other sites can still show their own ads; the debug log
-  lists what was blocked.
+  full-page ads) are stopped whatever throwaway domain they use. A
+  pop-up box that a script from another site draws over the page (fake
+  "storage running out" warnings, app-download boxes) is removed, and
+  that site's scripts are blocked for the rest of the page; the page's
+  own pop-ups and Cloudflare / captcha checks are left alone. Frames from
+  other sites can still show their own ads; the debug log lists what was
+  blocked ("pop-up box" plus the site for these).
 - **Browser tab** (`src/BrowserTab.js`) — a plain browser for any site,
   between Anime and the Library: type an address or search words (a
   Google search) in its bar, with ‹ › and ⟳. Nothing there is recorded

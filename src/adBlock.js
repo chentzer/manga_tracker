@@ -11,6 +11,9 @@
 //       loading, and removes any that get added to the page anyway
 //     • also stops "zone" ad scripts (isZoneScript) whatever domain they
 //       come from: those networks keep moving to new throwaway domains
+//     • removes pop-up boxes that a script from another site draws over
+//       the page (fake phone warnings, app-download boxes), and then
+//       blocks that site for the rest of the page
 //     • stops the page's own requests to those networks
 //     • ignores taps on links that lead to them
 //     • hides the usual ad boxes
@@ -93,9 +96,13 @@ export const AD_BLOCK_JS = `
     function hostOf(url) {
       try { return new URL(url, location.href).hostname.toLowerCase(); } catch (e) { return ''; }
     }
+    // Sites caught drawing a pop-up box (see "Pop-up boxes" below): the
+    // rest of their scripts are blocked too.
+    var caught = {};
     function isAd(url) {
       if (!url) return false;
       var h = hostOf(String(url));
+      if (caught[h]) return true;
       for (var i = 0; i < DOMAINS.length; i++) {
         if (h === DOMAINS[i] || h.slice(-DOMAINS[i].length - 1) === '.' + DOMAINS[i]) return true;
       }
@@ -188,6 +195,62 @@ export const AD_BLOCK_JS = `
       }
     }, true);
 
+    // Pop-up boxes drawn by scripts from other sites (fake "storage
+    // running out" warnings, app-download boxes), whatever ad network or
+    // domain they use. Elements a script from another site creates are
+    // marked with that site; one that turns out to float over the page
+    // (position: fixed) or is a frame is removed, and that site is caught.
+    // The page's own scripts, and challenge / captcha scripts, are left
+    // alone.
+    var SAFE_HOSTS = ['challenges.cloudflare.com', 'www.gstatic.com', 'www.google.com', 'www.recaptcha.net', 'js.hcaptcha.com', 'hcaptcha.com'];
+    function siteOf(h) { return h.split('.').slice(-2).join('.'); }
+    var pageSite = siteOf(location.hostname);
+    var STACK_URL = /(https?:\\/\\/[^\\s()]+?):\\d+:\\d+/g;
+    // The other site whose script is running right now, or ''.
+    function foreignCaller() {
+      var stack = '';
+      try { stack = new Error().stack || ''; } catch (e) {}
+      STACK_URL.lastIndex = 0;
+      var m;
+      while ((m = STACK_URL.exec(stack))) {
+        var h = hostOf(m[1]);
+        if (h && siteOf(h) !== pageSite && SAFE_HOSTS.indexOf(h) === -1) return h;
+      }
+      return '';
+    }
+    var realCreate = Document.prototype.createElement;
+    Document.prototype.createElement = function () {
+      var el = realCreate.apply(this, arguments);
+      var cur = document.currentScript;
+      if (!(cur && cur.src && siteOf(hostOf(cur.src)) === pageSite)) {
+        var by = foreignCaller();
+        if (by) el.__mtBy = by;
+      }
+      return el;
+    };
+    function floats(el) {
+      if (!el.isConnected) return false;
+      if (getComputedStyle(el).position === 'fixed') return true;
+      var inner = el.querySelectorAll('*');
+      for (var i = 0; i < inner.length && i < 50; i++) {
+        if (getComputedStyle(inner[i]).position === 'fixed') return true;
+      }
+      return false;
+    }
+    function checkForeign(el) {
+      var by = el.__mtBy;
+      var drop = function () {
+        if (!el.isConnected) return;
+        el.remove();
+        caught[by] = true;
+        report('pop-up box', 'https://' + by);
+      };
+      if (el.tagName === 'IFRAME') return drop();
+      // Its look may come a moment after it's added.
+      setTimeout(function () { if (floats(el)) drop(); }, 0);
+      setTimeout(function () { if (floats(el)) drop(); }, 1000);
+    }
+
     // Anything from an ad network that is already in the page, or added
     // later, is removed.
     function sweep(root) {
@@ -214,6 +277,7 @@ export const AD_BLOCK_JS = `
           for (var j = 0; j < added.length; j++) {
             var node = added[j];
             if (node.nodeType !== 1) continue;
+            if (node.__mtBy) checkForeign(node);
             if (node.matches && node.matches('script[src], iframe[src], img[src], a[href]')) sweep(node.parentNode);
             else sweep(node);
           }
