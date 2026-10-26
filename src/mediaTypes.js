@@ -1004,22 +1004,41 @@ export const MEDIA_TYPES = {
     // (check the debug log's "Checking URL: ..." lines) and extraction
     // will skip until you're past it.
     // interstitialKeywords: ['some-marker-found-in-the-url'],
-    // Title comes from the first piece of text in the page's <h1>
-    // (usually the English title; some pages also put badges or a
-    // summary inside the <h1>) and the thumbnail from og:image. og:title often holds the original/
-    // romanized title instead, so it's saved as altTitle when it differs
-    // (minus a leading "Watch "). Many anime sites are single-page apps
-    // that swap the page client-side, so this waits until the <h1> is
-    // there and og:url points at the series in the current URL before
-    // reading anything — otherwise it could save the previous series'
-    // details. Opened from inside the site, the og: tags can be stale, so
-    // the cover comes from the page's AniList cover when there is one.
-    // No author for anime. malId comes from the page's link to
-    // myanimelist.net/anime/<id> (see malList.js).
+    // The series comes from the page's JSON-LD (a TVSeries / Movie block
+    // with its name, other names and picture), which the site keeps up to
+    // date as you move between pages inside it; the <h1> on an episode
+    // page is the episode's name, so it's only used when there's no
+    // JSON-LD. altTitle: the first other name in Latin letters. Cover: the
+    // page's AniList cover (.../cover/large/bx<id>-...), else the JSON-LD
+    // picture, og:image or the video's. malId: the page's link to
+    // myanimelist.net/anime/<id>, else asked of AniList by the cover's id
+    // (see malList.js). Many anime sites are single-page apps, so this
+    // waits until the page's own title names the series before reading
+    // anything — otherwise it could save the previous series' details.
+    // No author for anime.
     extractMetadataJs: `
       (function() {
         var attempts = 0;
+        function send(p) { window.ReactNativeWebView.postMessage(JSON.stringify(p)); }
+        function series() {
+          var blocks = document.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < blocks.length; i++) {
+            try {
+              var d = JSON.parse(blocks[i].textContent);
+              var list = Array.isArray(d) ? d : d['@graph'] || [d];
+              for (var j = 0; j < list.length; j++) {
+                if (/^(TVSeries|Movie|CreativeWorkSeries)$/.test(list[j]['@type']) && list[j].name) return list[j];
+              }
+            } catch (e) {}
+          }
+          return null;
+        }
+        function latin(t) {
+          for (var i = 0; i < t.length; i++) if (t.charCodeAt(i) > 0x24f && t.charAt(i) !== '\u2019') return false;
+          return true;
+        }
         function trySend() {
+          var ld = series();
           var ogTitle = document.querySelector('meta[property="og:title"]');
           var ogImage = document.querySelector('meta[property="og:image"]');
           var ogUrl = document.querySelector('meta[property="og:url"]');
@@ -1027,10 +1046,12 @@ export const MEDIA_TYPES = {
           var seriesId = location.pathname.split('/')[2] || '';
           // Opened from inside the site (e.g. its search results), the og:
           // tags can still be the previous page's; then the page's own
-          // title, once it names the <h1>, says it's ready.
+          // title, once it names the series, says it's ready.
           var ogFresh = !ogUrl || !seriesId || ogUrl.content.indexOf(seriesId) !== -1;
           var h1Text = h1 ? h1.textContent.trim() : '';
-          var ready = h1Text && (ogFresh || document.title.indexOf(h1Text.slice(0, 20)) !== -1);
+          var name = ld ? String(ld.name).trim() : h1Text;
+          var titled = document.title.indexOf(name.slice(0, 20)) !== -1;
+          var ready = name && (ld ? ogFresh && titled : ogFresh || titled);
           if (!ogFresh) {
             ogTitle = null;
             ogImage = null;
@@ -1042,49 +1063,71 @@ export const MEDIA_TYPES = {
             return;
           }
 
-          var title = null;
-          if (h1) {
-            var walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
-            var node;
-            while ((node = walker.nextNode())) {
-              if (node.textContent.trim()) {
-                title = node.textContent.trim();
-                break;
+          var title = ld ? name : null;
+          var altTitle = null;
+          if (ld) {
+            var alts = [].concat(ld.alternateName || []);
+            for (var a = 0; a < alts.length; a++) {
+              var alt = String(alts[a]).trim();
+              if (alt && alt !== title && latin(alt)) { altTitle = alt; break; }
+            }
+          } else {
+            if (h1) {
+              var walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
+              var node;
+              while ((node = walker.nextNode())) {
+                if (node.textContent.trim()) {
+                  title = node.textContent.trim();
+                  break;
+                }
               }
             }
+            altTitle = ogTitle && ogTitle.content
+              ? ogTitle.content.replace(/^Watch +/i, '').trim()
+              : null;
+            if (!title) {
+              title = altTitle || document.title || null;
+              altTitle = null;
+            }
+            if (altTitle === title) altTitle = null;
           }
-          var altTitle = ogTitle && ogTitle.content
-            ? ogTitle.content.replace(/^Watch +/i, '').trim()
-            : null;
-          if (!title) {
-            title = altTitle || document.title || null;
-            altTitle = null;
-          }
-          if (altTitle === title) altTitle = null;
-          // The cover: the page's AniList cover for its own AniList id
-          // (.../cover/large/bx<id>-...), else og:image, else the video's.
+          // The cover: the page's AniList cover (the series' own comes
+          // first; related titles' follow), whose file name has the
+          // AniList id.
           var aniLink = document.querySelector('a[href*="anilist.co/anime/"]');
           var aniMatch = aniLink && aniLink.href.match(/anilist[.]co[/]anime[/]([0-9]+)/);
           var cover = null;
-          if (aniMatch) {
-            var imgs = document.querySelectorAll('img[src*="/cover/"]');
-            for (var i = 0; i < imgs.length; i++) {
-              if (new RegExp('/[a-z]*' + aniMatch[1] + '-').test(imgs[i].src)) { cover = imgs[i].src; break; }
+          var aniId = aniMatch ? aniMatch[1] : null;
+          var imgs = document.querySelectorAll('img[src*="/cover/large/"], img[src*="/cover/"]');
+          for (var i = 0; i < imgs.length; i++) {
+            var idIn = imgs[i].src.match(/[/][a-z]*([0-9]+)-[^/]*$/);
+            if (!idIn) continue;
+            if (aniId ? idIn[1] === aniId : imgs[i].src.indexOf('/cover/large/') !== -1) {
+              cover = imgs[i].src;
+              aniId = idIn[1];
+              break;
             }
           }
           var video = document.querySelector('video');
-          var imageUrl = cover || (ogImage && ogImage.content) || (video && video.poster) || null;
+          var ldImage = ld && (typeof ld.image === 'string' ? ld.image : ld.image && ld.image.url);
+          var imageUrl = cover || ldImage || (ogImage && ogImage.content) || (video && video.poster) || null;
 
           var malLink = document.querySelector('a[href*="myanimelist.net/anime/"]');
           var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]anime[/]([0-9]+)/);
-
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            imageUrl: imageUrl,
-            title: title,
-            altTitle: altTitle,
-            author: null,
-            malId: malMatch ? Number(malMatch[1]) : null,
-          }));
+          var details = { imageUrl: imageUrl, title: title, altTitle: altTitle, author: null, malId: malMatch ? Number(malMatch[1]) : null };
+          if (details.malId || !aniId) return send(details);
+          fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ query: 'query($id:Int){Media(id:$id,type:ANIME){idMal}}', variables: { id: Number(aniId) } }),
+          })
+            .then(function(r) { return r.json(); })
+            .then(function(json) {
+              var mal = json && json.data && json.data.Media && json.data.Media.idMal;
+              if (mal) details.malId = mal;
+              send(details);
+            })
+            .catch(function() { send(details); });
         }
         trySend();
       })();

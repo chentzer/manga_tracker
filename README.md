@@ -88,11 +88,16 @@ adapt to whatever you actually use:
    the MyAnimeList link. The second site only records from the series
    page: its reader pages don't show the cover or author, so its script
    posts `{ skip: '…' }` there and nothing is saved from that page.
-   The anime script takes the cover from the page's AniList cover (the
-   `<img>` for the id in its anilist.co link) before `og:image`: a title
-   opened from inside the site (e.g. its search results) can still carry
-   the previous page's `og:` tags, so those are only used once `og:url`
-   names this title.
+   The anime script reads the series from the page's JSON-LD (a
+   `TVSeries` / `Movie` block: name, other names, picture) — on an
+   episode page the `<h1>` is the episode's name — and falls back to the
+   `<h1>` / `og:` tags only when there's none. The cover is the page's
+   AniList cover (`.../cover/large/bx<id>-…`) before the JSON-LD picture
+   or `og:image`, and without a MyAnimeList link the MAL id is asked of
+   AniList by that cover's id. A title opened from inside the site (e.g.
+   its search results) can still carry the previous page's details, so
+   nothing is read until `og:url` names this title and the page's title
+   names the series.
 4. **Manhwa sites, in `.env`** — `MANHWA_SITE_URL`, `MANHWA_SITE_2_URL` and
    `MANHWA_SITE_3_URL`. The ▾ site list at the top of the tab switches
    between them, and a title search's **Next ›** goes through them in that
