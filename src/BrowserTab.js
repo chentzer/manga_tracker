@@ -6,6 +6,7 @@ import { PAUSE_MEDIA_JS } from './MediaWebView';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture } from './imageHold';
+import { TAP_SLOP } from './touch';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Turns what was typed in the address bar into a URL to open:
@@ -193,7 +194,8 @@ const BrowserTab = forwardRef(function BrowserTab(
           onPress={() => webviewRef.current?.goBack()}
           disabled={!nav.canGoBack}
           style={styles.navButton}
-          hitSlop={6}
+          hitSlop={4}
+          accessibilityLabel="Back"
         >
           <Text style={[styles.navText, !nav.canGoBack && styles.navDisabled]}>‹</Text>
         </TouchableOpacity>
@@ -201,7 +203,8 @@ const BrowserTab = forwardRef(function BrowserTab(
           onPress={() => webviewRef.current?.goForward()}
           disabled={!nav.canGoForward}
           style={styles.navButton}
-          hitSlop={6}
+          hitSlop={4}
+          accessibilityLabel="Forward"
         >
           <Text style={[styles.navText, !nav.canGoForward && styles.navDisabled]}>›</Text>
         </TouchableOpacity>
@@ -227,7 +230,8 @@ const BrowserTab = forwardRef(function BrowserTab(
           onPress={() => (nav.loading ? webviewRef.current?.stopLoading() : webviewRef.current?.reload())}
           disabled={!source}
           style={styles.navButton}
-          hitSlop={6}
+          hitSlop={4}
+          accessibilityLabel={nav.loading ? 'Stop loading' : 'Reload'}
         >
           <Text style={[styles.navTextSmall, !source && styles.navDisabled]}>{nav.loading ? '✕' : '⟳'}</Text>
         </TouchableOpacity>
@@ -250,12 +254,12 @@ const BrowserTab = forwardRef(function BrowserTab(
                 setBlockedUrl(null);
                 open(url);
               }}
-              hitSlop={6}
+              hitSlop={TAP_SLOP}
             >
               <Text style={styles.blockedAction}>Open</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity onPress={() => setBlockedUrl(null)} hitSlop={6}>
+          <TouchableOpacity onPress={() => setBlockedUrl(null)} hitSlop={TAP_SLOP} accessibilityLabel="Dismiss">
             <Text style={styles.blockedAction}>✕</Text>
           </TouchableOpacity>
         </View>
@@ -320,7 +324,7 @@ const styles = themed(StyleSheet.create({
     gap: 6,
     backgroundColor: '#16213e',
   },
-  navButton: { minWidth: 28, alignItems: 'center', paddingVertical: 4 },
+  navButton: { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 26, lineHeight: 28, color: '#fff' },
   navTextSmall: { fontSize: 18, color: '#fff' },
   navDisabled: { color: '#4a5578' },

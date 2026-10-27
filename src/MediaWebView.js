@@ -41,6 +41,7 @@ import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './im
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName } from './gallery';
+import { TAP_SLOP } from './touch';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Asks the page for what a screenshot's file name needs (App.js →
@@ -195,31 +196,22 @@ async function downloadImageLocally(imageUrl, mediaType, sourceId, refererUrl) {
 // disable) — harmless to include on a type with no <video> element
 // (manga pages), since there'd just be nothing for a click to land on.
 //
-// Listens at the document level (bubbling phase) rather than attaching
-// directly to the <video> element — most players wrap the raw <video>
-// in their own overlay/controls layer that sits on top and intercepts
-// clicks itself, so a listener on <video> directly can simply never
-// receive anything (this was the actual cause of double-tap seeming to
-// do nothing at all on at least one real player). Delegating to
-// document and checking the click's position against the nearest
-// <video>'s bounding box works regardless of what's layered on top,
-// as long as the click isn't fully swallowed via stopPropagation
-// before it bubbles up — which most players don't do for a plain tap.
+// The site's player must not see a double tap as well: it would show
+// its controls (or run its own double-tap seek) on top of ours. So a tap over a <video> is held back, listening on
+// window in the capturing phase (this runs before the page's own
+// scripts, so it's first): pointerdown and touchstart go through, but
+// the tap's ending (pointerup, touchend and the mouse/click events the
+// browser makes from it) waits up to DOUBLE_TAP_MS. A second tap in
+// that time seeks: the first tap is cancelled for the player
+// (pointercancel / touchcancel) and the second one never reaches it.
+// Otherwise the held events are sent on to where they were going,
+// unchanged, so a single tap still shows the controls, just 300 ms
+// later. A drag (the seek bar, scrolling), a long press, a second
+// finger and taps on a link (video previews on list pages) aren't held.
 //
-// Uses plain 'click' (not touch events directly) since mixing both
-// would double-count a single tap as two, throwing off the double-tap
-// timing detection.
-//
-// Some players bind their own double-click handler (commonly for
-// toggling fullscreen — a known real-world case on some sites),
-// which fires as a genuinely separate native "dblclick" event
-// alongside our own two-click timing detection, meaning a double-tap
-// could seek AND toggle fullscreen at once. Fixed by also listening
-// for "dblclick" at the document level in the CAPTURING phase and
-// calling stopPropagation() — capture-phase listeners run before a
-// bubble-phase listener further down the tree (which is how a
-// player's own handler is presumably attached), so this reliably
-// intercepts it before the player ever sees the event.
+// The player's own "dblclick" handler (commonly for toggling
+// fullscreen) is blocked too,
+// for the same "landed over a video" area.
 function buildDoubleTapSeekJs(seconds) {
   return `
     (function() {
@@ -228,11 +220,14 @@ function buildDoubleTapSeekJs(seconds) {
 
       var DOUBLE_TAP_MS = 300;
       var SEEK_SECONDS = ${seconds};
-      var lastTapTime = 0;
+      var replayed = new WeakSet(); // events this script sent itself
+      var tap = null; // the tap being held: { x, y, start, target, pointerId, pointerType, touch, held, ended }
+      var timer = null; // after a held tap ends: sends it on unless a second tap comes
+      var swallowing = false; // the second tap of a double tap: hidden from the page
 
-      // Finds whichever <video> the click actually landed within,
-      // even if the click's real target was an overlay/controls
-      // element layered on top of it rather than the <video> itself.
+      // Finds whichever <video> the tap actually landed within,
+      // even if its real target was an overlay/controls element
+      // layered on top of it rather than the <video> itself.
       function findVideoUnderPoint(x, y) {
         var videos = document.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
@@ -244,30 +239,121 @@ function buildDoubleTapSeekJs(seconds) {
         return null;
       }
 
-      document.addEventListener('click', function(e) {
-        var video = findVideoUnderPoint(e.clientX, e.clientY);
-        if (!video) return;
-
-        var now = Date.now();
-        var isDoubleTap = (now - lastTapTime) < DOUBLE_TAP_MS;
-        // Reset after a successful double-tap so a third tap shortly
-        // after doesn't immediately chain into another seek.
-        lastTapTime = isDoubleTap ? 0 : now;
-        if (!isDoubleTap) return;
-
+      function seek(video, x) {
         var rect = video.getBoundingClientRect();
-        var isLeftHalf = (e.clientX - rect.left) < (rect.width / 2);
         var duration = video.duration || Infinity;
-        if (isLeftHalf) {
+        if (x - rect.left < rect.width / 2) {
           video.currentTime = Math.max(0, video.currentTime - SEEK_SECONDS);
         } else {
           video.currentTime = Math.min(duration, video.currentTime + SEEK_SECONDS);
         }
+      }
+
+      function send(target, e) {
+        replayed.add(e);
+        try { target.dispatchEvent(e); } catch (err) {}
+      }
+
+      // A copy of a held event (an event can't be sent twice).
+      function copyOf(e) {
+        var init = {};
+        for (var k in e) init[k] = e[k];
+        ['touches', 'targetTouches', 'changedTouches'].forEach(function(k) {
+          if (e[k]) init[k] = Array.prototype.slice.call(e[k]);
+        });
+        return new e.constructor(e.type, init);
+      }
+
+      // Sends the held tap on, as it was.
+      function release() {
+        clearTimeout(timer);
+        timer = null;
+        var t = tap;
+        tap = null;
+        if (!t) return;
+        t.held.forEach(function(e) {
+          try { send(e.target, copyOf(e)); } catch (err) {}
+        });
+      }
+
+      // The player saw the first tap start; tell it the tap was called off.
+      function cancel(t) {
+        try {
+          send(t.target, new PointerEvent('pointercancel', {
+            bubbles: true, pointerId: t.pointerId, pointerType: t.pointerType, isPrimary: true
+          }));
+        } catch (err) {}
+        if (t.touch) {
+          try {
+            send(t.target, new TouchEvent('touchcancel', {
+              bubbles: true, touches: [], targetTouches: [], changedTouches: [t.touch]
+            }));
+          } catch (err) {}
+        }
+      }
+
+      window.addEventListener('pointerdown', function(e) {
+        if (replayed.has(e) || !e.isPrimary) return;
+        var video = findVideoUnderPoint(e.clientX, e.clientY);
+        if (tap && tap.ended && video) {
+          // The second tap: seek, and keep both taps from the player.
+          clearTimeout(timer);
+          timer = null;
+          cancel(tap);
+          tap = null;
+          swallowing = true;
+          e.stopPropagation();
+          seek(video, e.clientX);
+          return;
+        }
+        release();
+        swallowing = false;
+        if (!video || (e.target.closest && e.target.closest('a[href]'))) return;
+        tap = {
+          x: e.clientX, y: e.clientY, start: Date.now(), target: e.target,
+          pointerId: e.pointerId, pointerType: e.pointerType, touch: null, held: [], ended: false
+        };
+      }, true);
+
+      window.addEventListener('touchstart', function(e) {
+        if (replayed.has(e)) return;
+        if (swallowing) return e.stopPropagation();
+        if (e.touches.length > 1) return release();
+        if (tap && !tap.ended && !tap.touch) tap.touch = e.changedTouches[0];
+      }, true);
+
+      window.addEventListener('pointermove', function(e) {
+        if (replayed.has(e)) return;
+        if (swallowing) return e.stopPropagation();
+        if (tap && !tap.ended && Math.abs(e.clientX - tap.x) + Math.abs(e.clientY - tap.y) > 10) release();
+      }, true);
+
+      window.addEventListener('touchmove', function(e) {
+        if (swallowing && !replayed.has(e)) e.stopPropagation();
+      }, true);
+
+      ['pointerup', 'touchend', 'mousedown', 'mouseup', 'click'].forEach(function(type) {
+        window.addEventListener(type, function(e) {
+          if (replayed.has(e)) return;
+          if (swallowing) {
+            e.stopPropagation();
+            // No mouse events or click from it either.
+            if (type === 'touchend' && e.cancelable) e.preventDefault();
+            if (type === 'click') e.preventDefault();
+            return;
+          }
+          if (!tap) return;
+          if (!tap.ended && Date.now() - tap.start > 500) return release(); // a long press
+          e.stopPropagation();
+          if (type === 'click') e.preventDefault(); // its copy does what it would have
+          tap.held.push(e);
+          if (type === 'pointerup') {
+            tap.ended = true;
+            timer = setTimeout(release, DOUBLE_TAP_MS);
+          }
+        }, true);
       });
 
-      // Blocks the player's own native double-click behavior (e.g.
-      // fullscreen toggle) from firing alongside our seek above, for
-      // the same "click landed over a video" area.
       document.addEventListener(
         'dblclick',
         function(e) {
@@ -1599,7 +1685,7 @@ const MediaWebView = forwardRef(function MediaWebView({
               </Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={8}>
+          <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={TAP_SLOP} accessibilityLabel="Stop searching">
             <Text style={styles.titleSearchClose}>✕</Text>
           </TouchableOpacity>
         </View>

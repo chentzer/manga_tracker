@@ -76,6 +76,6 @@ const styles = themed(
     action: { alignItems: 'center', paddingVertical: 12, marginTop: 10, borderRadius: 8, backgroundColor: '#e3ecfa' },
     actionText: { color: '#0f3460', fontSize: 15, fontWeight: '600' },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
-    closeText: { color: '#888', fontSize: 15 },
+    closeText: { color: '#666', fontSize: 15 },
   })
 );

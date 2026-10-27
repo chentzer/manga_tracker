@@ -41,6 +41,8 @@ import {
 } from './artists';
 import FocusImage from './FocusImage';
 import RatePrompt from './RatePrompt';
+import { TAP_SLOP } from './touch';
+import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
 import Marquee from './Marquee';
 
@@ -268,7 +270,7 @@ function TagEditor({ tags, onChange }) {
         <TextInput
           style={styles.tagInput}
           placeholder="Add a tag…"
-          placeholderTextColor={themeColor('#999')}
+          placeholderTextColor={themeColor('#767676')}
           value={input}
           onChangeText={setInput}
           onSubmitEditing={addTag}
@@ -452,7 +454,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
                 value={text}
                 onChangeText={setText}
                 placeholder="New group name, or search"
-                placeholderTextColor={themeColor('#999')}
+                placeholderTextColor={themeColor('#767676')}
                 onSubmitEditing={() => join(text)}
                 returnKeyType="done"
               />
@@ -634,7 +636,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                   onSubmitEditing={saveName}
                   onBlur={saveName}
                   placeholder="Group name"
-                  placeholderTextColor={themeColor('#999')}
+                  placeholderTextColor={themeColor('#767676')}
                   returnKeyType="done"
                 />
               </View>
@@ -668,13 +670,23 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                 </TouchableOpacity>
                 {editing ? (
                   <View style={styles.groupPageTools}>
-                    <TouchableOpacity onPress={() => move(i, i - 1)} disabled={i === 0} hitSlop={6}>
+                    <TouchableOpacity
+                      onPress={() => move(i, i - 1)}
+                      disabled={i === 0}
+                      style={styles.groupTool}
+                      accessibilityLabel="Move up"
+                    >
                       <Text style={[styles.groupArrow, i === 0 && styles.groupArrowOff]}>▲</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => move(i, i + 1)} disabled={i === members.length - 1} hitSlop={6}>
+                    <TouchableOpacity
+                      onPress={() => move(i, i + 1)}
+                      disabled={i === members.length - 1}
+                      style={styles.groupTool}
+                      accessibilityLabel="Move down"
+                    >
                       <Text style={[styles.groupArrow, i === members.length - 1 && styles.groupArrowOff]}>▼</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => onLeave(p)} hitSlop={6}>
+                    <TouchableOpacity onPress={() => onLeave(p)} style={styles.groupTool} accessibilityLabel="Take out of the group">
                       <Text style={styles.groupRemove}>✕</Text>
                     </TouchableOpacity>
                   </View>
@@ -696,7 +708,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                       value={search}
                       onChangeText={setSearch}
                       placeholder="Search titles…"
-                      placeholderTextColor={themeColor('#999')}
+                      placeholderTextColor={themeColor('#767676')}
                     />
                     {candidates.map((e) => (
                       <TouchableOpacity key={e.source_id} style={styles.groupRow} onPress={() => onWriteGroup([...members, e], name)}>
@@ -1092,7 +1104,7 @@ function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles,
               <View style={[styles.detailImage, styles.thumbPlaceholder]} />
             )}
             {artist.cover && !moving ? (
-              <TouchableOpacity onPress={() => setDraftFocus(focus || { x: 0.5, y: 0.5, zoom: 1 })} hitSlop={6}>
+              <TouchableOpacity onPress={() => setDraftFocus(focus || { x: 0.5, y: 0.5, zoom: 1 })} hitSlop={TAP_SLOP}>
                 <Text style={styles.moveText}>✥ Move picture</Text>
               </TouchableOpacity>
             ) : null}
@@ -1224,6 +1236,8 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
 export default function EntryList({ active = true, reloadKey = 0, focusKey = null, onFocusHandled, onOpenInTab }) {
   const dark = useDarkMode(); // redraws in the other colours when Dark mode is switched
   const [entries, setEntries] = useState([]);
+  // Entries deleted but still offered for Undo (undo.js): hidden until then.
+  const hiddenKeys = useRef(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(null); // null = all types
   const [sort, setSort] = useState('updated');
@@ -1244,11 +1258,14 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   }, [toRateVisible, toRate.count]);
 
   const load = useCallback(() => {
-    setEntries(getAllEntries(filter));
+    setEntries(getAllEntries(filter).filter((e) => !hiddenKeys.current.has(`${e.media_type}:${e.source_id}`)));
     setToRate(findToRate(getAllEntries()));
   }, [filter]);
 
   useEffect(load, [load]);
+  // For Undo's commit, which runs after `load` may have changed.
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   // Series you're reading that are still coming out have no total. Opening
   // the Library asks AniList about them again (each at most once a day —
@@ -1807,28 +1824,30 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     if (!selectedKey && !selectedArtistRef) setRandomOpened(false);
   }, [selectedKey, selectedArtistRef]);
 
+  // Gone at once, with Undo for a few seconds (undo.js); only then is it
+  // deleted with its thumbnail, and from the Drive backup.
   const handleDeleteEntry = useCallback(
     (item) => {
-      Alert.alert(
-        'Delete this entry?',
-        `This permanently removes "${item.title || item.source_id}" and its saved thumbnail from this phone. This can't be undone. (Anything already backed up to Google Drive is left untouched there.)`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              if (item.local_image_path) {
-                await FileSystem.deleteAsync(item.local_image_path, { idempotent: true }).catch(() => {});
-              }
-              deleteEntry(item.source_id, item.media_type);
-              setSelectedKey(null); // close the detail modal since its entry no longer exists
-              load();
-              backupSilently(); // reflect the removal in the Drive CSV too
-            },
-          },
-        ]
-      );
+      const key = `${item.media_type}:${item.source_id}`;
+      hiddenKeys.current.add(key);
+      setSelectedKey(null); // close the detail modal since its entry is gone
+      load();
+      offerUndo({
+        message: `Deleted "${item.title || item.source_id}"`,
+        commit: async () => {
+          if (item.local_image_path) {
+            await FileSystem.deleteAsync(item.local_image_path, { idempotent: true }).catch(() => {});
+          }
+          deleteEntry(item.source_id, item.media_type);
+          hiddenKeys.current.delete(key);
+          loadRef.current();
+          backupSilently(); // reflect the removal in the Drive CSV too
+        },
+        undo: () => {
+          hiddenKeys.current.delete(key);
+          loadRef.current();
+        },
+      });
     },
     [load, backupSilently]
   );
@@ -1945,12 +1964,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               value={peopleQuery}
               onChangeText={setPeopleQuery}
               placeholder="Search groups…"
-              placeholderTextColor={themeColor('#999')}
+              placeholderTextColor={themeColor('#767676')}
               autoCorrect={false}
               returnKeyType="search"
             />
             {peopleQuery ? (
-              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')}>
+              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')} accessibilityLabel="Clear">
                 <Text style={styles.artistFilterClear}>✕</Text>
               </TouchableOpacity>
             ) : null}
@@ -1999,12 +2018,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               value={peopleQuery}
               onChangeText={setPeopleQuery}
               placeholder="Search artists…"
-              placeholderTextColor={themeColor('#999')}
+              placeholderTextColor={themeColor('#767676')}
               autoCorrect={false}
               returnKeyType="search"
             />
             {peopleQuery ? (
-              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')}>
+              <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')} accessibilityLabel="Clear">
                 <Text style={styles.artistFilterClear}>✕</Text>
               </TouchableOpacity>
             ) : null}
@@ -2058,7 +2077,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           <Text style={styles.filterToggleArrow}>{filtersOpen ? '▴' : '▾'}</Text>
         </TouchableOpacity>
         {activeFilterSummary.length ? (
-          <TouchableOpacity style={styles.artistFilterClearButton} onPress={clearFilters}>
+          <TouchableOpacity style={styles.artistFilterClearButton} onPress={clearFilters} accessibilityLabel="Clear">
             <Text style={styles.artistFilterClear}>✕</Text>
           </TouchableOpacity>
         ) : null}
@@ -2097,7 +2116,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           </Text>
         </TouchableOpacity>
         {artistFilter ? (
-          <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setArtistFilter('')}>
+          <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setArtistFilter('')} accessibilityLabel="Clear">
             <Text style={styles.artistFilterClear}>✕</Text>
           </TouchableOpacity>
         ) : null}
@@ -2426,6 +2445,8 @@ const styles = themed(StyleSheet.create({
     backgroundColor: '#fde2e2',
     borderRadius: 8,
     paddingHorizontal: 14,
+    minWidth: 48,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   artistFilterClear: { color: '#c0392b', fontSize: 16, fontWeight: '600' },
@@ -2438,7 +2459,7 @@ const styles = themed(StyleSheet.create({
   artistSectionHeader: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#888',
+    color: '#666',
     textTransform: 'uppercase',
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -2460,7 +2481,7 @@ const styles = themed(StyleSheet.create({
   logTitle: { fontSize: 17, fontWeight: '700' },
   logClose: { color: '#0f3460', fontSize: 15 },
   logScroll: { flex: 1 },
-  logLine: { padding: 16, color: '#888', fontSize: 14 },
+  logLine: { padding: 16, color: '#666', fontSize: 14 },
   list: { flex: 1 },
   row: {
     flexDirection: 'row',
@@ -2488,7 +2509,7 @@ const styles = themed(StyleSheet.create({
   conflictTitle: { fontSize: 14, fontWeight: '700', color: '#b9770e' },
   conflictHint: { fontSize: 12, color: '#8a6d3b', marginTop: 2, marginBottom: 6 },
   conflictRow: { marginTop: 6 },
-  conflictLabel: { fontSize: 12, color: '#888', marginBottom: 4 },
+  conflictLabel: { fontSize: 12, color: '#666', marginBottom: 4 },
   conflictChoices: { flexDirection: 'row', gap: 6 },
   conflictChoice: {
     flex: 1,
@@ -2498,7 +2519,7 @@ const styles = themed(StyleSheet.create({
     borderColor: '#f0d9a8',
     padding: 8,
   },
-  conflictWhich: { fontSize: 11, color: '#888' },
+  conflictWhich: { fontSize: 11, color: '#666' },
   conflictValue: { fontSize: 13, color: '#333', marginTop: 2 },
   detailNextButton: {
     flex: 1,
@@ -2516,7 +2537,7 @@ const styles = themed(StyleSheet.create({
     marginBottom: 32,
     maxHeight: '85%',
   },
-  randomHint: { fontSize: 12, color: '#888', marginTop: 4 },
+  randomHint: { fontSize: 12, color: '#666', marginTop: 4 },
   randomPickButton: { backgroundColor: '#e94560' },
   topButtons: { flexDirection: 'row', gap: 8, marginHorizontal: 10, marginTop: 8 },
   topButton: { flex: 1, marginHorizontal: 0, marginTop: 0 },
@@ -2582,7 +2603,7 @@ const styles = themed(StyleSheet.create({
   zoomChipActive: { backgroundColor: '#0f3460' },
   zoomText: { color: '#333', fontSize: 12 },
   zoomTextActive: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  linkHint: { fontSize: 11, color: '#999', marginBottom: 6 },
+  linkHint: { fontSize: 11, color: '#666', marginBottom: 6 },
   focusButtons: { flexDirection: 'row', gap: 8, marginBottom: 6 },
   focusButton: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
   focusButtonText: { color: '#333', fontWeight: '600' },
@@ -2633,7 +2654,7 @@ const styles = themed(StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  countOf: { fontSize: 13, color: '#888' },
+  countOf: { fontSize: 13, color: '#666' },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dateInput: {
     minWidth: 140,
@@ -2643,7 +2664,7 @@ const styles = themed(StyleSheet.create({
     paddingVertical: 7,
   },
   dateValue: { fontSize: 14, color: '#222' },
-  datePlaceholder: { fontSize: 14, color: '#999' },
+  datePlaceholder: { fontSize: 14, color: '#767676' },
   dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e3ecfa' },
   dateButtonText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
   switchRow: {
@@ -2671,8 +2692,8 @@ const styles = themed(StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
-  status: { fontSize: 12, color: '#888' },
-  empty: { textAlign: 'center', marginTop: 40, color: '#999', paddingHorizontal: 24 },
+  status: { fontSize: 12, color: '#666' },
+  empty: { textAlign: 'center', marginTop: 40, color: '#666', paddingHorizontal: 24 },
   detailOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -2687,7 +2708,7 @@ const styles = themed(StyleSheet.create({
   },
   detailImage: { width: '100%', height: 220, borderRadius: 10, backgroundColor: '#eee' },
   detailTitle: { fontSize: 20, fontWeight: '700', marginTop: 14 },
-  detailAltTitle: { fontSize: 14, color: '#888', marginTop: 2, fontStyle: 'italic' },
+  detailAltTitle: { fontSize: 14, color: '#666', marginTop: 2, fontStyle: 'italic' },
   detailAuthor: { fontSize: 15, color: '#666', marginTop: 4 },
   detailRow: {
     flexDirection: 'row',
@@ -2696,7 +2717,7 @@ const styles = themed(StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#eee',
   },
-  detailLabel: { fontSize: 13, color: '#888', marginTop: 12, marginBottom: 4 },
+  detailLabel: { fontSize: 13, color: '#666', marginTop: 12, marginBottom: 4 },
   detailValue: { fontSize: 14, color: '#333' },
   detailUrlButton: {
     marginTop: 14,
@@ -2792,11 +2813,12 @@ const styles = themed(StyleSheet.create({
   groupPageThumb: { width: 44, height: 60, borderRadius: 4, backgroundColor: '#eee' },
   groupPageText: { flex: 1 },
   groupPageItemTitle: { color: '#333', fontSize: 14, fontWeight: '600' },
-  groupPageTools: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  groupPageTools: { flexDirection: 'row', alignItems: 'center' },
+  groupTool: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   groupRemove: { fontSize: 16, color: '#c0392b', fontWeight: '700' },
   groupActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 8 },
   groupPanel: { marginTop: 10 },
-  groupHint: { fontSize: 13, color: '#888', marginTop: 8 },
+  groupHint: { fontSize: 13, color: '#666', marginTop: 8 },
   groupButtonOff: { opacity: 0.4 },
   groupSuggestion: {
     alignSelf: 'flex-start',

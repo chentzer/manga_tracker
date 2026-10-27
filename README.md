@@ -582,16 +582,18 @@ so nothing renders blank.
   `doubleTapSeekSeconds` enables double-tap-to-seek on any `<video>`
   element — left half rewinds, right half fast-forwards, YouTube-style
   — via `buildDoubleTapSeekJs()`; harmless to leave on a type with no
-  video (nothing for a click to land on). Listens at the `document`
-  level rather than attaching directly to `<video>` — most players wrap
-  the raw element in their own overlay/controls layer that intercepts
-  clicks before they'd ever reach it directly, which was the actual
-  cause of double-tap seeming to do nothing at all on at least one real
-  player. A click's position is checked against the nearest `<video>`'s
-  bounding box to figure out which one (if any) it landed on, and which
-  half. Seek detection itself
-  uses plain `click` events with manual timing rather than native
-  `dblclick`. Some players bind their own native double-click handler
+  video (nothing for a click to land on). Listens on `window` in the
+  capturing phase rather than on `<video>` — players wrap the raw
+  element in their own overlay/controls layer, so a listener on
+  `<video>` never hears anything; a tap's position is checked against
+  each `<video>`'s bounding box instead. The player mustn't see the
+  double tap as well (it would show its controls, or run its own seek),
+  so a tap over a video is held for 300 ms: a second tap in that time
+  seeks, the first is cancelled for the player (`pointercancel` /
+  `touchcancel`) and the second never reaches it; otherwise the held
+  events are passed on unchanged, so a single tap still shows the
+  controls, 300 ms later. Drags, long presses, a second finger and taps
+  on links aren't held. Some players bind their own native double-click handler
   (commonly for fullscreen — confirmed as a real conflict on at least
   one site), which fires as a genuinely separate event alongside the
   click-based detection above and would otherwise seek AND toggle
@@ -788,7 +790,7 @@ so nothing renders blank.
   picture shows (drag and zoom; `src/FocusImage.js`, kept on this phone).
   **🎲 Random** can pick an artist instead of a title (**Pick a: 🎭
   Artist**), where the Rating row's ♥ means your ★ favourite artists.
-- **Notepad** (`src/Notepad.js`, the 📝 button on the Library) — notes as
+- **Notepad** (`src/Notepad.js`, a section of the bottom bar) — notes as
   lists of items (text or links, which open with a tap). The built-in
   **Inbox** is for jotting things down, and is where text and links
   shared from other apps land (select them, then **Share › AniManga
@@ -869,10 +871,12 @@ so nothing renders blank.
   "Clear All" button wipes *every* entry the same way, also
   after confirming first.
 - `App.js` — wraps everything in `SafeAreaProvider` + `AppLock`, then
-  renders the tab bar built from the media type list plus the Library
-  tab. On browsing tabs the tab bar hides once the page hasn't scrolled
-  for 3 seconds (`TAB_BAR_HIDE_MS`; taps on the page don't count), and
-  comes back when you pull down at the very top of the page. Pulling
+  renders a bottom bar with four sections (Material's 3–5): **Browse**
+  (the site tabs — Manga, Manhwa, Anime — picked in a row at the top;
+  Browse returns to the last one), **Library**, **Browser** and
+  **Notepad**. On browsing tabs both bars hide once the page hasn't
+  scrolled for 3 seconds (`TAB_BAR_HIDE_MS`; taps on the page don't
+  count), and come back when you pull down at the very top of the page. Pulling
   further (about 160px) and letting go reloads the page, with a small
   "Pull to refresh" / "Release to refresh" pill at the top meanwhile
   (Android's web view has no pull-to-refresh of its own). At the very
@@ -882,7 +886,14 @@ so nothing renders blank.
   the bottom, so a swipe that only reaches the end of a chapter on the
   way never jumps away by itself.
   `src/tabBarWatch.js`, run inside each page, handles these and reports
-  scrolling; the bar always shows on the Library tab.
+  scrolling; the bars always show on the Library and Notepad.
+  Deleting a Library entry or a Notepad item happens at once with an
+  **Undo** bar for 5 seconds instead of an "Are you sure?" (`src/undo.js`,
+  `src/UndoBar.js`); it's only really deleted (and taken off Drive) after
+  that, when another delete comes, or when the app goes to the
+  background. The app turns with the phone (no portrait lock), grey
+  text meets 4.5:1 contrast, and small controls have 48 dp tap areas
+  (`src/touch.js` `TAP_SLOP`) and TalkBack labels.
   All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
   so each webview keeps its scroll position and navigation history when

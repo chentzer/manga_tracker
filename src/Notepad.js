@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   FlatList,
   ScrollView,
-  Modal,
   Alert,
   Linking,
   StyleSheet,
@@ -23,6 +22,8 @@ import {
   deleteNotebook,
 } from './db';
 import { syncNotepadToDrive, onNotepadSynced } from './notepadSync';
+import { TAP_SLOP } from './touch';
+import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Splits text into plain and link parts so links inside a note (or a
@@ -47,7 +48,7 @@ function LinkifiedText({ content, style, linkStyle }) {
   );
 }
 
-// Full-screen notepad (the 📝 button on the Library). Notes are lists of
+// The Notepad tab (bottom bar). Notes are lists of
 // items (text or links). The Inbox is built in and is where everything
 // shared from other apps lands — no unlock needed, so no picking a
 // destination at share time; items get moved into a named note
@@ -59,9 +60,10 @@ function LinkifiedText({ content, style, linkStyle }) {
 // notepadSync.js.
 //
 //
-// refreshKey: bumped by App.js when something is shared in, so an
-// already open notepad reloads.
-export default function Notepad({ visible, onClose, refreshKey }) {
+// visible: it's the tab on screen. refreshKey: bumped by App.js when
+// something is shared in, so an already open notepad reloads. Its ref's
+// goBack() closes an open overlay for the Back button (true when it did).
+export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
   const dark = useDarkMode(); // redraws in the other colours when Dark mode is switched
   const [notebooks, setNotebooks] = useState([]);
   const [counts, setCounts] = useState({ inbox: 0 });
@@ -74,6 +76,8 @@ export default function Notepad({ visible, onClose, refreshKey }) {
   const [newNoteOpen, setNewNoteOpen] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [movingItem, setMovingItem] = useState(null);
+  // Items deleted but still offered for Undo (undo.js): hidden until then.
+  const hiddenIds = useRef(new Set());
 
   const reload = useCallback(() => {
     const books = getNotebooks();
@@ -83,7 +87,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
     if (!stillThere) setSelectedId(null);
     setNotebooks(books);
     setCounts(getNoteCounts());
-    setItems(getNotes(current));
+    setItems(getNotes(current).filter((n) => !hiddenIds.current.has(n.id)));
   }, [selectedId]);
 
   useEffect(() => {
@@ -119,18 +123,23 @@ export default function Notepad({ visible, onClose, refreshKey }) {
     changed();
   };
 
+  // Gone at once, with Undo for a few seconds (undo.js); then it's
+  // deleted here and on Drive.
   const handleDeleteItem = (item) => {
-    Alert.alert('Delete this item?', 'It’s also removed from Drive.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          deleteNote(item.id);
-          changed();
-        },
+    hiddenIds.current.add(item.id);
+    reload();
+    offerUndo({
+      message: 'Item deleted',
+      commit: () => {
+        hiddenIds.current.delete(item.id);
+        deleteNote(item.id);
+        changed();
       },
-    ]);
+      undo: () => {
+        hiddenIds.current.delete(item.id);
+        reloadRef.current();
+      },
+    });
   };
 
   const handleMoveTo = (notebookId) => {
@@ -185,26 +194,22 @@ export default function Notepad({ visible, onClose, refreshKey }) {
     );
   };
 
-  // Back button closes an open overlay first, then the notepad.
-  const handleRequestClose = () => {
-    if (movingItem) setMovingItem(null);
-    else if (newNoteOpen) setNewNoteOpen(false);
-    else onClose();
-  };
+  // Back button closes an open overlay first.
+  useImperativeHandle(ref, () => ({
+    goBack: () => {
+      if (movingItem) setMovingItem(null);
+      else if (newNoteOpen) setNewNoteOpen(false);
+      else return false;
+      return true;
+    },
+  }));
 
   const tabs = [{ id: null, title: INBOX_TITLE, count: counts.inbox || 0 }].concat(
     notebooks.map((b) => ({ id: b.id, title: b.title, count: counts[b.id] || 0 }))
   );
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={handleRequestClose}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Notepad</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={8}>
-            <Text style={styles.closeText}>Close</Text>
-          </TouchableOpacity>
-        </View>
 
         <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
@@ -235,7 +240,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
             {selectedTitle}
           </Text>
           {selectedId != null ? (
-            <TouchableOpacity onPress={handleDeleteNotebook} hitSlop={8}>
+            <TouchableOpacity onPress={handleDeleteNotebook} hitSlop={TAP_SLOP}>
               <Text style={styles.deleteNoteText}>Delete note</Text>
             </TouchableOpacity>
           ) : null}
@@ -245,7 +250,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
           <TextInput
             style={styles.input}
             placeholder={`Add to ${selectedTitle}… (text or a link)`}
-            placeholderTextColor={themeColor('#999')}
+            placeholderTextColor={themeColor('#767676')}
             value={input}
             onChangeText={setInput}
             multiline
@@ -274,10 +279,14 @@ export default function Notepad({ visible, onClose, refreshKey }) {
                 <LinkifiedText content={item.content} style={styles.itemText} linkStyle={styles.link} />
                 <Text style={styles.itemDate}>{item.created_at}</Text>
               </View>
-              <TouchableOpacity onPress={() => setMovingItem(item)} hitSlop={8} style={styles.itemAction}>
+              <TouchableOpacity onPress={() => setMovingItem(item)} style={styles.itemAction}>
                 <Text style={styles.moveText}>Move</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteItem(item)} hitSlop={8} style={styles.itemAction}>
+              <TouchableOpacity
+                onPress={() => handleDeleteItem(item)}
+                style={styles.itemAction}
+                accessibilityLabel="Delete"
+              >
                 <Text style={styles.deleteText}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -292,7 +301,7 @@ export default function Notepad({ visible, onClose, refreshKey }) {
               <TextInput
                 style={styles.sheetInput}
                 placeholder="e.g. Grocery list"
-                placeholderTextColor={themeColor('#999')}
+                placeholderTextColor={themeColor('#767676')}
                 value={newNoteTitle}
                 onChangeText={setNewNoteTitle}
                 onSubmitEditing={handleCreateNote}
@@ -346,22 +355,11 @@ export default function Notepad({ visible, onClose, refreshKey }) {
           </View>
         ) : null}
       </View>
-    </Modal>
   );
-}
+});
 
 const styles = themed(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: '#1a1a2e',
-  },
-  title: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  closeText: { color: '#e94560', fontSize: 15, fontWeight: '600' },
   tabs: { paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
   tab: {
     paddingHorizontal: 14,
@@ -403,7 +401,7 @@ const styles = themed(StyleSheet.create({
   // Items are separate soft cards with generous padding and line
   // height, rather than tight rows divided by hairlines.
   list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 32 },
-  empty: { color: '#888', textAlign: 'center', marginTop: 40, paddingHorizontal: 24, fontSize: 15, lineHeight: 23 },
+  empty: { color: '#666', textAlign: 'center', marginTop: 40, paddingHorizontal: 24, fontSize: 15, lineHeight: 23 },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -418,8 +416,8 @@ const styles = themed(StyleSheet.create({
   itemBody: { flex: 1, paddingRight: 4 },
   itemText: { fontSize: 16, lineHeight: 24, color: '#222' },
   link: { color: '#1a73e8', textDecorationLine: 'underline' },
-  itemDate: { fontSize: 12, color: '#999', marginTop: 10 },
-  itemAction: { paddingHorizontal: 10, paddingVertical: 4, minWidth: 40, alignItems: 'center' },
+  itemDate: { fontSize: 12, color: '#666', marginTop: 10 },
+  itemAction: { paddingHorizontal: 10, minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   moveText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
   deleteText: { color: '#c0392b', fontSize: 17, fontWeight: '600' },
   overlay: {
@@ -447,5 +445,5 @@ const styles = themed(StyleSheet.create({
   moveList: { flexGrow: 0 },
   moveRow: { paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
   moveRowText: { fontSize: 16, color: '#222' },
-  moveHint: { color: '#888', fontSize: 13, paddingVertical: 12 },
+  moveHint: { color: '#666', fontSize: 13, paddingVertical: 12 },
 }));

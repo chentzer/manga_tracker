@@ -7,7 +7,7 @@ export default {
     name: 'AniManga Tracker',
     slug: 'manga-tracker',
     version: '1.0.0',
-    orientation: 'portrait',
+    orientation: 'default',
     userInterfaceStyle: 'automatic',
     // An open book with a play button: manga and anime.
     icon: './assets/icon.png',

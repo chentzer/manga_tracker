@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { getSetting, setSetting } from './db';
 import { MEDIA_TYPES } from './mediaTypes';
+import { TAP_SLOP } from './touch';
 import { themed, useDarkMode } from './theme';
 
 // The Library's ⭐ To rate button (EntryList.js): titles waiting for a score.
@@ -59,7 +60,7 @@ function Row({ entry, label, onRate, onSkip }) {
         </View>
         <Text style={styles.rateText}>Rate</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => onSkip(entry)} hitSlop={8} style={styles.skip}>
+      <TouchableOpacity onPress={() => onSkip(entry)} hitSlop={TAP_SLOP} style={styles.skip}>
         <Text style={styles.skipText}>Skip</Text>
       </TouchableOpacity>
     </View>
@@ -125,8 +126,8 @@ const styles = themed(
     card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, maxHeight: '85%' },
     heading: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 6 },
     scroll: { flexGrow: 0 },
-    section: { fontSize: 13, fontWeight: '700', color: '#888', textTransform: 'uppercase', marginTop: 12 },
-    hint: { fontSize: 12, color: '#888', marginTop: 4, marginBottom: 4 },
+    section: { fontSize: 13, fontWeight: '700', color: '#666', textTransform: 'uppercase', marginTop: 12 },
+    hint: { fontSize: 12, color: '#666', marginTop: 4, marginBottom: 4 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
     rowMain: {
       flex: 1,
@@ -142,11 +143,11 @@ const styles = themed(
     thumbEmpty: { backgroundColor: '#eee' },
     rowText: { flex: 1 },
     rowTitle: { fontSize: 14, fontWeight: '600', color: '#222' },
-    rowMeta: { fontSize: 12, color: '#888', marginTop: 2 },
+    rowMeta: { fontSize: 12, color: '#666', marginTop: 2 },
     rateText: { color: '#e94560', fontWeight: '700', fontSize: 14 },
     skip: { paddingHorizontal: 4 },
-    skipText: { color: '#888', fontSize: 13 },
+    skipText: { color: '#666', fontSize: 13 },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
-    closeText: { color: '#888', fontSize: 15 },
+    closeText: { color: '#666', fontSize: 15 },
   })
 );

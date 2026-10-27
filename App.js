@@ -36,6 +36,7 @@ import {
 } from './src/backup';
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
+import UndoBar from './src/UndoBar';
 import { syncNotepadToDrive } from './src/notepadSync';
 import ProcessText from './modules/process-text/src';
 import { classify } from './src/quickSearch';
@@ -59,7 +60,7 @@ import AppLock, { useAppLockSetting } from './src/AppLock';
 import { galleryFolderFor } from './src/gallery';
 import { fileScreenshot, buildGalleryFileName } from './src/screenshots';
 import { suppressNextRelock, isRelockSuppressed } from './src/relockGuard';
-import { themed, useDarkMode, setDarkMode } from './src/theme';
+import { themed, themeColor, useDarkMode, setDarkMode } from './src/theme';
 
 // Tabs = one per media type (from config, so this never needs manual
 // updates when a type is added) + a unified library at the end.
@@ -68,11 +69,20 @@ const SITE_TAB_KEYS = MEDIA_TYPE_LIST.map((m) => m.key);
 // …plus the Browser tab (src/BrowserTab.js), any site, nothing recorded.
 const BROWSING_TAB_KEYS = [...SITE_TAB_KEYS, 'browser'];
 
-const TABS = [
-  ...MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label })),
-  { key: 'browser', label: 'Browser' },
-  { key: 'library', label: 'Library' },
+// The bottom bar's four sections (Material: 3–5, navigation only). Browse
+// holds the site tabs (Manga, Manhwa, Anime), picked in the row at the
+// top; the other three are one screen each. `tab` below is what's on
+// screen: a site's key, 'browser', 'library' or 'notepad'.
+const SITE_TABS = MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label }));
+const SECTIONS = [
+  { key: 'browse', label: 'Browse', icon: '🏠' },
+  { key: 'library', label: 'Library', icon: '📚' },
+  { key: 'browser', label: 'Browser', icon: '🌐' },
+  { key: 'notepad', label: 'Notepad', icon: '📝' },
 ];
+const sectionOfTab = (tab) => (SITE_TAB_KEYS.includes(tab) ? 'browse' : tab);
+// Screens with nothing to scroll away from: the bars stay shown.
+const KEEP_BARS = ['library', 'notepad'];
 
 export default function App() {
   // Bumped whenever a note arrives via the share sheet, so an already
@@ -221,8 +231,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  // The site tab Browse goes back to.
+  const lastSiteTab = useRef(tab);
+  if (sectionOfTab(tab) === 'browse') lastSiteTab.current = tab;
   // Each browsing tab's MediaWebView, for the back button below.
   const webviewRefs = useRef({});
+  const notepadRef = useRef(null);
 
   // The app's only hardwareBackPress listener. Lets the open tab's webview
   // go back in its own history first; once it has nowhere left to go (or
@@ -233,6 +247,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     const onBackPress = () => {
       const webview = webviewRefs.current[tab];
       if (webview && webview.goBackIfPossible()) return true;
+      if (tab === 'notepad' && notepadRef.current?.goBack()) return true;
       Alert.alert('Exit app?', 'Are you sure you want to exit?', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
@@ -373,11 +388,11 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const scheduleTabBarHide = useCallback(() => {
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
-      if (tabRef.current !== 'library') setTabBarHiddenAnimated(true);
+      if (!KEEP_BARS.includes(tabRef.current)) setTabBarHiddenAnimated(true);
     }, TAB_BAR_HIDE_MS);
   }, [setTabBarHiddenAnimated]);
   useEffect(() => {
-    if (tab === 'library') {
+    if (KEEP_BARS.includes(tab)) {
       clearTimeout(hideTimer.current);
       setTabBarHiddenAnimated(false);
     } else {
@@ -491,7 +506,6 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   };
   const [settingsVisible, setSettingsVisible] = useState(false);
   // The Notepad (src/Notepad.js), opened from the 📝 button on the Library.
-  const [notepadVisible, setNotepadVisible] = useState(false);
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
   const [buttons, setButtons] = useState({ searchBox: true, siteMenu: true, savePageImage: true });
@@ -852,19 +866,34 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
           {/* Backup / restore progress (src/SyncStatusPill.js). */}
           <SyncStatusPill />
           {/* Settings (incl. Drive and MyAnimeList), on every tab. */}
-          <TouchableOpacity onPress={() => setSettingsVisible(true)} hitSlop={10} style={styles.headerSettingsButton}>
+          <TouchableOpacity
+            onPress={() => setSettingsVisible(true)}
+            hitSlop={10}
+            style={styles.headerSettingsButton}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
             <Text style={styles.headerSettingsIcon}>⚙️</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
-        {TABS.map((t) => (
-          <TouchableOpacity key={t.key} style={styles.tabItem} onPress={() => setTab(t.key)}>
-            <Text style={tab === t.key ? styles.tabActive : styles.tabInactive}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Browse's site chooser. */}
+      {sectionOfTab(tab) === 'browse' ? (
+        <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
+          {SITE_TABS.map((t) => (
+            <TouchableOpacity
+              key={t.key}
+              style={styles.tabItem}
+              onPress={() => setTab(t.key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === t.key }}
+            >
+              <Text style={tab === t.key ? styles.tabActive : styles.tabInactive}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.body}>
         {/* All tabs stay mounted at all times — switching tabs only
@@ -927,15 +956,35 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             onFocusHandled={() => setLibraryFocusKey(null)}
             onOpenInTab={handleOpenInTab}
           />
-          {tab === 'library' ? (
-            <TouchableOpacity style={styles.notepadFab} onPress={() => setNotepadVisible(true)}>
-              <Text style={styles.notepadFabIcon}>📝</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
+        <View style={[styles.tabPane, { display: tab === 'notepad' ? 'flex' : 'none' }]}>
+          <Notepad ref={notepadRef} visible={tab === 'notepad'} refreshKey={notepadRefreshKey} />
+        </View>
+        <UndoBar />
       </View>
 
-      <Notepad visible={notepadVisible} onClose={() => setNotepadVisible(false)} refreshKey={notepadRefreshKey} />
+      {/* The bottom bar: Browse, Library, Browser, Notepad. Hides with
+          the site chooser while a page sits still (see tabBarHidden). */}
+      <View style={[styles.bottomBar, tabBarHidden && styles.tabBarHidden]} accessibilityRole="tablist">
+        {SECTIONS.map((section) => {
+          const active = sectionOfTab(tab) === section.key;
+          return (
+            <TouchableOpacity
+              key={section.key}
+              style={styles.bottomItem}
+              onPress={() => setTab(section.key === 'browse' ? lastSiteTab.current : section.key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={section.label}
+            >
+              <View style={[styles.bottomIconPill, active && styles.bottomIconPillActive]}>
+                <Text style={styles.bottomIcon}>{section.icon}</Text>
+              </View>
+              <Text style={active ? styles.bottomLabelActive : styles.bottomLabel}>{section.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
       <QuickSearchPicker
         pick={searchPick}
@@ -1041,7 +1090,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                   value={newSite.address}
                   onChangeText={(address) => setNewSite((n) => ({ ...n, address }))}
                   placeholder="Website, e.g. example.com"
-                  placeholderTextColor="#999"
+                  placeholderTextColor={themeColor('#767676')}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="url"
@@ -1193,24 +1242,18 @@ const styles = themed(StyleSheet.create({
   tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },
   tabBarHidden: { height: 0, overflow: 'hidden' },
   tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center' },
-  tabActive: { color: '#e94560', fontWeight: '700' },
-  tabInactive: { color: '#888' },
+  tabActive: { color: '#ff7a90', fontWeight: '700' },
+  tabInactive: { color: '#a0a0b4' },
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
-  // The Notepad button, bottom right on the Library.
-  notepadFab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#16213e',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-  },
-  notepadFabIcon: { fontSize: 22 },
+  // Material's navigation bar: icon over label, the active one in a pill.
+  bottomBar: { flexDirection: 'row', backgroundColor: '#16213e', paddingTop: 6, paddingBottom: 4 },
+  bottomItem: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' },
+  bottomIconPill: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 16 },
+  bottomIconPillActive: { backgroundColor: '#3a2340' },
+  bottomIcon: { fontSize: 20 },
+  bottomLabel: { color: '#a0a0b4', fontSize: 12, marginTop: 2 },
+  bottomLabelActive: { color: '#ff7a90', fontSize: 12, fontWeight: '700', marginTop: 2 },
   settingsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1227,7 +1270,7 @@ const styles = themed(StyleSheet.create({
   settingsSectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#888',
+    color: '#666',
     marginTop: 20,
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -1242,7 +1285,7 @@ const styles = themed(StyleSheet.create({
   settingsRowGap: { marginBottom: 16 },
   settingsRowText: { flex: 1 },
   settingsLabel: { fontSize: 15, fontWeight: '600', color: '#222' },
-  settingsHint: { fontSize: 12, color: '#888', marginTop: 4 },
+  settingsHint: { fontSize: 12, color: '#666', marginTop: 4 },
   settingsCloseButton: {
     marginTop: 20,
     backgroundColor: '#16213e',
