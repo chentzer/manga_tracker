@@ -286,7 +286,9 @@ finish date and sets progress to the total when the total is known.
   replacing the previous export there. Entries without a MAL id are left
   out (the summary says how many). The file's user name and id come from
   the last list you imported.
-- **Hentai is left out of exports** (ecchi stays). Genres come from
+- **18+ titles are left out of exports** (ecchi stays) unless
+  **Include 18+ titles** (Settings → MyAnimeList, off by default) is
+  on; it applies to both lists. Genres come from
   AniList's API (`graphql.anilist.co`), looked up by MAL id, 50 titles
   per request, and kept on the entry (`genres`, `is_adult`). A title
   counts as hentai when AniList marks it adult or lists the Hentai

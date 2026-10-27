@@ -268,13 +268,16 @@ export async function refreshFromAniList(entries) {
 
 // Builds the export for one MAL list ('anime' or 'manga'), saves it to
 // Drive (replacing the last export there) when connected, and offers it
-// to the share sheet. Hentai is left out. Returns { exported, skipped,
-// hentai, drive: 'saved' | 'not connected' | error }.
+// to the share sheet. 18+ titles (isHentai) are left out unless
+// Settings → MyAnimeList → Include 18+ titles is on (the malExportAdult
+// setting). Returns { exported, skipped, hentai, drive: 'saved' |
+// 'not connected' | error }.
 export async function exportMalList(malType) {
   const all = entriesOnMalList(malType);
   const linked = all.filter((e) => e.mal_id);
   await refreshFromAniList(linked);
-  const withId = linked.filter((e) => !isHentai(e));
+  const includeAdult = getSetting('malExportAdult', '0') === '1';
+  const withId = includeAdult ? linked : linked.filter((e) => !isHentai(e));
   let user = {};
   try {
     user = JSON.parse(getSetting(`malUser_${malType}`, '{}')) || {};

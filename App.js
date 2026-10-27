@@ -763,6 +763,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   // Settings → MyAnimeList: export/import MAL list files (src/malList.js).
   // MAL has two lists; the manga one includes manhwa.
   const [malBusy, setMalBusy] = useState(false);
+  // Whether exports keep 18+ titles (read by exportMalList).
+  const [malExportAdult, setMalExportAdult] = useState(() => getSetting('malExportAdult', '0') === '1');
+  const toggleMalExportAdult = (value) => {
+    setMalExportAdult(value);
+    setSetting('malExportAdult', value ? '1' : '0');
+  };
 
   const runMalExport = async (malType) => {
     setMalBusy(true);
@@ -770,7 +776,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       const result = await exportMalList(malType);
       const listLabel = MAL_LISTS.find((l) => l.key === malType).label;
       const lines = [`${result.exported} ${listLabel} entries exported.`];
-      if (result.hentai > 0) lines.push(`${result.hentai} hentai titles left out.`);
+      if (result.hentai > 0) lines.push(`${result.hentai} 18+ titles left out (Include 18+ titles is off).`);
       if (result.skipped > 0) {
         lines.push(
           `${result.skipped} left out: no MyAnimeList id yet. Open them once in their tab to pick it up.`
@@ -1039,6 +1045,15 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
               Export or import MAL list files. Manga includes manhwa. Exports are also saved to Google
               Drive when it's connected; imports add missing titles and mark differences to review.
             </Text>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Include 18+ titles</Text>
+                <Text style={styles.settingsHint}>
+                  Off: titles AniList marks adult (or Hentai) are left out of exports.
+                </Text>
+              </View>
+              <Switch value={malExportAdult} onValueChange={toggleMalExportAdult} />
+            </View>
             <View style={styles.settingsButtonRow}>
               {MAL_LISTS.map((l) => (
                 <TouchableOpacity
