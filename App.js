@@ -55,6 +55,7 @@ import {
   takeDriveSyncDeferred,
 } from './src/dataSaver';
 import { MEDIA_TYPE_LIST } from './src/mediaTypes';
+import { getHoldToSave, setHoldToSave } from './src/imageHold';
 import { loadCustomSites, saveCustomSites, domainOf, withCustomSites } from './src/customSites';
 import AppLock, { useAppLockSetting } from './src/AppLock';
 import { galleryFolderFor } from './src/gallery';
@@ -270,6 +271,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const toggleBlockAds = (value) => {
     setBlockAds(value);
     setSetting('blockAds', value ? '1' : '0');
+  };
+  // Settings → Hold to save pictures (src/imageHold.js). On unless turned off.
+  const [holdToSave, setHoldToSaveState] = useState(() => getHoldToSave());
+  const toggleHoldToSave = (value) => {
+    setHoldToSaveState(value);
+    setHoldToSave(value);
   };
 
   // Tabs stay loaded when you switch away (so they keep their place), so
@@ -928,6 +935,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 onViewInLibrary={handleViewInLibrary}
                 buttons={buttons}
                 blockAds={blockAds}
+              holdToSave={holdToSave}
+                holdToSave={holdToSave}
                 onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
                 initialUrl={lastUrls.current[mediaConfig.key] || null}
                 onPageChange={(url) => {
@@ -1181,6 +1190,16 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 </Text>
               </View>
               <Switch value={blockAds} onValueChange={toggleBlockAds} />
+            </View>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Hold to save pictures</Text>
+                <Text style={styles.settingsHint}>
+                  Hold a finger on a picture in a browsing tab to save it to your gallery. Off, a long
+                  press does what the site does. Takes effect when a page next loads.
+                </Text>
+              </View>
+              <Switch value={holdToSave} onValueChange={toggleHoldToSave} accessibilityLabel="Hold to save pictures" />
             </View>
             <View style={styles.settingsRow}>
               <View style={styles.settingsRowText}>

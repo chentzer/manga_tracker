@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 // SDK 57: saveToLibraryAsync only works from the legacy entry point.
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { suppressNextRelock } from './relockGuard';
+import { getSetting, setSetting } from './db';
 import { saveFileToGallery } from './gallery';
 
 // Hold a finger on a picture in a browsing tab (about half a second,
@@ -121,6 +122,17 @@ export function pictureExtension(mimeType, url) {
 export function timeStamp(date = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}_${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`;
+}
+
+// Settings → Hold to save pictures: on unless you turn it off. Off, the
+// browsing tabs leave IMAGE_HOLD_JS out of their pages (from the next page
+// load), so a long press does what the site or Android does; holds from a
+// page loaded before you switched it off are ignored.
+export function getHoldToSave() {
+  return getSetting('holdToSave', '1') !== '0';
+}
+export function setHoldToSave(on) {
+  setSetting('holdToSave', on ? '1' : '0');
 }
 
 // Saves a held picture ({ url } or { dataUrl } from IMAGE_HOLD_JS) to the
