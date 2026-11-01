@@ -1023,7 +1023,7 @@ const RATING_FILTERS = [
 ];
 const READ_STATUS_FILTERS = [
   { key: null, label: 'Any status' },
-  { key: 'reading', label: '▶️ Reading/Watching' },
+  { key: 'reading', icon: 'reading', label: 'Reading/Watching' },
   { key: 'read', icon: 'read', label: 'Read/Watched' },
   { key: 'on_hold', icon: 'on_hold', label: 'On Hold' },
   { key: 'dropped', icon: 'dropped', label: 'Dropped' },
@@ -1035,7 +1035,7 @@ const READ_STATUS_FILTERS = [
 const RANDOM_STATUS_CHOICES = [
   { key: 'read', icon: 'read', label: 'Read/Watched' },
   { key: 'want_to_read', icon: 'want_to_read', label: 'Want to Read/Watch' },
-  { key: 'reading', label: '▶️ Reading/Watching' },
+  { key: 'reading', icon: 'reading', label: 'Reading/Watching' },
 ];
 // 'favorite': ♥ favourite entries; 'low': scored 1–5; 0: no score.
 const RANDOM_RATING_CHOICES = [

@@ -55,8 +55,9 @@ export const ICONS = {
   upload: 'upload',
   person: 'account-outline',
   event: 'calendar-check-outline',
-  // read statuses
-  reading: 'book-open-variant',
+  // read statuses (one set for reading and watching: a play circle
+  // beside the pause / check / cross circles)
+  reading: 'play-circle-outline',
   read: 'check-circle-outline',
   on_hold: 'pause-circle-outline',
   dropped: 'close-circle-outline',
