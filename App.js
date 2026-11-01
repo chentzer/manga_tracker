@@ -36,6 +36,7 @@ import {
 } from './src/backup';
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
+import { CrashGuard, installCrashHandler } from './src/CrashScreen';
 import UndoBar from './src/UndoBar';
 import Icon from './src/Icon';
 import { TAP_SLOP } from './src/touch';
@@ -87,7 +88,21 @@ const sectionOfTab = (tab) => (SITE_TAB_KEYS.includes(tab) ? 'browse' : tab);
 // Screens with nothing to scroll away from: the bars stay shown.
 const KEEP_BARS = ['library', 'notepad'];
 
+// An error at start-up shows on screen instead of closing the app
+// (src/CrashScreen.js).
+installCrashHandler();
+
+// The crash screen wraps everything, so even an error in AppMain's own
+// start-up shows instead of closing the app.
 export default function App() {
+  return (
+    <CrashGuard>
+      <AppMain />
+    </CrashGuard>
+  );
+}
+
+function AppMain() {
   // Bumped whenever a note arrives via the share sheet, so an already
   // open Notepad reloads its list.
   const [notepadRefreshKey, setNotepadRefreshKey] = useState(0);
