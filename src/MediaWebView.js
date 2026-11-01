@@ -37,7 +37,7 @@ import { suppressNextRelock } from './relockGuard';
 import { snoozeUntil, snoozeLabel } from './snooze';
 import RatePrompt from './RatePrompt';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
-import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery } from './imageHold';
+import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery, getHoldToSave } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName } from './gallery';
@@ -586,6 +586,7 @@ const MediaWebView = forwardRef(function MediaWebView({
   openRequest = null,
   onOpenHandled,
   blockAds = true,
+  holdToSave = true,
 }, ref) {
   useDarkMode(); // redraws in the other colours when Dark mode is switched
   const webviewRef = useRef(null);
@@ -1288,6 +1289,7 @@ const MediaWebView = forwardRef(function MediaWebView({
 
       // Held a finger on a picture (src/imageHold.js): ask, then save it.
       if (payload.type === 'holdImage') {
+        if (!getHoldToSave()) return; // switched off (a page loaded before)
         if (payload.error) {
           if (Platform.OS === 'android') ToastAndroid.show("This picture can't be saved.", ToastAndroid.SHORT);
           return;
@@ -1834,13 +1836,13 @@ const MediaWebView = forwardRef(function MediaWebView({
           (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '') +
           getBeforeLoadJs(config) +
           TAB_BAR_WATCH_JS +
-          IMAGE_HOLD_JS +
+          (holdToSave ? IMAGE_HOLD_JS : '') +
           (blockAds ? AD_BLOCK_JS : '')
         }
         // The tab-row watcher, hold-to-save and ad blocking again once the
         // page has loaded, since Android doesn't always run the script
         // above (each only runs once per page).
-        injectedJavaScript={TAB_BAR_WATCH_JS + IMAGE_HOLD_JS + (blockAds ? AD_BLOCK_JS : '')}
+        injectedJavaScript={TAB_BAR_WATCH_JS + (holdToSave ? IMAGE_HOLD_JS : '') + (blockAds ? AD_BLOCK_JS : '')}
       />
     </View>
   );

@@ -5,7 +5,7 @@ import { galleryFolderFor } from './gallery';
 import { PAUSE_MEDIA_JS } from './MediaWebView';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
-import { IMAGE_HOLD_JS, saveHeldPicture } from './imageHold';
+import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
 import { TAP_SLOP } from './touch';
 import { themed, themeColor, useDarkMode } from './theme';
 
@@ -68,7 +68,7 @@ const TAP_TRACKER_JS = `
 // here, since a web page has no code; they're filed under
 // AniManga Tracker/Browser), pauseMedia and getCurrentUrl (Data saver).
 const BrowserTab = forwardRef(function BrowserTab(
-  { blockAds = true, onTabBarActivity, initialUrl = null, onPageChange },
+  { blockAds = true, holdToSave = true, onTabBarActivity, initialUrl = null, onPageChange },
   ref
 ) {
   useDarkMode(); // redraws in the other colours when Dark mode is switched
@@ -151,7 +151,7 @@ const BrowserTab = forwardRef(function BrowserTab(
       onTabBarActivity?.(message.kind); // auto-hiding tab row, pull up for Library (App.js)
     } else if (message.type === 'userTap') {
       userNavUntil.current = Date.now() + USER_NAV_WINDOW_MS;
-    } else if (message.type === 'holdImage') {
+    } else if (message.type === 'holdImage' && getHoldToSave()) {
       // Held a finger on a picture (src/imageHold.js): saved to
       // AniManga Tracker/Browser, named "<site>_<time>".
       const toast = (text, long = false) =>
@@ -185,7 +185,7 @@ const BrowserTab = forwardRef(function BrowserTab(
     }
   };
 
-  const pageJs = TAP_TRACKER_JS + IMAGE_HOLD_JS + TAB_BAR_WATCH_JS + (blockAds ? AD_BLOCK_JS : '');
+  const pageJs = TAP_TRACKER_JS + (holdToSave ? IMAGE_HOLD_JS : '') + TAB_BAR_WATCH_JS + (blockAds ? AD_BLOCK_JS : '');
 
   return (
     <View style={styles.container}>

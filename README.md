@@ -710,6 +710,8 @@ so nothing renders blank.
   the finger even behind a see-through layer (a full-screen viewer), and
   also takes a video's poster or a background picture; small icons are
   skipped. Saved as `<code>_<time>` on a title's page, else `<site>_<time>`.
+  **Settings → Hold to save pictures** turns it off (from the next page
+  load), so a long press does what the site does.
 - **Gallery folders** (`src/gallery.js`) — everything the app saves goes
   into `Pictures/AniManga Tracker/`, one folder per tab (e.g.
   `Pictures/AniManga Tracker/Manga/`), instead of loose in the camera roll.
