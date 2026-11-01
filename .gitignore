@@ -42,3 +42,6 @@ yarn-error.*
 
 # Typescript
 *.tsbuildinfo
+
+# graphify knowledge graph output
+graphify-out/
