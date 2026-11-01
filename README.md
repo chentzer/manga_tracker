@@ -895,7 +895,13 @@ so nothing renders blank.
   **Undo** bar for 5 seconds instead of an "Are you sure?" (`src/undo.js`,
   `src/UndoBar.js`); it's only really deleted (and taken off Drive) after
   that, when another delete comes, or when the app goes to the
-  background. The app turns with the phone (no portrait lock), grey
+  background. **Several at once:** hold a Library title to start
+  selecting, tap others (or **Select all**, which follows the filters),
+  then **Status…**, **Favourite** or **Delete** them together, with Undo;
+  ✕ or Back stops selecting. A page that can't load says why (offline,
+  too slow, not found) with **Retry** (`src/PageError.js`), and the bars
+  stay shown until a page has loaded; tapping the title shows them.
+  Icons are Material Design Icons (`src/Icon.js`). The app turns with the phone (no portrait lock), grey
   text meets 4.5:1 contrast, and small controls have 48 dp tap areas
   (`src/touch.js` `TAP_SLOP`) and TalkBack labels.
   All tabs stay mounted simultaneously at all times — switching

@@ -13,6 +13,7 @@ import {
   Alert,
   TextInput,
   Switch,
+  BackHandler,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
@@ -1292,6 +1293,10 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [genreFilters, setGenreFilters] = useState([]); // selected genres (AND logic, like tags)
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
   const [conflictsOnly, setConflictsOnly] = useState(false); // "To review" chip
+  // Select mode (hold a title): the keys picked, or null when not
+  // selecting; statusSheet: the Status… choice is open.
+  const [picked, setPicked] = useState(null);
+  const [statusSheet, setStatusSheet] = useState(false);
 
   // ⭐ To rate (ToRate.js): titles waiting for a score, across every type.
   const [toRate, setToRate] = useState({ finished: [], unrated: [], count: 0 });
@@ -1895,6 +1900,127 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [load, backupSilently]
   );
 
+  // ---------- Select mode: changing several entries at once ----------
+
+  const keyOf = (e) => `${e.media_type}:${e.source_id}`;
+  const pickedEntries = useMemo(
+    () => (picked ? entries.filter((e) => picked.has(keyOf(e))) : []),
+    [picked, entries]
+  );
+  const togglePick = (key) =>
+    setPicked((p) => {
+      const next = new Set(p || []);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const stopPicking = () => {
+    setPicked(null);
+    setStatusSheet(false);
+  };
+  // Back leaves select mode first.
+  useEffect(() => {
+    if (!picked) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      stopPicking();
+      return true;
+    });
+    return () => sub.remove();
+  }, [picked]);
+
+  // Applies change(entry) to every picked entry; each returns how to put
+  // it back, or null when it didn't apply. Then Undo for a few seconds
+  // (undo.js) puts them all back.
+  const applyToPicked = (message, change) => {
+    const restores = pickedEntries.map(change).filter(Boolean);
+    stopPicking();
+    if (!restores.length) {
+      Alert.alert('Nothing changed', 'The selected titles were already like that.');
+      return;
+    }
+    load();
+    backupSilently();
+    offerUndo({
+      message: `${message}: ${restores.length} title${restores.length === 1 ? '' : 's'}`,
+      commit: () => {},
+      undo: () => {
+        restores.forEach((r) => r());
+        loadRef.current();
+        backupSilently();
+      },
+    });
+  };
+
+  // Like a single status change (handleSetReadStatus): starting fills in
+  // the start date, completing the finish date and full progress.
+  const bulkSetStatus = (status) =>
+    applyToPicked('Status changed', (e) => {
+      if ((e.read_status || null) === status) return null;
+      const before = {
+        read_status: e.read_status || null,
+        start_date: e.start_date || null,
+        finish_date: e.finish_date || null,
+        progress: e.progress ?? null,
+        progress_volumes: e.progress_volumes ?? null,
+      };
+      const fields = { read_status: status };
+      if (status === 'reading' && !e.start_date) fields.start_date = todayString();
+      if (status === 'read') {
+        if (!e.finish_date) fields.finish_date = todayString();
+        if (e.total) fields.progress = e.total;
+        if (e.total_volumes) fields.progress_volumes = e.total_volumes;
+      }
+      updateEntryFields(e.source_id, e.media_type, settlingConflicts(e, fields));
+      return () => updateEntryFields(e.source_id, e.media_type, before);
+    });
+
+  // Favourite turns on for all, unless all already are: then off.
+  const bulkFavorite = () => {
+    const on = !pickedEntries.every((e) => e.favorite);
+    applyToPicked(on ? 'Made favourites' : 'Favourites removed', (e) => {
+      if (!!e.favorite === on) return null;
+      updateEntryFields(e.source_id, e.media_type, { favorite: on ? 1 : 0 });
+      return () => updateEntryFields(e.source_id, e.media_type, { favorite: on ? 0 : 1 });
+    });
+  };
+
+  // Gone at once with Undo, like a single delete (handleDeleteEntry).
+  const bulkDelete = () => {
+    const items = pickedEntries;
+    if (!items.length) return;
+    items.forEach((e) => hiddenKeys.current.add(keyOf(e)));
+    stopPicking();
+    load();
+    offerUndo({
+      message: `Deleted ${items.length} title${items.length === 1 ? '' : 's'}`,
+      commit: async () => {
+        for (const e of items) {
+          if (e.local_image_path) await FileSystem.deleteAsync(e.local_image_path, { idempotent: true }).catch(() => {});
+          deleteEntry(e.source_id, e.media_type);
+          hiddenKeys.current.delete(keyOf(e));
+        }
+        loadRef.current();
+        backupSilently();
+      },
+      undo: () => {
+        items.forEach((e) => hiddenKeys.current.delete(keyOf(e)));
+        loadRef.current();
+      },
+    });
+  };
+
+  // The statuses offered: the titles' own words when they're all one
+  // type, else both words.
+  const bulkStatusOptions = () => {
+    const types = [...new Set(pickedEntries.map((e) => e.media_type))];
+    const one = types.length === 1 ? getReadStatusLabels(types[0]) : null;
+    const both = { reading: 'Reading / Watching', read: 'Read / Watched', on_hold: 'On Hold', dropped: 'Dropped', want: 'Want to Read / Watch' };
+    return [
+      ...READ_STATUSES.map((s) => ({ key: s.key, icon: s.key, label: (one || both)[s.label] || both[s.label] })),
+      { key: null, label: 'No status' },
+    ];
+  };
+
   // Looked up by key rather than kept as a snapshot object, so the modal
   // reflects rating changes made while it's open instead of going stale.
   // Random can pick outside the current type filter, so fall back to the
@@ -2264,17 +2390,68 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       </View>
       ) : null}
 
+      {picked ? (
+        <View style={styles.selectBar}>
+          <View style={styles.selectTop}>
+            <TouchableOpacity onPress={stopPicking} hitSlop={TAP_SLOP} accessibilityRole="button" accessibilityLabel="Stop selecting">
+              <Text style={styles.selectClose}>
+                <Icon name="close" size={22} />
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.selectCount}>{picked.size} selected</Text>
+            <TouchableOpacity
+              style={styles.selectAll}
+              onPress={() =>
+                setPicked(picked.size === displayEntries.length ? new Set() : new Set(displayEntries.map(keyOf)))
+              }
+            >
+              <Text style={styles.selectAllText}>
+                {picked.size === displayEntries.length && picked.size > 0 ? 'Select none' : `Select all (${displayEntries.length})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.selectActions}>
+            {[
+              { icon: 'want_to_read', label: 'Status…', onPress: () => setStatusSheet(true) },
+              pickedEntries.length && pickedEntries.every((e) => e.favorite)
+                ? { icon: 'heartOutline', label: 'Unfavourite', onPress: bulkFavorite }
+                : { icon: 'heart', label: 'Favourite', onPress: bulkFavorite },
+              { icon: 'delete', label: 'Delete', onPress: bulkDelete, danger: true },
+            ].map((a) => (
+              <TouchableOpacity
+                key={a.label}
+                style={[styles.selectAction, !pickedEntries.length && styles.selectActionOff]}
+                onPress={a.onPress}
+                disabled={!pickedEntries.length}
+              >
+                <Text style={[styles.selectActionText, a.danger && styles.selectActionDanger]}>
+                  <IconText icon={a.icon} size={16}>{a.label}</IconText>
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <FlatList
-        extraData={dark}
+        extraData={[dark, picked]}
         style={styles.list}
         data={displayEntries}
         keyExtractor={(item) => `${item.media_type}:${item.source_id}`}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={styles.row}
-            onPress={() => setSelectedKey(`${item.media_type}:${item.source_id}`)}
+            style={[styles.row, picked && picked.has(keyOf(item)) && styles.rowPicked]}
+            onPress={() => (picked ? togglePick(keyOf(item)) : setSelectedKey(keyOf(item)))}
+            // Hold a title to select it, then tap others to add them.
+            onLongPress={() => (picked ? togglePick(keyOf(item)) : setPicked(new Set([keyOf(item)])))}
+            accessibilityState={picked ? { selected: picked.has(keyOf(item)) } : undefined}
           >
+            {picked ? (
+              <Text style={styles.pickMark}>
+                <Icon name={picked.has(keyOf(item)) ? 'checked' : 'unchecked'} size={24} />
+              </Text>
+            ) : null}
             {item.local_image_path ? (
               <Image source={{ uri: item.local_image_path }} style={styles.thumb} />
             ) : (
@@ -2378,6 +2555,29 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onLeaveGroup={handleLeaveGroup}
         onOpenEntry={(e) => setSelectedKey(`${e.media_type}:${e.source_id}`)}
       />
+
+      {/* Select mode's Status… choice. */}
+      <Modal visible={statusSheet && !!picked} transparent animationType="fade" onRequestClose={() => setStatusSheet(false)}>
+        <TouchableOpacity style={styles.selectSheetOverlay} activeOpacity={1} onPress={() => setStatusSheet(false)}>
+          <View style={styles.selectSheet}>
+            <Text style={styles.selectSheetTitle}>
+              Set status of {pickedEntries.length} title{pickedEntries.length === 1 ? '' : 's'}
+            </Text>
+            <ScrollView>
+              {bulkStatusOptions().map((o) => (
+                <TouchableOpacity key={String(o.key)} style={styles.selectSheetRow} onPress={() => bulkSetStatus(o.key)}>
+                  <Text style={styles.selectSheetRowText}>
+                    <IconText icon={o.icon} size={17}>{o.label}</IconText>
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.selectSheetCancel} onPress={() => setStatusSheet(false)}>
+              <Text style={styles.selectSheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <ToRateModal
         visible={toRateVisible}
@@ -2563,6 +2763,34 @@ const styles = themed(StyleSheet.create({
   logScroll: { flex: 1 },
   logLine: { padding: 16, color: '#666', fontSize: 14 },
   list: { flex: 1 },
+  // Select mode (hold a title).
+  rowPicked: { backgroundColor: '#e3ebfb' },
+  pickMark: { color: '#16213e', marginRight: 10, minWidth: 24 },
+  selectBar: { backgroundColor: '#16213e', paddingVertical: 6 },
+  selectTop: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 12, minHeight: 48 },
+  selectClose: { color: '#fff' },
+  selectCount: { color: '#fff', fontSize: 16, fontWeight: '700', flex: 1 },
+  selectAll: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 8 },
+  selectAllText: { color: '#fff', fontSize: 14, textDecorationLine: 'underline' },
+  selectActions: { paddingHorizontal: 8, gap: 8 },
+  selectAction: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    minHeight: 40,
+    justifyContent: 'center',
+    marginVertical: 4,
+  },
+  selectActionOff: { opacity: 0.5 },
+  selectActionText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
+  selectActionDanger: { color: '#c0392b' },
+  selectSheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
+  selectSheet: { backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: '80%' },
+  selectSheetTitle: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 8 },
+  selectSheetRow: { minHeight: 48, justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
+  selectSheetRowText: { fontSize: 16, color: '#222' },
+  selectSheetCancel: { alignSelf: 'flex-end', minHeight: 48, justifyContent: 'center', paddingHorizontal: 12, marginTop: 8 },
+  selectSheetCancelText: { color: '#666', fontSize: 15 },
   row: {
     flexDirection: 'row',
     padding: 12,
