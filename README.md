@@ -806,6 +806,9 @@ so nothing renders blank.
   every device (creating or deleting one does it everywhere), but each
   device only ever sees its own items. Deleting an item removes it from
   Drive too; deleting a whole note keeps it and its items in Drive.
+  Each category (Manga, Manhwa, Anime) always has a note of its own,
+  listed first after the Inbox and never deleted; each item in one has a
+  magnifier that searches it in that tab (a link opens there).
 - `src/SyncStatusPill.js` / `src/syncStatus.js` — the pill beside the
   Settings button. While a backup, restore or MAL import runs it shows
   **Backup**, **Restore** or **Import**, filling from the left as it goes (full = done); then

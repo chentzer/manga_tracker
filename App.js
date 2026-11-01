@@ -571,6 +571,14 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   // the tab's other sites.
   const [searchPick, setSearchPick] = useState(null);
   const searchInTab = (key, query) => handleOpenInTab(key, { search: query });
+  // The magnifier on an item in a category's note (Notepad.js): a link
+  // opens in that tab, anything else is searched as a title on its sites.
+  const handleNoteSearch = (key, content) => {
+    const text = String(content || '').trim();
+    if (!text) return;
+    if (/^https?:\/\/\S+$/i.test(text)) handleOpenInTab(key, { url: text });
+    else searchInTab(key, text);
+  };
   useEffect(() => {
     if (!shareSearch) return;
     onShareSearchDone();
@@ -1000,7 +1008,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
           />
         </View>
         <View style={[styles.tabPane, { display: tab === 'notepad' ? 'flex' : 'none' }]}>
-          <Notepad ref={notepadRef} visible={tab === 'notepad'} refreshKey={notepadRefreshKey} />
+          <Notepad
+            ref={notepadRef}
+            visible={tab === 'notepad'}
+            refreshKey={notepadRefreshKey}
+            onSearch={handleNoteSearch}
+          />
         </View>
         <UndoBar />
       </View>

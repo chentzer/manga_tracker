@@ -22,6 +22,7 @@ import {
   deleteNotebook,
 } from './db';
 import { syncNotepadToDrive, onNotepadSynced } from './notepadSync';
+import { MEDIA_TYPE_LIST } from './mediaTypes';
 import { TAP_SLOP } from './touch';
 import Icon from './Icon';
 import { offerUndo } from './undo';
@@ -64,7 +65,31 @@ function LinkifiedText({ content, style, linkStyle }) {
 // visible: it's the tab on screen. refreshKey: bumped by App.js when
 // something is shared in, so an already open notepad reloads. Its ref's
 // goBack() closes an open overlay for the Back button (true when it did).
-export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
+// Every category (the site tabs) always has a note of its own, named
+// after it, for titles to look up there later. It's made when missing (a
+// note of yours with that name becomes it), comes first after the Inbox,
+// can't be deleted, and each of its items has a magnifier that searches
+// it in that tab (onSearch, App.js). They're ordinary notes otherwise, so
+// they sync like any other.
+const CATEGORIES = MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label }));
+const categoryOf = (title) => CATEGORIES.find((c) => c.label.toLowerCase() === String(title || '').toLowerCase()) || null;
+
+function ensureCategoryNotes() {
+  const have = new Set(getNotebooks().map((b) => b.title.toLowerCase()));
+  let made = false;
+  for (const c of CATEGORIES) {
+    if (have.has(c.label.toLowerCase())) continue;
+    try {
+      createNotebook(c.label);
+      made = true;
+    } catch (e) {
+      // already there under another spelling
+    }
+  }
+  return made;
+}
+
+export default forwardRef(function Notepad({ visible, refreshKey, onSearch }, ref) {
   const dark = useDarkMode(); // redraws in the other colours when Dark mode is switched
   const [notebooks, setNotebooks] = useState([]);
   const [counts, setCounts] = useState({ inbox: 0 });
@@ -81,7 +106,14 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
   const hiddenIds = useRef(new Set());
 
   const reload = useCallback(() => {
-    const books = getNotebooks();
+    // Category notes first (in the tabs' order), then yours.
+    if (ensureCategoryNotes()) syncNotepadToDrive();
+    const all = getNotebooks();
+    const rank = (b) => {
+      const c = categoryOf(b.title);
+      return c ? CATEGORIES.indexOf(c) : CATEGORIES.length;
+    };
+    const books = all.map((b, i) => ({ b, i })).sort((x, y) => rank(x.b) - rank(y.b) || x.i - y.i).map((x) => x.b);
     // The selected note may have just been deleted.
     const stillThere = selectedId == null || books.some((b) => b.id === selectedId);
     const current = stillThere ? selectedId : null;
@@ -115,6 +147,7 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
 
   const selectedTitle =
     selectedId == null ? INBOX_TITLE : notebooks.find((b) => b.id === selectedId)?.title || INBOX_TITLE;
+  const selectedCategory = selectedId == null ? null : categoryOf(selectedTitle);
 
   const handleAdd = () => {
     const value = input.trim();
@@ -240,7 +273,11 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
           <Text style={styles.noteTitle} numberOfLines={1}>
             {selectedTitle}
           </Text>
-          {selectedId != null ? (
+          {selectedCategory ? (
+            <Text style={styles.categoryHint}>
+              <Icon name="search" size={14} /> searches {selectedCategory.label}
+            </Text>
+          ) : selectedId != null ? (
             <TouchableOpacity onPress={handleDeleteNotebook} hitSlop={TAP_SLOP}>
               <Text style={styles.deleteNoteText}>Delete note</Text>
             </TouchableOpacity>
@@ -271,7 +308,9 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
             <Text style={styles.empty}>
               {selectedId == null
                 ? 'Nothing here yet. Add text or a link above, or select text or a link in another app and tap Share › AniManga Tracker — it lands here without unlocking. Then use Move to file it into a note.'
-                : 'This note is empty. Add items above, or move them here from the Inbox.'}
+                : selectedCategory
+                  ? `Add titles or links to look up in ${selectedCategory.label}. Tap the magnifier on one to search it there.`
+                  : 'This note is empty. Add items above, or move them here from the Inbox.'}
             </Text>
           }
           renderItem={({ item }) => (
@@ -280,6 +319,18 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
                 <LinkifiedText content={item.content} style={styles.itemText} linkStyle={styles.link} />
                 <Text style={styles.itemDate}>{item.created_at}</Text>
               </View>
+              {selectedCategory ? (
+                <TouchableOpacity
+                  onPress={() => onSearch?.(selectedCategory.key, item.content)}
+                  style={styles.itemAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Search in ${selectedCategory.label}`}
+                >
+                  <Text style={styles.searchText}>
+                    <Icon name="search" size={22} />
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity onPress={() => setMovingItem(item)} style={styles.itemAction}>
                 <Text style={styles.moveText}>Move</Text>
               </TouchableOpacity>
@@ -423,6 +474,8 @@ const styles = themed(StyleSheet.create({
   itemAction: { paddingHorizontal: 10, minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   moveText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
   deleteText: { color: '#c0392b', fontSize: 17, fontWeight: '600' },
+  searchText: { fontSize: 18, color: '#1a73e8' },
+  categoryHint: { color: '#666', fontSize: 13 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
