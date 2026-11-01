@@ -43,6 +43,7 @@ import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName } from './gallery';
 import { TAP_SLOP } from './touch';
 import PageError from './PageError';
+import Icon from './Icon';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Asks the page for what a screenshot's file name needs (App.js →
@@ -1689,7 +1690,9 @@ const MediaWebView = forwardRef(function MediaWebView({
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity onPress={() => setTitleSearch(null)} hitSlop={TAP_SLOP} accessibilityLabel="Stop searching">
-            <Text style={styles.titleSearchClose}>✕</Text>
+            <Text style={styles.titleSearchClose}>
+              <Icon name="close" size={20} />
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -1698,7 +1701,9 @@ const MediaWebView = forwardRef(function MediaWebView({
           style={styles.viewInLibraryButton}
           onPress={() => onViewInLibrary?.(currentEntryKey)}
         >
-          <Text style={styles.saveImageButtonText}>📚 View in Library</Text>
+          <Text style={styles.saveImageButtonText}>
+            <Icon name="library" size={16} /> View in Library
+          </Text>
         </TouchableOpacity>
       ) : null}
       {config.savePageImage && buttons.savePageImage ? (
@@ -1708,14 +1713,16 @@ const MediaWebView = forwardRef(function MediaWebView({
           disabled={savingImage}
         >
           <Text style={styles.saveImageButtonText}>
-            {savingImage ? 'Saving…' : '⬇ Save Page Image'}
+            {savingImage ? 'Saving…' : <><Icon name="image" size={16} /> Save Page Image</>}
           </Text>
         </TouchableOpacity>
       ) : null}
       {showDebugTools ? (
         <>
           <TouchableOpacity style={styles.captureHtmlButton} onPress={handleCapturePageHtml}>
-            <Text style={styles.saveImageButtonText}>🔍 Capture HTML</Text>
+            <Text style={styles.saveImageButtonText}>
+              <Icon name="code" size={16} /> Capture HTML
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.debugBar} onPress={() => setLogVisible(true)}>
             <Text style={styles.debugText} numberOfLines={1}>
@@ -1763,7 +1770,7 @@ const MediaWebView = forwardRef(function MediaWebView({
                 onPress={() => openSite(site)}
               >
                 <Text style={[styles.siteMenuText, i === currentSiteIndex && styles.siteMenuTextCurrent]}>
-                  {i === currentSiteIndex ? '✓ ' : ''}
+                  {i === currentSiteIndex ? <><Icon name="check" size={15} />{' '}</> : null}
                   {site.name}
                 </Text>
                 <Text style={styles.siteMenuDomain}>{site.domain}</Text>

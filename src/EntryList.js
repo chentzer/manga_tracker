@@ -42,6 +42,7 @@ import {
 import FocusImage from './FocusImage';
 import RatePrompt from './RatePrompt';
 import { TAP_SLOP } from './touch';
+import Icon, { IconText } from './Icon';
 import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
 import Marquee from './Marquee';
@@ -59,13 +60,13 @@ const DEFAULT_READ_STATUS_LABELS = {
 // The five statuses, in MyAnimeList's order. `label` is the key into a
 // type's readStatusLabels.
 const READ_STATUSES = [
-  { key: 'reading', label: 'reading', icon: '▶️' },
-  { key: 'read', label: 'read', icon: '📖' },
-  { key: 'on_hold', label: 'on_hold', icon: '⏸️' },
-  { key: 'dropped', label: 'dropped', icon: '✖️' },
-  { key: 'want_to_read', label: 'want', icon: '📌' },
+  { key: 'reading', label: 'reading' },
+  { key: 'read', label: 'read' },
+  { key: 'on_hold', label: 'on_hold' },
+  { key: 'dropped', label: 'dropped' },
+  { key: 'want_to_read', label: 'want' },
 ];
-const READ_STATUS_ICONS = Object.fromEntries(READ_STATUSES.map((s) => [s.key, s.icon]));
+// Each status has an icon of the same name (src/Icon.js).
 
 function getReadStatusLabels(mediaType) {
   return MEDIA_TYPES[mediaType]?.readStatusLabels || DEFAULT_READ_STATUS_LABELS;
@@ -183,14 +184,16 @@ function DateField({ value, onChange }) {
   return (
     <View style={styles.dateRow}>
       <TouchableOpacity style={styles.dateInput} onPress={pick}>
-        <Text style={value ? styles.dateValue : styles.datePlaceholder}>📅 {value || 'Pick a date'}</Text>
+        <Text style={value ? styles.dateValue : styles.datePlaceholder}><Icon name="calendar" size={15} /> {value || 'Pick a date'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.dateButton} onPress={() => onChange(todayString())}>
         <Text style={styles.dateButtonText}>Today</Text>
       </TouchableOpacity>
       {value ? (
         <TouchableOpacity style={styles.dateButton} onPress={() => onChange(null)}>
-          <Text style={styles.dateButtonText}>✕</Text>
+          <Text style={styles.dateButtonText}>
+            <Icon name="close" size={16} />
+          </Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -221,7 +224,7 @@ function PriorityPicker({ value, onChange }) {
 // only the wording differs.
 function ReadStatusToggle({ status, mediaType, onChange }) {
   const labels = getReadStatusLabels(mediaType);
-  const options = READ_STATUSES.map((s) => ({ key: s.key, label: `${s.icon} ${labels[s.label]}` }));
+  const options = READ_STATUSES.map((s) => ({ key: s.key, icon: s.key, label: labels[s.label] }));
   return (
     <View style={styles.readStatusRow}>
       {options.map((s) => (
@@ -231,7 +234,7 @@ function ReadStatusToggle({ status, mediaType, onChange }) {
           onPress={() => onChange(status === s.key ? null : s.key)}
         >
           <Text style={status === s.key ? styles.readStatusTextActive : styles.readStatusText}>
-            {s.label}
+            <IconText icon={s.icon} size={15}>{s.label}</IconText>
           </Text>
         </TouchableOpacity>
       ))}
@@ -261,7 +264,9 @@ function TagEditor({ tags, onChange }) {
         <View style={styles.tagWrap}>
           {tags.map((tag) => (
             <TouchableOpacity key={tag} style={styles.tagChip} onPress={() => removeTag(tag)}>
-              <Text style={styles.tagChipText}>{tag} ✕</Text>
+              <Text style={styles.tagChipText}>
+                {tag} <Icon name="close" size={13} />
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -337,7 +342,9 @@ function ConflictReview({ entry, onResolve }) {
   if (fields.length === 0) return null;
   return (
     <View style={styles.conflictBox}>
-      <Text style={styles.conflictTitle}>⚠ Differs from your MyAnimeList list</Text>
+      <Text style={styles.conflictTitle}>
+          <Icon name="warning" size={15} /> Differs from your MyAnimeList list
+        </Text>
       <Text style={styles.conflictHint}>
         Choose which to keep, or change it yourself below.
       </Text>
@@ -517,7 +524,9 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
       })}
       <View style={styles.groupActions}>
         <TouchableOpacity onPress={() => setGroupView('edit')}>
-          <Text style={styles.groupLink}>✎ Edit group</Text>
+          <Text style={styles.groupLink}>
+            <Icon name="edit" size={15} /> Edit group
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => onLeave(entry)}>
           <Text style={[styles.groupLink, styles.groupLeave]}>Remove this from group</Text>
@@ -547,7 +556,7 @@ function GroupDetails({ entry, members, sameType, onWriteGroup, onLeave, onOpen 
 const GROUP_SORTS = [
   { key: 'part', label: '# Part number' },
   { key: 'title', label: 'A–Z Title' },
-  { key: 'added', label: '🕒 Date added' },
+  { key: 'added', icon: 'clock', label: 'Date added' },
 ];
 function sortGroup(members, how) {
   const partNumber = (e) => {
@@ -618,7 +627,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                 onEditing(!editing);
               }}
             >
-              <Text style={[styles.groupEditText, editing && styles.groupEditTextOn]}>{editing ? 'Done' : '✎ Edit'}</Text>
+              <Text style={[styles.groupEditText, editing && styles.groupEditTextOn]}>{editing ? 'Done' : <><Icon name="edit" size={15} /> Edit</>}</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.groupHint}>
@@ -644,11 +653,13 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
               <View style={styles.tagWrap}>
                 {GROUP_SORTS.map((o) => (
                   <TouchableOpacity key={o.key} style={styles.tagChip} onPress={() => onWriteGroup(sortGroup(members, o.key), name)}>
-                    <Text style={styles.tagChipText}>{o.label}</Text>
+                    <Text style={styles.tagChipText}>
+                      <IconText icon={o.icon} size={14}>{o.label}</IconText>
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-              <Text style={styles.groupHint}>Or move one with ▲ / ▼. ✕ takes it out of the group.</Text>
+              <Text style={styles.groupHint}>Or move one with ▲ / ▼. <Icon name="close" size={13} /> takes it out of the group.</Text>
             </>
           ) : null}
 
@@ -687,7 +698,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                       <Text style={[styles.groupArrow, i === members.length - 1 && styles.groupArrowOff]}>▼</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => onLeave(p)} style={styles.groupTool} accessibilityLabel="Take out of the group">
-                      <Text style={styles.groupRemove}>✕</Text>
+                      <Text style={styles.groupRemove}><Icon name="close" size={18} /></Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
@@ -750,16 +761,16 @@ function parseGenres(genres) {
 // on the site isn't known yet (imported from MyAnimeList), since it
 // searches for it instead.
 function nextButtonLabel(entry, words) {
-  const icon = isImportedSourceId(entry.source_id) ? '🔍' : '▶';
+  const icon = isImportedSourceId(entry.source_id) ? 'search' : 'play';
   // Completed: starts a reread from the first chapter.
-  if (entry.read_status === 'read' && !entry.repeating) return `${icon} ${words.again}`;
+  if (entry.read_status === 'read' && !entry.repeating) return { icon, label: words.again };
   const verb = entry.media_type === 'anime' ? 'watching' : 'reading';
   const label = entry.repeating
     ? `${words.again} ${words.short} ${(entry.repeat_progress || 0) + 1}`
     : entry.progress
       ? `Continue ${verb} · ${words.short} ${entry.progress + 1}`
       : `Start ${verb}`;
-  return `${icon} ${label}`;
+  return { icon, label };
 }
 
 // An entry's page on MyAnimeList (anime or manga list, by its MAL id).
@@ -815,7 +826,11 @@ function DetailModal({
               onPress={() => onToggleFavorite(entry)}
             >
               <Text style={[styles.heartButtonText, entry.favorite ? styles.heartButtonTextActive : null]}>
-                {entry.favorite ? '♥ Favourite' : '♡ Add to Favourites'}
+                {entry.favorite ? (
+                  <><Icon name="heart" size={16} /> Favourite</>
+                ) : (
+                  <><Icon name="heartOutline" size={16} /> Add to Favourites</>
+                )}
               </Text>
             </TouchableOpacity>
 
@@ -867,7 +882,11 @@ function DetailModal({
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Sync</Text>
               <Text style={styles.detailValue}>
-                {entry.sync_status === 'synced' ? '☁️ Synced to Drive' : '📴 Local only'}
+                {entry.sync_status === 'synced' ? (
+                  <><Icon name="cloud" size={15} /> Synced to Drive</>
+                ) : (
+                  <><Icon name="localOnly" size={15} /> Local only</>
+                )}
               </Text>
             </View>
 
@@ -955,12 +974,14 @@ function DetailModal({
 
           {onPickAgain ? (
             <TouchableOpacity style={styles.pickAgainButton} onPress={onPickAgain}>
-              <Text style={styles.pickAgainButtonText}>🎲 Pick again</Text>
+              <Text style={styles.pickAgainButtonText}>
+                <Icon name="random" size={16} /> Pick again
+              </Text>
             </TouchableOpacity>
           ) : null}
           <View style={styles.detailFooterRow}>
             <TouchableOpacity style={styles.detailNextButton} onPress={() => onOpenNext(entry)}>
-              <Text style={styles.detailNextButtonText}>{nextButtonLabel(entry, words)}</Text>
+              <Text style={styles.detailNextButtonText}><IconText icon={nextButtonLabel(entry, words).icon} size={17}>{nextButtonLabel(entry, words).label}</IconText></Text>
             </TouchableOpacity>
           </View>
           <View style={styles.detailFooterRow}>
@@ -992,44 +1013,44 @@ const SORTS = [
 // key: a minimum score, or 'favorite' for ♥ favourites only.
 const RATING_FILTERS = [
   { key: null, label: 'Any score' },
-  { key: 'favorite', label: '♥ Favourites' },
-  { key: 9, label: '★9+' },
-  { key: 8, label: '★8+' },
-  { key: 7, label: '★7+' },
-  { key: 6, label: '★6+' },
-  { key: 5, label: '★5+' },
+  { key: 'favorite', icon: 'heart', label: 'Favourites' },
+  { key: 9, icon: 'star', label: '9+' },
+  { key: 8, icon: 'star', label: '8+' },
+  { key: 7, icon: 'star', label: '7+' },
+  { key: 6, icon: 'star', label: '6+' },
+  { key: 5, icon: 'star', label: '5+' },
 ];
 const READ_STATUS_FILTERS = [
   { key: null, label: 'Any status' },
   { key: 'reading', label: '▶️ Reading/Watching' },
-  { key: 'read', label: '📖 Read/Watched' },
-  { key: 'on_hold', label: '⏸️ On Hold' },
-  { key: 'dropped', label: '✖️ Dropped' },
-  { key: 'want_to_read', label: '📌 Want to Read/Watch' },
+  { key: 'read', icon: 'read', label: 'Read/Watched' },
+  { key: 'on_hold', icon: 'on_hold', label: 'On Hold' },
+  { key: 'dropped', icon: 'dropped', label: 'Dropped' },
+  { key: 'want_to_read', icon: 'want_to_read', label: 'Want to Read/Watch' },
 ];
 
 // The 🎲 Random button's choices. Each row allows several choices at once
 // (e.g. Manga + Anime); a row with nothing chosen means "any".
 const RANDOM_STATUS_CHOICES = [
-  { key: 'read', label: '📖 Read/Watched' },
-  { key: 'want_to_read', label: '📌 Want to Read/Watch' },
+  { key: 'read', icon: 'read', label: 'Read/Watched' },
+  { key: 'want_to_read', icon: 'want_to_read', label: 'Want to Read/Watch' },
   { key: 'reading', label: '▶️ Reading/Watching' },
 ];
 // 'favorite': ♥ favourite entries; 'low': scored 1–5; 0: no score.
 const RANDOM_RATING_CHOICES = [
-  { key: 'favorite', label: '♥ Favourite' },
-  { key: 10, label: '★10' },
-  { key: 9, label: '★9' },
-  { key: 8, label: '★8' },
-  { key: 7, label: '★7' },
-  { key: 6, label: '★6' },
-  { key: 'low', label: '★1–5' },
+  { key: 'favorite', icon: 'heart', label: 'Favourite' },
+  { key: 10, icon: 'star', label: '10' },
+  { key: 9, icon: 'star', label: '9' },
+  { key: 8, icon: 'star', label: '8' },
+  { key: 7, icon: 'star', label: '7' },
+  { key: 6, icon: 'star', label: '6' },
+  { key: 'low', icon: 'star', label: '1–5' },
   { key: 0, label: 'No score' },
 ];
 // What Random picks: a title, or an artist credited on the matching titles.
 const RANDOM_KIND_CHOICES = [
-  { key: 'entry', label: '📚 Title' },
-  { key: 'artist', label: '🎭 Artist' },
+  { key: 'entry', icon: 'books', label: 'Title' },
+  { key: 'artist', icon: 'people', label: 'Artist' },
 ];
 const EMPTY_RANDOM_CHOICE = { types: [], statuses: [], ratings: [], kind: 'entry' };
 const EMPTY_SET = new Set();
@@ -1105,7 +1126,9 @@ function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles,
             )}
             {artist.cover && !moving ? (
               <TouchableOpacity onPress={() => setDraftFocus(focus || { x: 0.5, y: 0.5, zoom: 1 })} hitSlop={TAP_SLOP}>
-                <Text style={styles.moveText}>✥ Move picture</Text>
+                <Text style={styles.moveText}>
+                  <Icon name="move" size={15} /> Move picture
+                </Text>
               </TouchableOpacity>
             ) : null}
             <Text style={styles.detailTitle}>{artist.name}</Text>
@@ -1116,18 +1139,26 @@ function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles,
               onPress={() => onToggleFavorite(artist.name)}
             >
               <Text style={[styles.favoriteButtonText, isFavorite && styles.favoriteButtonTextActive]}>
-                {isFavorite ? '★ Favourite' : '☆ Add to Favourites'}
+                {isFavorite ? (
+                    <><Icon name="star" size={16} /> Favourite</>
+                  ) : (
+                    <><Icon name="starOutline" size={16} /> Add to Favourites</>
+                  )}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.detailUrlButton} onPress={() => onShowTitles(artist.name)}>
-              <Text style={styles.detailUrlText}>📚 Show their titles</Text>
+              <Text style={styles.detailUrlText}>
+                  <Icon name="books" size={15} /> Show their titles
+                </Text>
             </TouchableOpacity>
           </ScrollView>
 
           {onPickAgain ? (
             <TouchableOpacity style={styles.pickAgainButton} onPress={onPickAgain}>
-              <Text style={styles.pickAgainButtonText}>🎲 Pick again</Text>
+              <Text style={styles.pickAgainButtonText}>
+                <Icon name="random" size={16} /> Pick again
+              </Text>
             </TouchableOpacity>
           ) : null}
           <View style={styles.detailFooterRow}>
@@ -1158,13 +1189,15 @@ function toggled(list, value) {
 }
 
 function RandomModal({ visible, choice, onChange, onPick, onClose }) {
-  const chip = (active, label, onPress) => (
+  const chip = (active, label, onPress, icon = null) => (
     <TouchableOpacity
-      key={label}
+      key={`${icon}${label}`}
       style={[styles.filterChip, active && styles.filterChipActive]}
       onPress={onPress}
     >
-      <Text style={active ? styles.filterTextActive : styles.filterText}>{label}</Text>
+      <Text style={active ? styles.filterTextActive : styles.filterText}>
+        <IconText icon={icon} size={15}>{label}</IconText>
+      </Text>
     </TouchableOpacity>
   );
   // "Any" chip for a row: on when nothing in the row is chosen; tapping it
@@ -1175,7 +1208,9 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
       <View style={styles.detailOverlay}>
         <View style={styles.randomCard}>
           <ScrollView>
-            <Text style={styles.detailTitle}>🎲 Random</Text>
+            <Text style={styles.detailTitle}>
+              <Icon name="random" size={20} /> Random
+            </Text>
             <Text style={styles.randomHint}>Choose any number in each row — none means any.</Text>
 
             <Text style={styles.detailLabel}>Category</Text>
@@ -1192,8 +1227,11 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
             <View style={styles.readStatusRow}>
               {anyChip(choice.statuses, () => onChange({ ...choice, statuses: [] }))}
               {RANDOM_STATUS_CHOICES.map((r) =>
-                chip(choice.statuses.includes(r.key), r.label, () =>
-                  onChange({ ...choice, statuses: toggled(choice.statuses, r.key) })
+                chip(
+                  choice.statuses.includes(r.key),
+                  r.label,
+                  () => onChange({ ...choice, statuses: toggled(choice.statuses, r.key) }),
+                  r.icon
                 )
               )}
             </View>
@@ -1202,8 +1240,11 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
             <View style={styles.readStatusRow}>
               {anyChip(choice.ratings, () => onChange({ ...choice, ratings: [] }))}
               {RANDOM_RATING_CHOICES.map((r) =>
-                chip(choice.ratings.includes(r.key), r.label, () =>
-                  onChange({ ...choice, ratings: toggled(choice.ratings, r.key) })
+                chip(
+                  choice.ratings.includes(r.key),
+                  r.label,
+                  () => onChange({ ...choice, ratings: toggled(choice.ratings, r.key) }),
+                  r.icon
                 )
               )}
             </View>
@@ -1211,12 +1252,12 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
             <Text style={styles.detailLabel}>Pick a</Text>
             <View style={styles.readStatusRow}>
               {RANDOM_KIND_CHOICES.map((k) =>
-                chip(choice.kind === k.key, k.label, () => onChange({ ...choice, kind: k.key }))
+                chip(choice.kind === k.key, k.label, () => onChange({ ...choice, kind: k.key }), k.icon)
               )}
             </View>
             <Text style={styles.randomHint}>
-              Artist picks someone credited on your titles that match the choices above (♥ Favourite:
-              your ★ favourite artists).
+              Artist picks someone credited on your titles that match the choices above (Favourite:
+              your favourite artists).
             </Text>
           </ScrollView>
           <View style={styles.detailFooterRow}>
@@ -1224,7 +1265,9 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
               <Text style={styles.detailCloseButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.detailCloseButtonFlex, styles.randomPickButton]} onPress={onPick}>
-              <Text style={styles.detailCloseButtonText}>🎲 Pick</Text>
+              <Text style={styles.detailCloseButtonText}>
+                <Icon name="random" size={16} /> Pick
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1248,7 +1291,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [tagFilters, setTagFilters] = useState([]); // array of selected tag strings (AND logic)
   const [genreFilters, setGenreFilters] = useState([]); // selected genres (AND logic, like tags)
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
-  const [conflictsOnly, setConflictsOnly] = useState(false); // "⚠ to review" chip
+  const [conflictsOnly, setConflictsOnly] = useState(false); // "To review" chip
 
   // ⭐ To rate (ToRate.js): titles waiting for a score, across every type.
   const [toRate, setToRate] = useState({ finished: [], unrated: [], count: 0 });
@@ -1803,12 +1846,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   // clear it all.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterSummary = [
-    ...(artistFilter ? [`🎭 ${artistFilter}`] : []),
-    ...(minRating === 'favorite' ? ['♥'] : minRating ? [`★${minRating}+`] : []),
-    ...(readStatusFilter ? [READ_STATUS_ICONS[readStatusFilter] || '📌'] : []),
-    ...(conflictsOnly ? ['⚠'] : []),
-    ...genreFilters,
-    ...tagFilters.map((t) => `#${t}`),
+    ...(artistFilter ? [{ icon: 'people', text: artistFilter }] : []),
+    ...(minRating === 'favorite' ? [{ icon: 'heart' }] : minRating ? [{ icon: 'star', text: `${minRating}+` }] : []),
+    ...(readStatusFilter ? [{ icon: readStatusFilter }] : []),
+    ...(conflictsOnly ? [{ icon: 'warning' }] : []),
+    ...genreFilters.map((g) => ({ text: g })),
+    ...tagFilters.map((t) => ({ text: `#${t}` })),
   ];
   const clearFilters = () => {
     setArtistFilter('');
@@ -1913,12 +1956,16 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     <View style={styles.container}>
       <View style={styles.topButtons}>
         <TouchableOpacity style={[styles.randomTopButton, styles.topButton]} onPress={openRandom}>
-          <Text style={styles.randomTopButtonText}>🎲 Random</Text>
+          <Text style={styles.randomTopButtonText}>
+            <Icon name="random" size={16} /> Random
+          </Text>
         </TouchableOpacity>
         {/* Only while something is waiting for a score (ToRate.js). */}
         {toRate.count ? (
           <TouchableOpacity style={[styles.toRateButton, styles.topButton]} onPress={() => setToRateVisible(true)}>
-            <Text style={styles.toRateButtonText}>⭐ To rate · {toRate.count}</Text>
+            <Text style={styles.toRateButtonText}>
+              <Icon name="starOutline" size={16} /> To rate · {toRate.count}
+            </Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -1938,9 +1985,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       {filter ? (
         <View style={styles.filterBar}>
           {[
-            { key: 'items', label: '📚 Titles' },
-            { key: 'artists', label: '🎭 Artists' },
-            ...(MEDIA_TYPES[filter]?.groupField ? [{ key: 'groups', label: '🗂 Groups' }] : []),
+            { key: 'items', icon: 'books', label: 'Titles' },
+            { key: 'artists', icon: 'people', label: 'Artists' },
+            ...(MEDIA_TYPES[filter]?.groupField ? [{ key: 'groups', icon: 'groups', label: 'Groups' }] : []),
           ].map((v) => {
             const active = (sectionViews[filter] || 'items') === v.key;
             return (
@@ -1949,7 +1996,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
                 style={[styles.filterChip, active && styles.filterChipActive]}
                 onPress={() => setSectionView(filter, v.key)}
               >
-                <Text style={active ? styles.filterTextActive : styles.filterText}>{v.label}</Text>
+                <Text style={active ? styles.filterTextActive : styles.filterText}>
+                  <IconText icon={v.icon} size={15}>{v.label}</IconText>
+                </Text>
               </TouchableOpacity>
             );
           })}
@@ -1970,7 +2019,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             />
             {peopleQuery ? (
               <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')} accessibilityLabel="Clear">
-                <Text style={styles.artistFilterClear}>✕</Text>
+                <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -2024,7 +2073,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             />
             {peopleQuery ? (
               <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setPeopleQuery('')} accessibilityLabel="Clear">
-                <Text style={styles.artistFilterClear}>✕</Text>
+                <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -2055,7 +2104,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
                   </Text>
                   <Text style={styles.author}>{titleCount(item.count)}</Text>
                 </View>
-                {favsOf(filter).has(item.name) ? <Text style={styles.favoriteStar}>★</Text> : null}
+                {favsOf(filter).has(item.name) ? (
+                  <Text style={styles.favoriteStar}>
+                    <Icon name="star" size={18} />
+                  </Text>
+                ) : null}
               </TouchableOpacity>
             )}
             ListEmptyComponent={
@@ -2072,13 +2125,19 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       <View style={styles.filterToggleRow}>
         <TouchableOpacity style={styles.filterToggle} onPress={() => setFiltersOpen((o) => !o)}>
           <Text style={styles.filterToggleText} numberOfLines={1}>
-            ⚙︎ Filters{activeFilterSummary.length ? ` · ${activeFilterSummary.join(' · ')}` : ''}
+            <Icon name="filters" size={16} /> Filters
+            {activeFilterSummary.map((s, i) => (
+              <React.Fragment key={i}>
+                {' · '}
+                <IconText icon={s.icon} size={14}>{s.text}</IconText>
+              </React.Fragment>
+            ))}
           </Text>
           <Text style={styles.filterToggleArrow}>{filtersOpen ? '▴' : '▾'}</Text>
         </TouchableOpacity>
         {activeFilterSummary.length ? (
           <TouchableOpacity style={styles.artistFilterClearButton} onPress={clearFilters} accessibilityLabel="Clear">
-            <Text style={styles.artistFilterClear}>✕</Text>
+            <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -2091,7 +2150,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             style={[styles.filterChip, sort === s.key && styles.filterChipActive]}
             onPress={() => setSort(s.key)}
           >
-            <Text style={sort === s.key ? styles.filterTextActive : styles.filterText}>{s.label}</Text>
+            <Text style={sort === s.key ? styles.filterTextActive : styles.filterText}>
+              <IconText icon={s.icon} size={15}>{s.label}</IconText>
+            </Text>
           </TouchableOpacity>
         ))}
         {conflictCount > 0 || conflictsOnly ? (
@@ -2100,7 +2161,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             onPress={() => setConflictsOnly((v) => !v)}
           >
             <Text style={conflictsOnly ? styles.filterTextActive : styles.reviewChipText}>
-              ⚠ To review ({conflictCount})
+              <Icon name="warning" size={15} /> To review ({conflictCount})
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -2112,12 +2173,12 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           onPress={openArtistFilter}
         >
           <Text style={styles.artistFilterButtonText}>
-            🎭 {artistFilter ? `Artist: ${artistFilter}` : 'Filter by Artist'}
+            <Icon name="people" size={16} /> {artistFilter ? `Artist: ${artistFilter}` : 'Filter by Artist'}
           </Text>
         </TouchableOpacity>
         {artistFilter ? (
           <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setArtistFilter('')} accessibilityLabel="Clear">
-            <Text style={styles.artistFilterClear}>✕</Text>
+            <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -2134,7 +2195,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             style={[styles.filterChip, minRating === r.key && styles.filterChipActive]}
             onPress={() => setMinRating(r.key)}
           >
-            <Text style={minRating === r.key ? styles.filterTextActive : styles.filterText}>{r.label}</Text>
+            <Text style={minRating === r.key ? styles.filterTextActive : styles.filterText}>
+              <IconText icon={r.icon} size={15}>{r.label}</IconText>
+            </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -2152,7 +2215,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             onPress={() => setReadStatusFilter(r.key)}
           >
             <Text style={readStatusFilter === r.key ? styles.filterTextActive : styles.filterText}>
-              {r.label}
+              <IconText icon={r.icon} size={15}>{r.label}</IconText>
             </Text>
           </TouchableOpacity>
         ))}
@@ -2223,9 +2286,17 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               </Text>
               {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
               <View style={styles.metaRow}>
-                {item.score ? <Text style={styles.scoreBadge}>★ {item.score}</Text> : null}
+                {item.score ? (
+                  <Text style={styles.scoreBadge}>
+                    <Icon name="star" size={13} /> {item.score}
+                  </Text>
+                ) : null}
                 {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
-                {item.mal_conflicts ? <Text style={styles.conflictBadge}>⚠ differs from MAL</Text> : null}
+                {item.mal_conflicts ? (
+                  <Text style={styles.conflictBadge}>
+                    <Icon name="warning" size={13} /> differs from MAL
+                  </Text>
+                ) : null}
                 {item.group_name ? (
                   <Text style={styles.progressBadge} numberOfLines={1}>
                     {item.group_name}
@@ -2234,12 +2305,19 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.typeBadge}>{item.media_type}</Text>
-                {item.favorite ? <Text style={styles.heartBadge}>♥</Text> : null}
-                {READ_STATUS_ICONS[item.read_status] ? (
-                  <Text style={styles.readStatusBadge}>{READ_STATUS_ICONS[item.read_status]}</Text>
+                {item.favorite ? (
+                  <Text style={styles.heartBadge} accessibilityLabel="Favourite">
+                    <Icon name="heart" size={14} />
+                  </Text>
+                ) : null}
+                {item.read_status ? (
+                  <Text style={styles.readStatusBadge}>
+                    <Icon name={item.read_status} size={15} />
+                  </Text>
                 ) : null}
                 <Text style={styles.status}>
-                  {item.sync_status === 'synced' ? '☁️ Synced' : '📴 Local only'}
+                  <Icon name={item.sync_status === 'synced' ? 'cloud' : 'localOnly'} size={12} />{' '}
+                  {item.sync_status === 'synced' ? 'Synced' : 'Local only'}
                 </Text>
               </View>
             </View>
@@ -2376,7 +2454,9 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           <ScrollView style={styles.logScroll}>
             {artistFilter ? (
               <TouchableOpacity style={styles.artistClearRow} onPress={() => selectArtist('')}>
-                <Text style={styles.artistClearRowText}>✕ Clear current filter</Text>
+                <Text style={styles.artistClearRowText}>
+                  <Icon name="close" size={15} /> Clear current filter
+                </Text>
               </TouchableOpacity>
             ) : null}
             {MEDIA_TYPE_LIST.map((mediaConfig) => {

@@ -23,6 +23,7 @@ import {
 } from './db';
 import { syncNotepadToDrive, onNotepadSynced } from './notepadSync';
 import { TAP_SLOP } from './touch';
+import Icon from './Icon';
 import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
 
@@ -222,7 +223,7 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
                   onPress={() => setSelectedId(t.id)}
                 >
                   <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                    {t.id == null ? '📥 ' : ''}
+                    {t.id == null ? <><Icon name="inbox" size={15} />{' '}</> : null}
                     {t.title}
                     {t.count > 0 ? ` · ${t.count}` : ''}
                   </Text>
@@ -287,7 +288,9 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
                 style={styles.itemAction}
                 accessibilityLabel="Delete"
               >
-                <Text style={styles.deleteText}>✕</Text>
+                <Text style={styles.deleteText}>
+                  <Icon name="close" size={20} />
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -339,7 +342,7 @@ export default forwardRef(function Notepad({ visible, refreshKey }, ref) {
                   .map((t) => (
                     <TouchableOpacity key={String(t.id)} style={styles.moveRow} onPress={() => handleMoveTo(t.id)}>
                       <Text style={styles.moveRowText}>
-                        {t.id == null ? '📥 ' : ''}
+                        {t.id == null ? <><Icon name="inbox" size={15} />{' '}</> : null}
                         {t.title}
                       </Text>
                     </TouchableOpacity>

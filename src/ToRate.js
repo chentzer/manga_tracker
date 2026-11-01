@@ -3,6 +3,7 @@ import { Modal, View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } fr
 import { getSetting, setSetting } from './db';
 import { MEDIA_TYPES } from './mediaTypes';
 import { TAP_SLOP } from './touch';
+import Icon from './Icon';
 import { themed, useDarkMode } from './theme';
 
 // The Library's ⭐ To rate button (EntryList.js): titles waiting for a score.
@@ -76,7 +77,9 @@ export default function ToRateModal({ visible, list, onRate, onSkip, onClose }) 
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.card}>
-          <Text style={styles.heading}>⭐ To rate</Text>
+          <Text style={styles.heading}>
+            <Icon name="starOutline" size={20} /> To rate
+          </Text>
           <ScrollView style={styles.scroll}>
             {list.finished.length ? (
               <>

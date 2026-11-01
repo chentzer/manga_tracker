@@ -37,6 +37,7 @@ import {
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import UndoBar from './src/UndoBar';
+import Icon from './src/Icon';
 import { TAP_SLOP } from './src/touch';
 import { syncNotepadToDrive } from './src/notepadSync';
 import ProcessText from './modules/process-text/src';
@@ -77,10 +78,10 @@ const BROWSING_TAB_KEYS = [...SITE_TAB_KEYS, 'browser'];
 // screen: a site's key, 'browser', 'library' or 'notepad'.
 const SITE_TABS = MEDIA_TYPE_LIST.map((m) => ({ key: m.key, label: m.label }));
 const SECTIONS = [
-  { key: 'browse', label: 'Browse', icon: '🏠' },
-  { key: 'library', label: 'Library', icon: '📚' },
-  { key: 'browser', label: 'Browser', icon: '🌐' },
-  { key: 'notepad', label: 'Notepad', icon: '📝' },
+  { key: 'browse', label: 'Browse', icon: 'browse', iconOn: 'browseOn' },
+  { key: 'library', label: 'Library', icon: 'library' },
+  { key: 'browser', label: 'Browser', icon: 'browser' },
+  { key: 'notepad', label: 'Notepad', icon: 'notepad', iconOn: 'notepadOn' },
 ];
 const sectionOfTab = (tab) => (SITE_TAB_KEYS.includes(tab) ? 'browse' : tab);
 // Screens with nothing to scroll away from: the bars stay shown.
@@ -868,7 +869,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       if (result.alreadyThere > 0) lines.push(`${result.alreadyThere} were already there.`);
       if (result.differing > 0) {
         lines.push(
-          `${result.differing} differ from what's in the app — tap "⚠ To review" in the Library to go through them. Nothing in the app was overwritten.`
+          `${result.differing} differ from what's in the app — tap "To review" in the Library to go through them. Nothing in the app was overwritten.`
         );
       }
       if (result.covers > 0) {
@@ -912,7 +913,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
-            <Text style={styles.headerSettingsIcon}>⚙️</Text>
+            <Icon name="settings" size={24} color="#ffffff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -1019,7 +1020,11 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
               accessibilityLabel={section.label}
             >
               <View style={[styles.bottomIconPill, active && styles.bottomIconPillActive]}>
-                <Text style={styles.bottomIcon}>{section.icon}</Text>
+                <Icon
+                  name={(active && section.iconOn) || section.icon}
+                  size={24}
+                  color={active ? '#ff7a90' : '#a0a0b4'}
+                />
               </View>
               <Text style={active ? styles.bottomLabelActive : styles.bottomLabel}>{section.label}</Text>
             </TouchableOpacity>
@@ -1052,7 +1057,13 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             <View style={styles.settingsRow}>
               <View style={styles.settingsRowText}>
                 <Text style={styles.settingsLabel}>
-                  {isSignedInToGoogle ? '☁️ Cloud sync is on' : 'Cloud sync is off'}
+                  {isSignedInToGoogle ? (
+                    <>
+                      <Icon name="cloud" size={16} /> Cloud sync is on
+                    </>
+                  ) : (
+                    'Cloud sync is off'
+                  )}
                 </Text>
                 <Text style={styles.settingsHint}>
                   {isSignedInToGoogle
@@ -1097,12 +1108,14 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                   onPress={() => runMalExport(l.key)}
                   disabled={malBusy}
                 >
-                  <Text style={styles.settingsSmallButtonText}>⬆ Export {l.label}</Text>
+                  <Text style={styles.settingsSmallButtonText}>
+                    <Icon name="upload" size={15} /> Export {l.label}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity style={styles.settingsWideButton} onPress={handleMalImport} disabled={malBusy}>
-              <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : '⬇ Import MAL list'}</Text>
+              <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : <><Icon name="downloaded" size={15} /> Import MAL list</>}</Text>
             </TouchableOpacity>
 
             <Text style={styles.settingsSectionTitle}>Sites</Text>
@@ -1298,7 +1311,6 @@ const styles = themed(StyleSheet.create({
   title: { color: '#fff', fontSize: 18, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerSettingsButton: { paddingHorizontal: 4, paddingVertical: 2 },
-  headerSettingsIcon: { fontSize: 22 },
   tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },
   tabBarHidden: { height: 0, overflow: 'hidden' },
   tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center' },
@@ -1311,7 +1323,6 @@ const styles = themed(StyleSheet.create({
   bottomItem: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' },
   bottomIconPill: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 16 },
   bottomIconPillActive: { backgroundColor: '#3a2340' },
-  bottomIcon: { fontSize: 20 },
   bottomLabel: { color: '#a0a0b4', fontSize: 12, marginTop: 2 },
   bottomLabelActive: { color: '#ff7a90', fontSize: 12, fontWeight: '700', marginTop: 2 },
   settingsOverlay: {

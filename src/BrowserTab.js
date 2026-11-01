@@ -8,6 +8,7 @@ import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
 import { TAP_SLOP } from './touch';
 import PageError from './PageError';
+import Icon from './Icon';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Turns what was typed in the address bar into a URL to open:
@@ -234,7 +235,7 @@ const BrowserTab = forwardRef(function BrowserTab(
           hitSlop={4}
           accessibilityLabel={nav.loading ? 'Stop loading' : 'Reload'}
         >
-          <Text style={[styles.navTextSmall, !source && styles.navDisabled]}>{nav.loading ? '✕' : '⟳'}</Text>
+          <Text style={[styles.navTextSmall, !source && styles.navDisabled]}><Icon name={nav.loading ? 'close' : 'reload'} size={20} /></Text>
         </TouchableOpacity>
       </View>
 
@@ -261,7 +262,9 @@ const BrowserTab = forwardRef(function BrowserTab(
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity onPress={() => setBlockedUrl(null)} hitSlop={TAP_SLOP} accessibilityLabel="Dismiss">
-            <Text style={styles.blockedAction}>✕</Text>
+            <Text style={styles.blockedAction}>
+              <Icon name="close" size={18} />
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}

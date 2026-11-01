@@ -4,6 +4,7 @@
 // (App.js keeps them up after a failed load), so the site list and
 // address bar are still there.
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Icon from './Icon';
 import { themed, useDarkMode } from './theme';
 
 function explain(description = '') {
@@ -24,11 +25,14 @@ export default function PageError({ description, onRetry }) {
   const [title, hint] = explain(description);
   return (
     <View style={styles.wrap}>
+      <Text style={styles.icon}>
+        <Icon name="localOnly" size={48} />
+      </Text>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.hint}>{hint}</Text>
       <TouchableOpacity style={styles.retry} onPress={onRetry} accessibilityRole="button">
         <Text style={styles.retryText}>
-          Retry
+          <Icon name="reload" size={18} /> Retry
         </Text>
       </TouchableOpacity>
     </View>
@@ -44,6 +48,7 @@ const styles = themed(
       justifyContent: 'center',
       padding: 24,
     },
+    icon: { color: '#666', marginBottom: 12 },
     title: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 6, textAlign: 'center' },
     hint: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20 },
     retry: {

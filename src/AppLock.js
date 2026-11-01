@@ -5,6 +5,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as FileSystem from 'expo-file-system/legacy';
 import { isRelockSuppressed, suppressNextRelock } from './relockGuard';
 import { initDb, getSetting, setSetting } from './db';
+import Icon from './Icon';
 
 // { lockEnabled, changeLockEnabled } for the Settings → App lock switch.
 const AppLockSettingContext = createContext(null);
@@ -166,7 +167,7 @@ export default function AppLock({ children }) {
   if (locked) {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={styles.icon}>🔒</Text>
+        <Icon name="lock" size={56} color="#e94560" style={styles.icon} />
         <Text style={styles.title}>AniManga Tracker Locked</Text>
         {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
         <TouchableOpacity
@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  icon: { fontSize: 56, marginBottom: 16 },
+  icon: { marginBottom: 16 },
   title: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 12 },
   status: {
     color: '#f5a623',

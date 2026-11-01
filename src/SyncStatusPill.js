@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { clearSyncResult, getSyncStatus, onSyncStatus } from './syncStatus';
+import Icon from './Icon';
 
 // The pill beside the Settings button: "Backup", "Restore" or "Import"
 // (MAL import, src/malList.js) while it runs, filling from the left as it goes (full = done), then
@@ -13,9 +14,9 @@ const SHOW_DELAY_MS = 500;
 const SUCCESS_MS = 2000;
 
 const LABELS = {
-  backup: { running: 'Backup', done: '✓ Backed up', failed: '⚠ Backup failed' },
-  restore: { running: 'Restore', done: '✓ Restored', failed: '⚠ Restore failed' },
-  import: { running: 'Import', done: '✓ Imported', failed: '⚠ Import failed' },
+  backup: { running: 'Backup', done: 'Backed up', failed: 'Backup failed' },
+  restore: { running: 'Restore', done: 'Restored', failed: 'Restore failed' },
+  import: { running: 'Import', done: 'Imported', failed: 'Import failed' },
 };
 
 export default function SyncStatusPill() {
@@ -70,7 +71,7 @@ export default function SyncStatusPill() {
       return (
         <View style={[styles.pill, styles.pillDone]}>
           <Text style={styles.text} numberOfLines={1}>
-            {result.summary ? `✓ ${result.summary}` : labels.done}
+            <Icon name="check" size={13} /> {result.summary || labels.done}
           </Text>
         </View>
       );
@@ -79,12 +80,14 @@ export default function SyncStatusPill() {
       <TouchableOpacity
         style={[styles.pill, styles.pillFailed]}
         onPress={() => {
-          Alert.alert(labels.failed.replace('⚠ ', ''), result.error);
+          Alert.alert(labels.failed, result.error);
           clearSyncResult();
         }}
         hitSlop={6}
       >
-        <Text style={styles.text}>{labels.failed}</Text>
+        <Text style={styles.text}>
+          <Icon name="warning" size={13} /> {labels.failed}
+        </Text>
       </TouchableOpacity>
     );
   }
