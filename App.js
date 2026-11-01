@@ -37,6 +37,7 @@ import {
 import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import UndoBar from './src/UndoBar';
+import { TAP_SLOP } from './src/touch';
 import { syncNotepadToDrive } from './src/notepadSync';
 import ProcessText from './modules/process-text/src';
 import { classify } from './src/quickSearch';
@@ -384,6 +385,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   // down at the very top of the page brings it back (src/tabBarWatch.js
   // reports both). Always shown on the Library tab.
   const [tabBarHidden, setTabBarHidden] = useState(false);
+  // Only a loaded page can bring the bars back (the pull is read by a
+  // script in the page), so they stay shown while a tab's page is loading
+  // or failed to load, and before its first page has loaded: pageStates
+  // holds each tab's 'loading' / 'loaded' / 'error' (from its web view).
+  // Tapping the header brings them back whatever the page is doing.
+  const pageStates = useRef({});
   const tabBarHiddenRef = useRef(false);
   const hideTimer = useRef(null);
   const setTabBarHiddenAnimated = useCallback((hidden) => {
@@ -395,7 +402,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const scheduleTabBarHide = useCallback(() => {
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
-      if (!KEEP_BARS.includes(tabRef.current)) setTabBarHiddenAnimated(true);
+      const current = tabRef.current;
+      if (!KEEP_BARS.includes(current) && pageStates.current[current] === 'loaded') setTabBarHiddenAnimated(true);
     }, TAB_BAR_HIDE_MS);
   }, [setTabBarHiddenAnimated]);
   useEffect(() => {
@@ -409,8 +417,14 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   useEffect(() => () => clearTimeout(hideTimer.current), []);
   const handleTabBarActivity = useCallback(
     (tabKey, kind) => {
+      if (kind === 'loading' || kind === 'loaded' || kind === 'error') pageStates.current[tabKey] = kind;
       if (tabKey !== tabRef.current) return; // a tab in the background
-      if (kind === 'library') {
+      if (kind === 'loading' || kind === 'error') {
+        clearTimeout(hideTimer.current);
+        setTabBarHiddenAnimated(false);
+      } else if (kind === 'loaded') {
+        scheduleTabBarHide();
+      } else if (kind === 'library') {
         setTab('library'); // pulled up past the bottom of the page
       } else if (kind === 'pullTop') {
         setTabBarHiddenAnimated(false);
@@ -874,7 +888,19 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.title}>AniManga Tracker</Text>
+        {/* Tapping the header brings the bars back, e.g. on a page that
+            can't (still loading, or failed to load). */}
+        <TouchableOpacity
+          onPress={() => {
+            setTabBarHiddenAnimated(false);
+            scheduleTabBarHide();
+          }}
+          hitSlop={TAP_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel="Show the tabs"
+        >
+          <Text style={styles.title}>AniManga Tracker</Text>
+        </TouchableOpacity>
         <View style={styles.headerRight}>
           {/* Backup / restore progress (src/SyncStatusPill.js). */}
           <SyncStatusPill />

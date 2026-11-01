@@ -42,6 +42,7 @@ import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName } from './gallery';
 import { TAP_SLOP } from './touch';
+import PageError from './PageError';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Asks the page for what a screenshot's file name needs (App.js →
@@ -1797,6 +1798,14 @@ const MediaWebView = forwardRef(function MediaWebView({
         ref={webviewRef}
         source={startSource}
         onNavigationStateChange={handleNavigationStateChange}
+        // For the auto-hiding bars (App.js): they stay up until a page has
+        // loaded, since only a loaded page can bring them back.
+        onLoadStart={() => tabBarActivityRef.current?.('loading')}
+        onLoad={() => tabBarActivityRef.current?.('loaded')}
+        onError={() => tabBarActivityRef.current?.('error')}
+        renderError={(domain, code, description) => (
+          <PageError description={description} onRetry={() => webviewRef.current?.reload()} />
+        )}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         // Every address goes to handleShouldStartLoad. With the default
         // (http/https only), anything else skips it and goes straight to

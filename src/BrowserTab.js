@@ -7,6 +7,7 @@ import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
 import { TAP_SLOP } from './touch';
+import PageError from './PageError';
 import { themed, themeColor, useDarkMode } from './theme';
 
 // Turns what was typed in the address bar into a URL to open:
@@ -270,6 +271,14 @@ const BrowserTab = forwardRef(function BrowserTab(
           ref={webviewRef}
           source={source}
           style={styles.webview}
+          // For the auto-hiding bars (App.js): they stay up until a page
+          // has loaded, since only a loaded page can bring them back.
+          onLoadStart={() => onTabBarActivity?.('loading')}
+          onLoad={() => onTabBarActivity?.('loaded')}
+          onError={() => onTabBarActivity?.('error')}
+          renderError={(domain, code, description) => (
+            <PageError description={description} onRetry={() => webviewRef.current?.reload()} />
+          )}
           onNavigationStateChange={(state) => {
             setNav({
               url: state.url,
