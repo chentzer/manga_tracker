@@ -40,7 +40,7 @@ import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture as saveHeldPictureToGallery, getHoldToSave } from './imageHold';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
-import { galleryFolderFor, safeFileName } from './gallery';
+import { galleryFolderFor, safeFileName, saveFileToGallery } from './gallery';
 import { TAP_SLOP } from './touch';
 import PageError from './PageError';
 import Icon from './Icon';
