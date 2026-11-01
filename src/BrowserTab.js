@@ -7,6 +7,7 @@ import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
 import { TAP_SLOP } from './touch';
+import { tourTarget } from './Tour';
 import PageError from './PageError';
 import Icon from './Icon';
 import { themed, themeColor, useDarkMode } from './theme';
@@ -211,6 +212,7 @@ const BrowserTab = forwardRef(function BrowserTab(
           <Text style={[styles.navText, !nav.canGoForward && styles.navDisabled]}>›</Text>
         </TouchableOpacity>
         <TextInput
+          ref={tourTarget('browser.address')}
           style={styles.address}
           value={editingAddress ? address : nav.url || address}
           onChangeText={setAddress}

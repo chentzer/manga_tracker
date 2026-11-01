@@ -43,6 +43,7 @@ import {
 import FocusImage from './FocusImage';
 import RatePrompt from './RatePrompt';
 import { TAP_SLOP } from './touch';
+import { tourTarget } from './Tour';
 import Icon, { IconText } from './Icon';
 import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
@@ -2081,7 +2082,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   return (
     <View style={styles.container}>
       <View style={styles.topButtons}>
-        <TouchableOpacity style={[styles.randomTopButton, styles.topButton]} onPress={openRandom}>
+        <TouchableOpacity ref={tourTarget('library.random')} style={[styles.randomTopButton, styles.topButton]} onPress={openRandom}>
           <Text style={styles.randomTopButtonText}>
             <Icon name="random" size={16} /> Random
           </Text>
@@ -2096,7 +2097,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         ) : null}
       </View>
 
-      <View style={[styles.filterBar, styles.filterBarWrap]}>
+      <View ref={tourTarget('library.types')} style={[styles.filterBar, styles.filterBarWrap]}>
         {FILTERS.map((f) => (
           <TouchableOpacity
             key={f.key ?? 'all'}
@@ -2249,7 +2250,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       {/* Filters fold away into one bar (summary of what's on + Clear), so
           the list keeps the screen; tap the bar to show them all. */}
       <View style={styles.filterToggleRow}>
-        <TouchableOpacity style={styles.filterToggle} onPress={() => setFiltersOpen((o) => !o)}>
+        <TouchableOpacity ref={tourTarget('library.filters')} style={styles.filterToggle} onPress={() => setFiltersOpen((o) => !o)}>
           <Text style={styles.filterToggleText} numberOfLines={1}>
             <Icon name="filters" size={16} /> Filters
             {activeFilterSummary.map((s, i) => (
@@ -2434,6 +2435,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       ) : null}
 
       <FlatList
+        ref={tourTarget('library.list')}
         extraData={[dark, picked]}
         style={styles.list}
         data={displayEntries}

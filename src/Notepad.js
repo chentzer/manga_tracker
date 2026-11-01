@@ -24,6 +24,7 @@ import {
 import { syncNotepadToDrive, onNotepadSynced } from './notepadSync';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
 import { TAP_SLOP } from './touch';
+import { tourTarget } from './Tour';
 import Icon from './Icon';
 import { offerUndo } from './undo';
 import { themed, themeColor, useDarkMode } from './theme';
@@ -245,7 +246,7 @@ export default forwardRef(function Notepad({ visible, refreshKey, onSearch }, re
   return (
       <View style={styles.container}>
 
-        <View>
+        <View ref={tourTarget('notepad.notes')} collapsable={false}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
             {tabs.map((t) => {
               const active = t.id === selectedId;

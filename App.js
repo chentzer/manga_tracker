@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -40,6 +40,7 @@ import { CrashGuard, installCrashHandler } from './src/CrashScreen';
 import UndoBar from './src/UndoBar';
 import Icon from './src/Icon';
 import { TAP_SLOP } from './src/touch';
+import Tour, { tourSteps, tourTarget } from './src/Tour';
 import { syncNotepadToDrive } from './src/notepadSync';
 import ProcessText from './modules/process-text/src';
 import { classify } from './src/quickSearch';
@@ -249,6 +250,24 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const [tab, setTab] = useState(MEDIA_TYPE_LIST[0].key);
   const tabRef = useRef(tab);
   tabRef.current = tab;
+
+  // The first-launch tour (src/Tour.js): runs once, after the app is
+  // unlocked; Settings → App → Show the tour plays it again. While it's
+  // open the bars stay shown, since it points at them.
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourOpenRef = useRef(false);
+  tourOpenRef.current = tourOpen;
+  const steps = useMemo(() => tourSteps({ siteTab: SITE_TABS[0].key, siteTabs: SITE_TABS }), []);
+  useEffect(() => {
+    if (getSetting('tourDone', '0') === '1') return undefined;
+    const timer = setTimeout(() => setTourOpen(true), 1200);
+    return () => clearTimeout(timer);
+  }, []);
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    setSetting('tourDone', '1');
+  }, []);
+  const showTourTab = useCallback((key) => setTab(key), []);
   // The site tab Browse goes back to.
   const lastSiteTab = useRef(tab);
   if (sectionOfTab(tab) === 'browse') lastSiteTab.current = tab;
@@ -410,6 +429,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const tabBarHiddenRef = useRef(false);
   const hideTimer = useRef(null);
   const setTabBarHiddenAnimated = useCallback((hidden) => {
+    if (hidden && tourOpenRef.current) return;
     if (tabBarHiddenRef.current === hidden) return;
     tabBarHiddenRef.current = hidden;
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -431,6 +451,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     }
   }, [tab, scheduleTabBarHide, setTabBarHiddenAnimated]);
   useEffect(() => () => clearTimeout(hideTimer.current), []);
+  useEffect(() => {
+    if (tourOpen) setTabBarHiddenAnimated(false);
+  }, [tourOpen, setTabBarHiddenAnimated]);
   const handleTabBarActivity = useCallback(
     (tabKey, kind) => {
       if (kind === 'loading' || kind === 'loaded' || kind === 'error') pageStates.current[tabKey] = kind;
@@ -915,6 +938,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         {/* Tapping the header brings the bars back, e.g. on a page that
             can't (still loading, or failed to load). */}
         <TouchableOpacity
+          ref={tourTarget('header.title')}
           onPress={() => {
             setTabBarHiddenAnimated(false);
             scheduleTabBarHide();
@@ -927,9 +951,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         </TouchableOpacity>
         <View style={styles.headerRight}>
           {/* Backup / restore progress (src/SyncStatusPill.js). */}
-          <SyncStatusPill />
+          <View ref={tourTarget('header.sync')} collapsable={false}>
+            <SyncStatusPill />
+          </View>
           {/* Settings (incl. Drive and MyAnimeList), on every tab. */}
           <TouchableOpacity
+            ref={tourTarget('header.settings')}
             onPress={() => setSettingsVisible(true)}
             hitSlop={10}
             style={styles.headerSettingsButton}
@@ -943,10 +970,11 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
 
       {/* Browse's site chooser. */}
       {sectionOfTab(tab) === 'browse' ? (
-        <View style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
+        <View ref={tourTarget('siteTabs')} style={[styles.tabBar, tabBarHidden && styles.tabBarHidden]}>
           {SITE_TABS.map((t) => (
             <TouchableOpacity
               key={t.key}
+              ref={tourTarget(`siteTab.${t.key}`)}
               style={styles.tabItem}
               onPress={() => setTab(t.key)}
               accessibilityRole="tab"
@@ -969,6 +997,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         {tabConfigs.map((mediaConfig) => (
           <View
             key={mediaConfig.key}
+            ref={tourTarget(`page.${mediaConfig.key}`)}
+            collapsable={false}
             style={[styles.tabPane, { display: tab === mediaConfig.key ? 'flex' : 'none' }]}
           >
             {/* Not loaded yet, or unloaded by Data saver: nothing here
@@ -985,7 +1015,6 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 onViewInLibrary={handleViewInLibrary}
                 buttons={buttons}
                 blockAds={blockAds}
-              holdToSave={holdToSave}
                 holdToSave={holdToSave}
                 onTabBarActivity={(kind) => handleTabBarActivity(mediaConfig.key, kind)}
                 initialUrl={lastUrls.current[mediaConfig.key] || null}
@@ -1041,6 +1070,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
           return (
             <TouchableOpacity
               key={section.key}
+              ref={tourTarget(`bottom.${section.key}`)}
               style={styles.bottomItem}
               onPress={() => setTab(section.key === 'browse' ? lastSiteTab.current : section.key)}
               accessibilityRole="tab"
@@ -1059,6 +1089,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
           );
         })}
       </View>
+
+      {/* Over everything but pop-ups (Settings closes before a replay). */}
+      <Tour steps={steps} visible={tourOpen} onShowTab={showTourTab} onClose={closeTour} />
 
       <QuickSearchPicker
         pick={searchPick}
@@ -1277,6 +1310,22 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 </Text>
               </View>
               <Switch value={showDebugTools} onValueChange={toggleDebugTools} />
+            </View>
+            <View style={[styles.settingsRow, styles.settingsRowGap]}>
+              <View style={styles.settingsRowText}>
+                <Text style={styles.settingsLabel}>Tour</Text>
+                <Text style={styles.settingsHint}>Walks through every tab and feature on the real screen.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.settingsSmallButton}
+                onPress={() => {
+                  setSettingsVisible(false);
+                  setTimeout(() => setTourOpen(true), 400);
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.settingsSmallButtonText}>Show the tour</Text>
+              </TouchableOpacity>
             </View>
             {Platform.OS === 'android' && Platform.Version >= 31 ? (
               <View style={[styles.settingsRow, styles.settingsRowSpaced]}>

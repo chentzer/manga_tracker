@@ -907,6 +907,22 @@ so nothing renders blank.
   Icons are Material Design Icons (`src/Icon.js`). The app turns with the phone (no portrait lock), grey
   text meets 4.5:1 contrast, and small controls have 48 dp tap areas
   (`src/touch.js` `TAP_SLOP`) and TalkBack labels.
+  **First-launch tour** (`src/Tour.js`): once the app is first unlocked,
+  it walks through every tab and feature on the real screens — each step
+  dims the rest and outlines one control, with "3 of 18", **Back**,
+  **Skip** and **Next** (Android's Back steps back too). It covers the
+  bottom bar, the site tabs, site list, search box and Next ›, hold to
+  save / pull to reload / pull up for the Library, bringing the bars
+  back, double-tap seek on Anime, the Library's kinds, Filters, Random,
+  details and selecting, the Browser, the Notepad and its Inbox, Drive
+  sync and Settings. A step whose control is turned off in Settings (or
+  a one-site tab's site list) is skipped. It runs once (the `tourDone`
+  setting); **Settings → Tour → Show the tour** plays it again. Controls
+  join it with `ref={tourTarget('key')}`, and the steps are
+  `tourSteps()` in Tour.js — update them whenever a tab or feature is
+  added, moved or removed.
+  An error that would close the app shows on screen instead, with
+  **Share error** and **Try again** (`src/CrashScreen.js`).
   All tabs stay mounted simultaneously at all times — switching
   tabs only toggles `display: none`/`flex`, never unmounts anything —
   so each webview keeps its scroll position and navigation history when

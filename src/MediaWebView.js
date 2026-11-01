@@ -42,6 +42,7 @@ import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName, saveFileToGallery } from './gallery';
 import { TAP_SLOP } from './touch';
+import { tourTarget } from './Tour';
 import PageError from './PageError';
 import Icon from './Icon';
 import { themed, themeColor, useDarkMode } from './theme';
@@ -1631,7 +1632,11 @@ const MediaWebView = forwardRef(function MediaWebView({
   };
   const siteButton =
     sites.length < 2 || !buttons.siteMenu ? null : (
-      <TouchableOpacity style={[styles.manualButton, styles.siteButton]} onPress={() => setSiteMenuVisible(true)}>
+      <TouchableOpacity
+        ref={tourTarget(`site.${config.key}.menu`)}
+        style={[styles.manualButton, styles.siteButton]}
+        onPress={() => setSiteMenuVisible(true)}
+      >
         <Text style={styles.manualButtonText} numberOfLines={1}>
           {currentSiteIndex >= 0 ? sites[currentSiteIndex].name : 'Sites'} ▾
         </Text>
@@ -1656,6 +1661,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           {showSearchBox ? (
             <>
               <TextInput
+                ref={tourTarget(`site.${config.key}.search`)}
                 style={styles.manualInput}
                 value={searchText}
                 onChangeText={setSearchText}
