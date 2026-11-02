@@ -974,6 +974,10 @@ export const MEDIA_TYPES = {
     doubleTapSeekSeconds: 5,
     // Set ANIME_SITE_URL in .env to the site you browse.
     startUrl: ANIME_SITE_URL,
+    // Pages can't leave the site (or a site added in Settings → Sites):
+    // ad scripts there sent the tab to betting pages. Its video players
+    // load in frames, which this doesn't touch.
+    blockExternalNavigation: true,
     // Example pattern: matches .../watch/<id>/<slug>?ep=3 (episode page)
     // and .../info/<id>/<slug> (series page) alike -> capture group 1 =
     // the series id, so every episode of a series is one entry. Adjust

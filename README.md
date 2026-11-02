@@ -557,7 +557,8 @@ so nothing renders blank.
   array of substrings) is the more robust fallback: if any of them
   appear in the URL, extraction is skipped entirely rather than saving
   bad data, waiting for a subsequent URL change once you're actually
-  past it. Also supports an opt-in `blockExternalNavigation`
+  past it. Also supports an opt-in `blockExternalNavigation` (on for
+  all three tabs: Manga, Manhwa and Anime)
   flag for sites with popup/redirect ads — rather than trying to detect
   and dismiss a popup after it opens, `onShouldStartLoadWithRequest`
   rejects any navigation attempt to a domain other than the site's own
