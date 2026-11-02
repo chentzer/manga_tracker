@@ -218,10 +218,18 @@ export default function Tour({ steps, visible, onShowTab, onClose }) {
   // The card goes under the control if it fits, else over it, else in
   // the middle (a control taller than the screen allows).
   let cardTop = Math.max(GAP, (height - cardHeight) / 2);
+  let pointer = null; // 'up' (card under the control) or 'down' (over it)
   if (hole) {
-    if (hole.bottom + GAP + cardHeight <= height - GAP) cardTop = hole.bottom + GAP;
-    else if (hole.top - GAP - cardHeight >= GAP) cardTop = hole.top - GAP - cardHeight;
+    if (hole.bottom + GAP + cardHeight <= height - GAP) {
+      cardTop = hole.bottom + GAP;
+      pointer = 'up';
+    } else if (hole.top - GAP - cardHeight >= GAP) {
+      cardTop = hole.top - GAP - cardHeight;
+      pointer = 'down';
+    }
   }
+  // The pointer sits under the control's middle, kept on the card.
+  const pointerLeft = hole ? Math.min(width - 16 - 28, Math.max(16 + 14, (hole.left + hole.right) / 2 - 8)) : 0;
   const last = index === steps.length - 1;
 
   return (
@@ -260,6 +268,15 @@ export default function Tour({ steps, visible, onShowTab, onClose }) {
           style={[styles.card, { top: cardTop }]}
           onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}
         >
+          {pointer ? (
+            <View
+              style={[
+                styles.pointer,
+                { left: pointerLeft - 16 },
+                pointer === 'up' ? { top: -8 } : { bottom: -8, transform: [{ rotate: '225deg' }] },
+              ]}
+            />
+          ) : null}
           <Text style={styles.progress}>
             {index + 1} of {steps.length}
           </Text>
@@ -306,6 +323,22 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: '#2c3a66',
+    shadowColor: '#000000',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  // A small turned square peeking out of the card's edge, towards the control.
+  pointer: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    backgroundColor: '#16213e',
+    borderColor: '#2c3a66',
+    borderLeftWidth: 1,
+    borderTopWidth: 1,
+    transform: [{ rotate: '45deg' }],
   },
   progress: { color: '#c8c8d8', fontSize: 13, marginBottom: 6 },
   text: { color: '#ffffff', fontSize: 16, lineHeight: 22 },
