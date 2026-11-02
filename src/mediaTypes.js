@@ -283,17 +283,30 @@ const SERIES_BY_PAGE_READER_JS = `
         .then(function(html) {
           var doc = new DOMParser().parseFromString(html, 'text/html');
           var h1 = doc.querySelector('h1');
-          var title = h1 ? h1.textContent.trim() : null;
+          // The <h1> holds the title in each language the site can show
+          // (English in [data-tl-en], romaji / native in [data-tl-show]),
+          // so its whole text would run them together.
+          function textOf(sel) {
+            var el = h1 && h1.querySelector(sel);
+            return el ? el.textContent.trim() : '';
+          }
+          var title = textOf('[data-tl-en]') || (h1 ? h1.textContent.trim() : '') || null;
+          var romaji = textOf('[data-tl-show="ro"]');
+          var altTitle = romaji && romaji !== title ? romaji : null;
+          var names = [title, romaji, textOf('[data-tl-show="na"]')].filter(Boolean);
+          // The cover: the picture named after the title (in any of its
+          // languages). A cover the site hides behind "Show" is the same
+          // picture, only blurred on the page.
           var cover = null;
           var imgs = doc.querySelectorAll('img[alt]');
           for (var i = 0; i < imgs.length; i++) {
-            if (title && imgs[i].getAttribute('alt').trim() === title) { cover = imgs[i]; break; }
+            if (names.indexOf(imgs[i].getAttribute('alt').trim()) !== -1) { cover = imgs[i]; break; }
           }
-          var names = [];
+          var people = [];
           var links = doc.querySelectorAll('a[href*="author="], a[href*="artist="]');
           for (var j = 0; j < links.length; j++) {
             var name = links[j].textContent.trim();
-            if (name && names.indexOf(name) === -1) names.push(name);
+            if (name && people.indexOf(name) === -1) people.push(name);
           }
           var malLink = doc.querySelector('a[href*="myanimelist.net/manga/"]');
           var malMatch = malLink && malLink.getAttribute('href').match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
@@ -304,7 +317,8 @@ const SERIES_BY_PAGE_READER_JS = `
             progress: progress,
             imageUrl: cover ? new URL(cover.getAttribute('src'), location.origin).href : null,
             title: title,
-            author: names.join(', ') || null,
+            altTitle: altTitle,
+            author: people.join(', ') || null,
             malId: malMatch ? Number(malMatch[1]) : null,
           });
         })
