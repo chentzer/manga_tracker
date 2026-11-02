@@ -752,8 +752,19 @@ so nothing renders blank.
   blocked ("pop-up box" plus the site for these).
 - **Browser tab** (`src/BrowserTab.js`) — a plain browser for any site,
   between Anime and the Library: type an address or search words (a
-  Google search) in its bar, with ‹ › and ⟳. Nothing there is recorded
-  in the Library. A page can't send you to another site by itself
+  Google search) in its bar. The toolbar is **🏠 Home**, the address and
+  **⋮** (Back, Forward, Reload, Bookmarks); the phone's Back goes back a
+  page. **Home** (the first page) lists every tab's sites — each tab's
+  site list and yours from Settings → Sites — and tapping one opens it
+  in its own tab; under them are your bookmarks. The page you were on
+  stays loaded behind it: Back or "‹ Back to …" returns to it.
+  **Bookmarks** are pages to come back to: ⋮ → **Bookmarks** →
+  **Bookmark this page** (or **Remove**); tap one to open it, hold one to
+  rename it, ✕ to remove it (with Undo). They're kept in the `bookmarks`
+  table and synced to Drive as `bookmarks.json` by `src/bookmarks.js` —
+  merged by bookmark, the newer change winning, removals included
+  (forgotten after 180 days) — at start-up, Connect, Backup Now and a few
+  seconds after each change. Nothing there is recorded in the Library. A page can't send you to another site by itself
   (redirects, pop-unders): moving to another site is only allowed within
   4 seconds of you touching the page or opening an address, and anything
   else is stopped with a bar showing where it tried to go and **Open**

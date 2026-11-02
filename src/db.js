@@ -231,6 +231,19 @@ export function initDb() {
       uid TEXT PRIMARY KEY
     );
   `);
+  // The Browser tab's bookmarks: pages to go back to (not entries). A
+  // removed one keeps its row with deleted_at set, so the removal reaches
+  // Drive and other devices (src/bookmarks.js syncs them).
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      uid TEXT PRIMARY KEY NOT NULL,
+      title TEXT,
+      url TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
+  `);
   initEntrySync();
 
   // App lock (AppLock.js): off on a fresh install. Builds before this
@@ -800,4 +813,56 @@ export function clearAllEntries() {
     db.execSync('DELETE FROM entries;');
     db.runSync('DELETE FROM entry_tombstones WHERE deleted_at >= ?', [now]);
   });
+}
+
+// ---- Bookmarks (the Browser tab; synced by src/bookmarks.js) ----
+
+const nowIso = () => new Date().toISOString();
+
+// Newest first, without removed ones.
+export function getBookmarks() {
+  return db.getAllSync('SELECT * FROM bookmarks WHERE deleted_at IS NULL ORDER BY created_at DESC');
+}
+
+// Every row, removed ones too, for the Drive sync.
+export function getAllBookmarkRows() {
+  return db.getAllSync('SELECT * FROM bookmarks');
+}
+
+export function addBookmark(title, url) {
+  const now = nowIso();
+  const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  db.runSync('INSERT INTO bookmarks (uid, title, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', [
+    uid,
+    String(title || '').trim(),
+    url,
+    now,
+    now,
+  ]);
+  return uid;
+}
+
+export function renameBookmark(uid, title) {
+  db.runSync('UPDATE bookmarks SET title = ?, updated_at = ? WHERE uid = ?', [String(title || '').trim(), nowIso(), uid]);
+}
+
+// removed false brings one back (Undo).
+export function setBookmarkRemoved(uid, removed = true) {
+  const now = nowIso();
+  db.runSync('UPDATE bookmarks SET deleted_at = ?, updated_at = ? WHERE uid = ?', [removed ? now : null, now, uid]);
+}
+
+// A row from Drive (newer than ours, or new here), as it is there.
+export function putBookmarkRow(b) {
+  db.runSync(
+    `INSERT INTO bookmarks (uid, title, url, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(uid) DO UPDATE SET title = excluded.title, url = excluded.url, created_at = excluded.created_at,
+       updated_at = excluded.updated_at, deleted_at = excluded.deleted_at`,
+    [b.uid, b.title || '', b.url, b.created_at, b.updated_at, b.deleted_at || null]
+  );
+}
+
+// Removed bookmarks older than this are forgotten, here and in Drive.
+export function forgetOldRemovedBookmarks(beforeIso) {
+  db.runSync('DELETE FROM bookmarks WHERE deleted_at IS NOT NULL AND deleted_at < ?', [beforeIso]);
 }

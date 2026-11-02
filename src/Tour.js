@@ -106,7 +106,9 @@ export function tourSteps({ siteTab, siteTabs }) {
       text: 'Tap a title for its details and Continue. Hold one to select several, and pull down to sync.',
     },
     { tab: 'browser', target: 'bottom.browser', text: 'Browser opens any website. Nothing here is saved to the Library.' },
+    { tab: 'browser', target: 'browser.home', optional: true, text: "Home lists every tab's sites (each opens in its tab) and your bookmarks." },
     { tab: 'browser', target: 'browser.address', optional: true, text: 'Type an address, or words to search the web.' },
+    { tab: 'browser', target: 'browser.menu', optional: true, text: 'Back, Forward, Reload, and Bookmarks: keep any page to come back to.' },
     { tab: 'notepad', target: 'bottom.notepad', text: 'The Notepad keeps quick lists. Text shared from other apps lands in its Inbox.' },
     {
       tab: 'notepad',

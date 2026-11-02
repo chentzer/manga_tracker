@@ -475,7 +475,7 @@ function getHostname(url) {
 // `sources`. Each has a name, a domain and a home page (the type's
 // startUrl for the first site, otherwise the site's front page). Empty
 // for one-site tabs.
-function getTabSites(config) {
+export function getTabSites(config) {
   if (config.sources) {
     return config.sources.map((s, i) => ({
       name: s.name,

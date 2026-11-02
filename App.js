@@ -43,6 +43,7 @@ import Icon from './src/Icon';
 import { TAP_SLOP } from './src/touch';
 import Tour, { tourSteps, tourTarget } from './src/Tour';
 import { syncNotepadToDrive } from './src/notepadSync';
+import { syncBookmarksToDrive } from './src/bookmarks';
 import ProcessText from './modules/process-text/src';
 import { classify } from './src/quickSearch';
 import QuickSearchPicker from './src/QuickSearchPicker';
@@ -524,6 +525,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     if (!driveSyncAllowed() || !takeDriveSyncDeferred()) return;
     await maybeBackupLibraryToDrive();
     await syncNotepadToDrive();
+    await syncBookmarksToDrive();
     await uploadPendingImages();
   }, []);
   useEffect(() => onUnmetered(catchUpDriveSync), [catchUpDriveSync]);
@@ -672,6 +674,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         // Picks up note names added on other devices, and anything shared
         // into the Inbox before Drive was signed in for this run.
         syncNotepadToDrive();
+        syncBookmarksToDrive(); // the Browser's bookmarks (bookmarks.js)
         catchUpDriveSync();
         // Changes made elsewhere since the app last ran (backup.js merges
         // Drive in before writing).
@@ -728,6 +731,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       if (restoreResult.restored > 0) reloadLibrary();
       await maybeBackupLibraryToDrive({ force: true });
       await syncNotepadToDrive({ force: true }); // push any notes written before connecting
+      await syncBookmarksToDrive({ force: true });
       const uploaded = await uploadPendingImages({ force: true }); // catch up any images saved before connecting
       takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
       // Covers Restore couldn't get, and any broken ones, in the background.
@@ -765,6 +769,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     try {
       await maybeBackupLibraryToDrive({ force: true });
       await syncNotepadToDrive({ force: true });
+      await syncBookmarksToDrive({ force: true });
       uploaded = await uploadPendingImages({ force: true, job: syncJob });
       syncJob.end();
     } catch (err) {
@@ -1079,6 +1084,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
               onPageChange={(url) => {
                 lastUrls.current.browser = url;
               }}
+              // The home page's sites open in their own tab.
+              onOpenSite={(key, url) => handleOpenInTab(key, { url })}
             />
           ) : null}
         </View>

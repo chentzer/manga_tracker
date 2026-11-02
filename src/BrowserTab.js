@@ -1,8 +1,25 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, Alert, Platform, ToastAndroid } from 'react-native';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Keyboard,
+  Alert,
+  Platform,
+  ToastAndroid,
+  Modal,
+  ScrollView,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 import { galleryFolderFor } from './gallery';
-import { PAUSE_MEDIA_JS } from './MediaWebView';
+import { PAUSE_MEDIA_JS, getTabSites } from './MediaWebView';
+import { MEDIA_TYPE_LIST } from './mediaTypes';
+import { loadCustomSites } from './customSites';
+import { getBookmarks } from './db';
+import { addBookmark, renameBookmark, removeBookmark, onBookmarksSynced } from './bookmarks';
+import { offerUndo } from './undo';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
@@ -71,7 +88,7 @@ const TAP_TRACKER_JS = `
 // here, since a web page has no code; they're filed under
 // AniManga Tracker/Browser), pauseMedia and getCurrentUrl (Data saver).
 const BrowserTab = forwardRef(function BrowserTab(
-  { blockAds = true, holdToSave = true, onTabBarActivity, initialUrl = null, onPageChange },
+  { blockAds = true, holdToSave = true, onTabBarActivity, initialUrl = null, onPageChange, onOpenSite },
   ref
 ) {
   useDarkMode(); // redraws in the other colours when Dark mode is switched
@@ -79,6 +96,15 @@ const BrowserTab = forwardRef(function BrowserTab(
   // null until the first page is opened. initialUrl: the page this tab
   // was on before Data saver unloaded it (App.js), reopened as it mounts.
   const [source, setSource] = useState(initialUrl ? { uri: initialUrl } : null);
+  // 🏠 The home page (the first page): every tab's sites and your
+  // bookmarks. The open page stays loaded behind it, so Back returns to it.
+  const [home, setHome] = useState(!initialUrl);
+  const [homeBookmarks, setHomeBookmarks] = useState(() => getBookmarks());
+  // 🔖 Bookmarks: pages to come back to. null while the list is closed;
+  // editingBookmark: { uid, title } being renamed. menuOpen: the ⋮ menu.
+  const [bookmarks, setBookmarks] = useState(null);
+  const [editingBookmark, setEditingBookmark] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [address, setAddress] = useState(initialUrl || '');
   const [editingAddress, setEditingAddress] = useState(false);
   const [nav, setNav] = useState({ url: '', title: '', canGoBack: false, canGoForward: false, loading: false });
@@ -92,6 +118,9 @@ const BrowserTab = forwardRef(function BrowserTab(
     if (!url) return;
     userNavUntil.current = Date.now() + USER_NAV_WINDOW_MS;
     setBlockedUrl(null);
+    setHome(false);
+    // A page is open now: the bars can start counting to hide (App.js).
+    onTabBarActivity?.('scroll');
     Keyboard.dismiss();
     setEditingAddress(false);
     setAddress(url);
@@ -103,7 +132,11 @@ const BrowserTab = forwardRef(function BrowserTab(
     ref,
     () => ({
       goBackIfPossible: () => {
-        if (nav.canGoBack && webviewRef.current) {
+        if (home && source) {
+          leaveHome();
+          return true;
+        }
+        if (!home && nav.canGoBack && webviewRef.current) {
           webviewRef.current.goBack();
           return true;
         }
@@ -114,8 +147,71 @@ const BrowserTab = forwardRef(function BrowserTab(
       // The page on screen, kept by App.js when Data saver unloads this tab.
       getCurrentUrl: () => nav.url || (source && source.uri) || null,
     }),
-    [nav, source]
+    [nav, source, home]
   );
+
+  // Bookmarks changed on another device (src/bookmarks.js).
+  useEffect(() => onBookmarksSynced(() => setHomeBookmarks(getBookmarks())), []);
+
+  const goHome = () => {
+    Keyboard.dismiss();
+    setEditingAddress(false);
+    setBlockedUrl(null);
+    webviewRef.current?.injectJavaScript(PAUSE_MEDIA_JS);
+    setHomeBookmarks(getBookmarks());
+    setHome(true);
+    // The bars come back and stay while home is shown (App.js).
+    onTabBarActivity?.('pullTop');
+  };
+
+  // Back to the page behind the home page.
+  const leaveHome = () => {
+    setHome(false);
+    onTabBarActivity?.('scroll');
+  };
+
+  const bookmarksChanged = () => {
+    setBookmarks((list) => (list ? getBookmarks() : list));
+    setHomeBookmarks(getBookmarks());
+  };
+  const showBookmarks = () => {
+    setEditingBookmark(null);
+    setBookmarks(getBookmarks());
+  };
+  const bookmarkHere = bookmarks && nav.url && !home ? bookmarks.find((b) => b.url === nav.url) : null;
+  const addThisPage = () => {
+    addBookmark(nav.title || hostnameOf(nav.url), nav.url);
+    bookmarksChanged();
+  };
+  // Removed at once, with Undo.
+  const dropBookmark = (b) => {
+    removeBookmark(b.uid);
+    bookmarksChanged();
+    offerUndo({
+      message: 'Bookmark removed',
+      commit: () => {},
+      undo: () => {
+        removeBookmark(b.uid, false);
+        bookmarksChanged();
+      },
+    });
+  };
+  const saveBookmarkName = () => {
+    renameBookmark(editingBookmark.uid, editingBookmark.title);
+    setEditingBookmark(null);
+    bookmarksChanged();
+  };
+
+  // The home page's sites, by tab: each tab's own (its site list) and
+  // yours from Settings → Sites. Tapping one opens it in its tab.
+  const homeSites = MEDIA_TYPE_LIST.map((m) => {
+    const own = getTabSites(m);
+    const sites = own.length ? own.map((x) => ({ name: x.name, url: x.homeUrl })) : [{ name: m.siteName || m.label, url: m.startUrl }];
+    loadCustomSites()
+      .filter((c) => c.type === m.key)
+      .forEach((c) => sites.push({ name: c.domain, url: `https://${c.domain}/` }));
+    return { key: m.key, label: m.label, sites: sites.filter((x) => x.url) };
+  }).filter((t) => t.sites.length);
 
   // Stops pages from sending you to another website on their own —
   // redirects, pop-unders, "you've won" pages. Moving to another site is
@@ -194,31 +290,25 @@ const BrowserTab = forwardRef(function BrowserTab(
     <View style={styles.container}>
       <View style={styles.toolbar}>
         <TouchableOpacity
-          onPress={() => webviewRef.current?.goBack()}
-          disabled={!nav.canGoBack}
+          ref={tourTarget('browser.home')}
+          onPress={goHome}
+          disabled={home}
           style={styles.navButton}
           hitSlop={4}
-          accessibilityLabel="Back"
+          accessibilityRole="button"
+          accessibilityLabel="Home"
+          accessibilityState={{ disabled: home }}
         >
-          <Text style={[styles.navText, !nav.canGoBack && styles.navDisabled]}>‹</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => webviewRef.current?.goForward()}
-          disabled={!nav.canGoForward}
-          style={styles.navButton}
-          hitSlop={4}
-          accessibilityLabel="Forward"
-        >
-          <Text style={[styles.navText, !nav.canGoForward && styles.navDisabled]}>›</Text>
+          <Icon name="home-outline" size={24} color={home ? '#ff7a90' : '#ffffff'} />
         </TouchableOpacity>
         <TextInput
           ref={tourTarget('browser.address')}
           style={styles.address}
-          value={editingAddress ? address : nav.url || address}
+          value={editingAddress ? address : home ? '' : nav.url || address}
           onChangeText={setAddress}
           onFocus={() => {
             setEditingAddress(true);
-            setAddress(nav.url || address);
+            setAddress(home ? '' : nav.url || address);
           }}
           onBlur={() => setEditingAddress(false)}
           onSubmitEditing={() => open(normalizeAddress(address))}
@@ -229,17 +319,67 @@ const BrowserTab = forwardRef(function BrowserTab(
           keyboardType="url"
           returnKeyType="go"
           selectTextOnFocus
+          accessibilityLabel="Address"
         />
         <TouchableOpacity
-          onPress={() => (nav.loading ? webviewRef.current?.stopLoading() : webviewRef.current?.reload())}
-          disabled={!source}
+          ref={tourTarget('browser.menu')}
+          onPress={() => setMenuOpen(true)}
           style={styles.navButton}
           hitSlop={4}
-          accessibilityLabel={nav.loading ? 'Stop loading' : 'Reload'}
+          accessibilityRole="button"
+          accessibilityLabel="More: back, forward, reload, bookmarks"
         >
-          <Text style={[styles.navTextSmall, !source && styles.navDisabled]}><Icon name={nav.loading ? 'close' : 'reload'} size={20} /></Text>
+          <Icon name="dots-vertical" size={24} color="#ffffff" />
         </TouchableOpacity>
       </View>
+
+      {/* ⋮: Back, Forward, Reload and Bookmarks (the phone's Back goes back a page too). */}
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <TouchableOpacity
+          style={styles.menuBackdrop}
+          activeOpacity={1}
+          onPress={() => setMenuOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close menu"
+        >
+          <View style={styles.menu}>
+            {[
+              {
+                icon: 'arrow-left',
+                label: 'Back',
+                disabled: home ? !source : !nav.canGoBack,
+                run: () => (home ? leaveHome() : webviewRef.current?.goBack()),
+              },
+              { icon: 'arrow-right', label: 'Forward', disabled: home || !nav.canGoForward, run: () => webviewRef.current?.goForward() },
+              {
+                icon: nav.loading ? 'close' : 'reload',
+                label: nav.loading ? 'Stop loading' : 'Reload',
+                disabled: !source || home,
+                run: () => (nav.loading ? webviewRef.current?.stopLoading() : webviewRef.current?.reload()),
+              },
+              { icon: 'bookmark-outline', label: 'Bookmarks', disabled: false, run: showBookmarks },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                style={styles.menuItem}
+                disabled={item.disabled}
+                accessibilityRole="menuitem"
+                accessibilityState={{ disabled: item.disabled }}
+                onPress={() => {
+                  setMenuOpen(false);
+                  item.run();
+                }}
+              >
+                <Text style={[styles.menuText, item.disabled && styles.navDisabled]}>
+                  <Icon name={item.icon} size={18} />
+                  {'  '}
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {blockedUrl ? (
         <View style={styles.blockedBar}>
@@ -276,6 +416,7 @@ const BrowserTab = forwardRef(function BrowserTab(
           ref={webviewRef}
           source={source}
           style={styles.webview}
+          containerStyle={home ? styles.hiddenPage : null}
           // For the auto-hiding bars (App.js): they stay up until a page
           // has loaded, since only a loaded page can bring them back.
           onLoadStart={() => onTabBarActivity?.('loading')}
@@ -313,15 +454,146 @@ const BrowserTab = forwardRef(function BrowserTab(
           allowsInlineMediaPlayback
           allowsFullscreenVideo
         />
-      ) : (
-        <View style={styles.empty}>
+      ) : null}
+      {home || !source ? (
+        <ScrollView style={styles.home} contentContainerStyle={styles.homeContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.emptyTitle}>Browser</Text>
           <Text style={styles.emptyText}>
             Type a web address or search words in the bar above. Pages here aren't added to your Library — open a title
-            in the Manga, Manhwa or Anime tab for that.
+            in the Manga, Manhwa or Anime tab for that. ⋮ → Bookmarks keeps any page to come back to.
           </Text>
+          {source && nav.url ? (
+            <TouchableOpacity accessibilityRole="button" style={styles.returnRow} onPress={leaveHome}>
+              <Text style={styles.returnText} numberOfLines={1}>
+                ‹ Back to {nav.title || hostnameOf(nav.url)}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <Text style={styles.homeHeading}>Sites</Text>
+          {homeSites.map((t) => (
+            <View key={t.key} style={styles.homeTab}>
+              <Text style={styles.homeTabLabel}>{t.label}</Text>
+              <View style={styles.homeSites}>
+                {t.sites.map((x) => (
+                  <TouchableOpacity
+                    key={x.url}
+                    style={styles.siteChip}
+                    onPress={() => (onOpenSite ? onOpenSite(t.key, x.url) : open(x.url))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${x.name} in ${t.label}`}
+                  >
+                    <Text style={styles.siteChipText}>{x.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
+          <Text style={styles.homeHeading}>Bookmarks</Text>
+          {homeBookmarks.length === 0 ? (
+            <Text style={styles.homeHint}>None yet. Open a page, then ⋮ → Bookmarks → Bookmark this page.</Text>
+          ) : (
+            homeBookmarks.map((b) => (
+              <TouchableOpacity accessibilityRole="button" key={b.uid} style={styles.bookmarkRow} onPress={() => open(b.url)}>
+                <View style={styles.bookmarkText}>
+                  <Text style={styles.bookmarkTitle} numberOfLines={1}>
+                    {b.title || hostnameOf(b.url)}
+                  </Text>
+                  <Text style={styles.bookmarkUrl} numberOfLines={1}>
+                    {b.url}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      ) : null}
+
+      <Modal visible={!!bookmarks} transparent animationType="fade" onRequestClose={() => setBookmarks(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            {bookmarks ? (
+              <>
+                <Text style={styles.sheetTitle}>Bookmarks</Text>
+                {nav.url && !home ? (
+                  bookmarkHere ? (
+                    <View style={styles.bookmarkHere}>
+                      <Text style={styles.sheetHint}>
+                        <Icon name="star" size={14} /> This page is bookmarked.
+                      </Text>
+                      <TouchableOpacity accessibilityRole="button" style={styles.textButton} onPress={() => dropBookmark(bookmarkHere)}>
+                        <Text style={styles.removeText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity accessibilityRole="button" style={styles.addBookmarkButton} onPress={addThisPage}>
+                      <Text style={styles.addBookmarkText}>
+                        <Icon name="star-outline" size={16} /> Bookmark this page
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                ) : null}
+                <ScrollView style={styles.bookmarkList} keyboardShouldPersistTaps="handled">
+                  {bookmarks.length === 0 ? (
+                    <Text style={styles.sheetHint}>No bookmarks yet. Open a page, then ⋮ → Bookmarks → Bookmark this page.</Text>
+                  ) : (
+                    bookmarks.map((b) =>
+                      editingBookmark && editingBookmark.uid === b.uid ? (
+                        <View key={b.uid} style={styles.bookmarkRow}>
+                          <TextInput
+                            style={styles.bookmarkInput}
+                            value={editingBookmark.title}
+                            onChangeText={(title) => setEditingBookmark((e) => ({ ...e, title }))}
+                            autoFocus
+                            onSubmitEditing={saveBookmarkName}
+                            accessibilityLabel="Bookmark name"
+                          />
+                          <TouchableOpacity accessibilityRole="button" style={styles.textButton} onPress={saveBookmarkName}>
+                            <Text style={styles.blockedAction}>Done</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          key={b.uid}
+                          style={styles.bookmarkRow}
+                          onPress={() => {
+                            setBookmarks(null);
+                            open(b.url);
+                          }}
+                          onLongPress={() => setEditingBookmark({ uid: b.uid, title: b.title || '' })}
+                        >
+                          <View style={styles.bookmarkText}>
+                            <Text style={styles.bookmarkTitle} numberOfLines={1}>
+                              {b.title || hostnameOf(b.url)}
+                            </Text>
+                            <Text style={styles.bookmarkUrl} numberOfLines={1}>
+                              {b.url}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.textButton}
+                            onPress={() => dropBookmark(b)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove bookmark ${b.title || b.url}`}
+                          >
+                            <Text style={styles.removeText}>
+                              <Icon name="close" size={18} />
+                            </Text>
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      )
+                    )
+                  )}
+                </ScrollView>
+                {bookmarks.length > 0 ? <Text style={styles.sheetHint}>Hold a bookmark to rename it.</Text> : null}
+                <TouchableOpacity accessibilityRole="button" onPress={() => setBookmarks(null)} style={styles.closeButton}>
+                  <Text style={styles.closeText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 });
@@ -364,6 +636,68 @@ const styles = themed(StyleSheet.create({
   },
   blockedText: { flex: 1, fontSize: 12, color: '#f5d9a8' },
   blockedAction: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  hiddenPage: { display: 'none' },
+  home: { flex: 1, backgroundColor: '#1a1a2e' },
+  homeContent: { padding: 20, paddingBottom: 40 },
+  homeHeading: { fontSize: 17, fontWeight: '700', color: '#ffffff', marginTop: 20, marginBottom: 8 },
+  homeHint: { fontSize: 14, color: '#b8c0dc' },
+  homeTab: { marginBottom: 10 },
+  homeTabLabel: { fontSize: 13, fontWeight: '700', color: '#b8c0dc', marginBottom: 6 },
+  homeSites: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  siteChip: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    backgroundColor: '#16213e',
+    borderWidth: 1,
+    borderColor: '#4a6fa5',
+    justifyContent: 'center',
+  },
+  siteChipText: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
+  returnRow: { minHeight: 48, justifyContent: 'center', marginTop: 12 },
+  returnText: { fontSize: 15, fontWeight: '700', color: '#8fb3ff' },
+  bookmarkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#4a5578',
+  },
+  bookmarkText: { flex: 1, paddingVertical: 6 },
+  bookmarkTitle: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
+  bookmarkUrl: { fontSize: 13, color: '#b8c0dc' },
+  menuBackdrop: { flex: 1, alignItems: 'flex-end', paddingTop: 100, paddingRight: 8 },
+  menu: { backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4, minWidth: 200, elevation: 8 },
+  menuItem: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
+  menuText: { fontSize: 15, color: '#ffffff' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  sheet: { backgroundColor: '#16213e', borderRadius: 12, padding: 20, maxHeight: '90%' },
+  sheetTitle: { fontSize: 19, fontWeight: '700', color: '#ffffff', marginBottom: 6 },
+  sheetHint: { fontSize: 13, color: '#b8c0dc', marginVertical: 6 },
+  bookmarkHere: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bookmarkList: { maxHeight: 360, marginTop: 8 },
+  bookmarkInput: {
+    flex: 1,
+    marginRight: 8,
+    minHeight: 48,
+    color: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#4a6fa5',
+    fontSize: 15,
+  },
+  addBookmarkButton: {
+    alignSelf: 'flex-start',
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#e94560',
+  },
+  addBookmarkText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+  textButton: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  removeText: { color: '#ff7468', fontSize: 15, fontWeight: '700' },
+  closeButton: { alignSelf: 'flex-end', minHeight: 48, minWidth: 64, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
+  closeText: { color: '#b8c0dc', fontSize: 15, fontWeight: '700' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 10 },
   emptyText: { fontSize: 15, lineHeight: 23, color: '#8892b0', textAlign: 'center' },
