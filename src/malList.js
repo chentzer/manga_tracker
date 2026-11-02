@@ -565,7 +565,7 @@ export async function pickAndImportMalList({ onCoversDone } = {}) {
     multiple: false,
   });
   if (picked.canceled || !picked.assets || picked.assets.length === 0) return null;
-  const job = beginSync('import', { show: true, total: 1 });
+  const job = beginSync('import', { show: true, total: 1, label: 'Lists' });
   let result;
   let targets = [];
   try {

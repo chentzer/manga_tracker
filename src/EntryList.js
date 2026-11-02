@@ -23,6 +23,8 @@ import {
   updateEntryFields,
   parseTags,
   deleteEntry,
+  getSetting,
+  setSetting,
 } from './db';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
@@ -1055,6 +1057,25 @@ const RANDOM_KIND_CHOICES = [
   { key: 'artist', icon: 'people', label: 'Artist' },
 ];
 const EMPTY_RANDOM_CHOICE = { types: [], statuses: [], ratings: [], kind: 'entry' };
+
+// Random's choices are kept (setting `randomChoice`) and come back the
+// next time it's opened. Anything no longer offered is dropped on reading.
+function loadRandomChoice() {
+  try {
+    const saved = JSON.parse(getSetting('randomChoice', '') || 'null');
+    if (!saved) return EMPTY_RANDOM_CHOICE;
+    const keep = (list, choices) =>
+      Array.isArray(list) ? list.filter((k) => choices.some((c) => c.key === k)) : [];
+    return {
+      types: keep(saved.types, MEDIA_TYPE_LIST),
+      statuses: keep(saved.statuses, RANDOM_STATUS_CHOICES),
+      ratings: keep(saved.ratings, RANDOM_RATING_CHOICES),
+      kind: RANDOM_KIND_CHOICES.some((k) => k.key === saved.kind) ? saved.kind : 'entry',
+    };
+  } catch (e) {
+    return EMPTY_RANDOM_CHOICE;
+  }
+}
 const EMPTY_SET = new Set();
 
 // How many titles, e.g. "1 title" / "3 titles".
@@ -1765,7 +1786,11 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
   // 🎲 Random: its window, its choices, and what this round has shown.
   const [randomVisible, setRandomVisible] = useState(false);
-  const [randomChoice, setRandomChoice] = useState(EMPTY_RANDOM_CHOICE);
+  const [randomChoice, setRandomChoice] = useState(loadRandomChoice);
+  const changeRandomChoice = useCallback((choice) => {
+    setRandomChoice(choice);
+    setSetting('randomChoice', JSON.stringify(choice));
+  }, []);
   const randomShown = useRef(new Set());
   // What Random last opened ('entry' / 'artist'), for "Pick again".
   const [randomOpened, setRandomOpened] = useState(false);
@@ -1831,10 +1856,10 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     }
   }, [randomChoice, selectedKey, selectedArtistRef, favoritesByType]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Each press of 🎲 Random starts a new round with fresh choices.
+  // Each press of 🎲 Random starts a new round, with the choices left
+  // last time.
   const openRandom = useCallback(() => {
     randomShown.current = new Set();
-    setRandomChoice(EMPTY_RANDOM_CHOICE);
     setRandomVisible(true);
   }, []);
 
@@ -2636,7 +2661,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       <RandomModal
         visible={randomVisible}
         choice={randomChoice}
-        onChange={setRandomChoice}
+        onChange={changeRandomChoice}
         onPick={pickRandomNow}
         onClose={() => setRandomVisible(false)}
       />

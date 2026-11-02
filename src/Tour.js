@@ -113,7 +113,7 @@ export function tourSteps({ siteTab, siteTabs }) {
       target: 'notepad.notes',
       text: 'Your notes. A category note’s magnifier searches that tab for an item.',
     },
-    { target: 'header.sync', optional: true, text: 'This shows Google Drive backup and sync.' },
+    { target: 'header.sync', optional: true, text: 'This shows Google Drive backup and sync, with how far it has got. Tap it while it runs for the details.' },
     {
       target: 'header.settings',
       text: 'Settings: Google Drive backup, MyAnimeList import and export, your own Sites, App lock, Block ads, Data saver — and this tour again.',

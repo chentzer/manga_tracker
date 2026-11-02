@@ -14,6 +14,9 @@ import {
   getEntryTombstone,
   putEntryTombstone,
   applySyncedFields,
+  getSetting,
+  setSetting,
+  setLocalImagePath,
 } from './db';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
@@ -26,6 +29,8 @@ import {
   isDriveConnected,
   fetchBackupCsvContent,
   downloadCoverForRestore,
+  isImageFile,
+  findCoverFileId,
 } from './GoogleDriveService';
 
 const COLUMNS = [
@@ -351,7 +356,7 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
   }
   const errors = [];
   let changedFromDrive = 0;
-  const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length });
+  const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length, label: 'Backup files' });
   for (const mediaConfig of MEDIA_TYPE_LIST) {
     try {
       // Changes made elsewhere (the browser extension, another phone)
@@ -398,6 +403,96 @@ export function countPendingImages() {
 // job: a status-pill job (syncStatus.js) to report to, one step per
 // cover, instead of its own — Backup Now counts the covers in its total
 // up front so the bar never goes back.
+// Entries whose cover isn't on the phone, or isn't a picture (a failed
+// download saved as one, before downloadCoverForRestore checked): each
+// one's cover is fetched from Drive again. This is what puts covers back
+// after a fresh install, when Restore couldn't get them all (offline or
+// Google busy). Runs after Drive connects and after a restore; on its
+// own (force false) at most once a day and only when Drive sync is
+// allowed, since entries with no cover in Drive are looked up each time.
+// onFound(n), if given, is told how many covers are missing as soon as
+// the phone has been checked (0 when it doesn't run) — Restore says so
+// in its message. Returns how many it fetched.
+const COVER_CHECK_MS = 24 * 60 * 60 * 1000;
+let coverFetch = null;
+let coverMissing = null; // the running fetch's count, once known
+const coverFoundListeners = new Set();
+export function fetchMissingCovers({ force = false, onFound = null } = {}) {
+  const skip = () => {
+    if (onFound) onFound(0);
+    return Promise.resolve(0);
+  };
+  if (!isDriveConnected()) return skip();
+  if (!force) {
+    if (!driveSyncAllowed()) return skip();
+    const last = Number(getSetting('coverCheckAt', '0')) || 0;
+    if (Date.now() - last < COVER_CHECK_MS) return skip();
+  }
+  if (onFound) {
+    if (coverFetch && coverMissing !== null) onFound(coverMissing);
+    else coverFoundListeners.add(onFound);
+  }
+  if (!coverFetch) {
+    coverFetch = runFetchMissingCovers(force).finally(() => {
+      coverFetch = null;
+      coverMissing = null;
+      // Anyone still waiting (the check itself failed) hears 0.
+      coverFoundListeners.forEach((l) => l(0));
+      coverFoundListeners.clear();
+    });
+  }
+  return coverFetch;
+}
+
+// force (after Connect or Restore) shows the status pill meanwhile.
+async function runFetchMissingCovers(force) {
+  const missing = [];
+  for (const entry of getAllEntries(null)) {
+    const path = entry.local_image_path;
+    let ok = false;
+    if (path) {
+      try {
+        ok = (await FileSystem.getInfoAsync(path)).exists && (await isImageFile(path));
+      } catch (e) {
+        ok = false;
+      }
+    }
+    if (!ok) missing.push(entry);
+  }
+  setSetting('coverCheckAt', String(Date.now()));
+  coverMissing = missing.length;
+  coverFoundListeners.forEach((l) => l(missing.length));
+  coverFoundListeners.clear();
+  if (!missing.length) return 0;
+
+  const job = beginSync('restore', { show: force, total: missing.length, label: 'Covers' });
+  let fetched = 0;
+  for (const entry of missing) {
+    try {
+      // A new file name: the Library may still have the broken one cached.
+      const path = await downloadCoverForRestore(
+        entry.media_type,
+        entry.source_id,
+        `${FileSystem.documentDirectory}${entry.media_type}-covers/`,
+        `${entry.source_id}-${Date.now()}.jpg`
+      );
+      if (path) {
+        if (entry.local_image_path && entry.local_image_path !== path) {
+          FileSystem.deleteAsync(entry.local_image_path, { idempotent: true }).catch(() => {});
+        }
+        setLocalImagePath(entry.source_id, entry.media_type, path);
+        fetched++;
+      }
+    } catch (err) {
+      console.warn(`Couldn't fetch the cover for ${entry.source_id}:`, err.message);
+    }
+    job.step();
+  }
+  job.end({ summary: fetched ? `${fetched} cover${fetched === 1 ? '' : 's'} back` : null });
+  if (fetched) driveChangeListeners.forEach((listener) => listener(fetched));
+  return fetched;
+}
+
 export async function uploadPendingImages({ force = false, job: outerJob = null } = {}) {
   if (!isDriveConnected()) return 0;
   if (!force && !driveSyncAllowed()) {
@@ -410,10 +505,18 @@ export async function uploadPendingImages({ force = false, job: outerJob = null 
   let failed = 0;
   if (!pending.length) return 0;
   // Uploading covers is the slow part of a backup, so it shows the pill.
-  const job = outerJob || beginSync('backup', { show: true, total: pending.length });
+  const job = outerJob || beginSync('backup', { show: true, total: pending.length, label: 'Covers uploaded' });
 
   for (const entry of pending) {
     try {
+      // A cover Drive already has (fetched back from it) is only marked
+      // synced, not uploaded twice.
+      const existing = await findCoverFileId(entry.media_type, entry.source_id);
+      if (existing) {
+        markSynced(entry.source_id, entry.media_type, existing);
+        job.step();
+        continue;
+      }
       const driveFileId = await uploadImageToDrive(
         entry.media_type,
         buildDriveDisplayName(entry.source_id, entry.title),
@@ -453,7 +556,7 @@ export async function restoreFromDriveBackup(onProgress) {
   if (!isDriveConnected()) {
     throw new Error('Connect Google Drive first.');
   }
-  const job = beginSync('restore', { show: true });
+  const job = beginSync('restore', { show: true, label: 'Entries checked' });
   try {
     const result = await runRestore(onProgress, job);
     job.end({ summary: result.restored ? `Restored ${result.restored}` : 'Nothing new to restore' });

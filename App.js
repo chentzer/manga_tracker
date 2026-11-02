@@ -31,6 +31,7 @@ import {
   maybeBackupLibraryToDrive,
   uploadPendingImages,
   restoreFromDriveBackup,
+  fetchMissingCovers,
   countPendingImages,
   onLibraryChangedFromDrive,
 } from './src/backup';
@@ -674,7 +675,15 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         catchUpDriveSync();
         // Changes made elsewhere since the app last ran (backup.js merges
         // Drive in before writing).
-        maybeBackupLibraryToDrive().catch(() => {});
+        // Then covers missing on the phone come back from Drive (at most
+        // once a day; backup.js fetchMissingCovers), and covers still
+        // marked "Local only" are uploaded, or just marked synced when
+        // Drive already has them.
+        maybeBackupLibraryToDrive()
+          .catch(() => {})
+          .then(() => fetchMissingCovers())
+          .then(() => uploadPendingImages())
+          .catch(() => {});
       }
     });
   }, []);
@@ -721,6 +730,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       await syncNotepadToDrive({ force: true }); // push any notes written before connecting
       const uploaded = await uploadPendingImages({ force: true }); // catch up any images saved before connecting
       takeDriveSyncDeferred(); // nothing is waiting for Wi-Fi now
+      // Covers Restore couldn't get, and any broken ones, in the background.
+      fetchMissingCovers({ force: true }).catch(() => {});
 
       const parts = ['Google Drive sync is now enabled.'];
       if (restoreResult.restored > 0) {
@@ -749,7 +760,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     // force: runs even when Data saver holds automatic sync for Wi-Fi.
     // The CSVs and covers show as one backup in the status pill, with the
     // covers counted from the start (one step each).
-    const syncJob = beginSync('backup', { show: true, total: countPendingImages() });
+    const syncJob = beginSync('backup', { show: true, total: countPendingImages(), label: 'Covers uploaded' });
     let uploaded = 0;
     try {
       await maybeBackupLibraryToDrive({ force: true });
@@ -820,17 +831,30 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             try {
               const result = await restoreFromDriveBackup();
               if (result.restored > 0) reloadLibrary();
-              if (result.restored === 0) {
+              // Then covers missing or broken on this phone, fetched in the
+              // background; the message says how many as soon as it knows.
+              const covers = await new Promise((resolve) => {
+                fetchMissingCovers({ force: true, onFound: resolve }).catch(() => resolve(0));
+              });
+              const parts = [];
+              if (result.restored > 0) {
+                parts.push(
+                  `Added ${result.restored} ${result.restored === 1 ? 'entry' : 'entries'} (${result.imagesRestored} with covers).`
+                );
+              }
+              if (covers > 0) {
+                parts.push(
+                  `Getting ${covers} cover${covers === 1 ? '' : 's'} missing on this phone from Drive. Tap the bar at the top to see how far it's got.`
+                );
+              }
+              if (parts.length) {
+                Alert.alert('Restoring', parts.join('\n\n'));
+              } else {
                 Alert.alert(
                   'Nothing to restore',
                   result.skipped > 0
-                    ? 'Every entry in your Drive backup already exists on this phone.'
+                    ? 'Every entry and cover in your Drive backup is already on this phone.'
                     : "No backup was found in Drive yet — try Backup Now first from another device, or there's simply nothing there."
-                );
-              } else {
-                Alert.alert(
-                  'Restore complete',
-                  `Added ${result.restored} ${result.restored === 1 ? 'entry' : 'entries'} (${result.imagesRestored} with cover images restored).`
                 );
               }
             } catch (err) {

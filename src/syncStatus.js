@@ -25,13 +25,20 @@ function emit() {
   listeners.forEach((l) => l(snapshot));
 }
 
-// { active: null | { kind, done, total, show }, result }
+// { active: null | { kind, done, total, show, parts }, result }
+// parts: the labelled jobs of this activity, running or finished —
+// [{ label, done, total }] — for the details the pill opens.
 export function getSyncStatus() {
   if (!activity) return { active: null, result };
   const done = activity.done + jobs.reduce((n, j) => n + j.done, 0);
   const total = activity.total + jobs.reduce((n, j) => n + j.total, 0);
+  const parts = [...activity.finished, ...jobs.filter((j) => j.label)].map((j) => ({
+    label: j.label,
+    done: Math.min(j.done, j.total),
+    total: j.total,
+  }));
   return {
-    active: { kind: activity.kind, done: Math.min(done, total), total, show: activity.show },
+    active: { kind: activity.kind, done: Math.min(done, total), total, show: activity.show, parts },
     result,
   };
 }
@@ -49,12 +56,14 @@ export function clearSyncResult() {
   emit();
 }
 
-// kind: 'backup' | 'restore' | 'import'. Returns the job's handle.
-export function beginSync(kind, { show = false, total = 0 } = {}) {
-  if (!activity) activity = { kind, show: false, done: 0, total: 0, error: null, summary: null };
+// kind: 'backup' | 'restore' | 'import'. label: what its steps count
+// ("Covers"), listed with its own x / total in the pill's details.
+// Returns the job's handle.
+export function beginSync(kind, { show = false, total = 0, label = null } = {}) {
+  if (!activity) activity = { kind, show: false, done: 0, total: 0, error: null, summary: null, finished: [] };
   if (kind !== 'backup') activity.kind = kind;
   activity.show = activity.show || show;
-  const job = { kind, done: 0, total };
+  const job = { kind, done: 0, total, label };
   jobs.push(job);
   emit();
   return {
@@ -79,6 +88,7 @@ export function beginSync(kind, { show = false, total = 0 } = {}) {
       jobs = jobs.filter((j) => j !== job);
       activity.done += job.total; // a finished job counts as all done
       activity.total += job.total;
+      if (job.label) activity.finished.push({ label: job.label, done: job.total, total: job.total });
       if (!ok) activity.error = activity.error || error || 'Something went wrong.';
       if (summary && (kind === activity.kind || !activity.summary)) activity.summary = summary;
       if (!jobs.length) {

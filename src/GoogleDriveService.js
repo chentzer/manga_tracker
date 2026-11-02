@@ -237,7 +237,7 @@ export async function fetchBackupCsvContent(fileName = 'library-backup.csv') {
 // Finds a cover image in MangaTracker/<mediaType>/ whose filename starts
 // with the given source id (filenames are "code - title.jpg" or just
 // "code.jpg"), or null if none is found.
-async function findCoverFileId(mediaType, sourceId) {
+export async function findCoverFileId(mediaType, sourceId) {
   const token = await getToken();
   const folderId = await getOrCreateTypeFolder(mediaType);
   const query = `'${folderId}' in parents and trashed=false and name contains '${sourceId}'`;
@@ -262,8 +262,10 @@ async function findCoverFileId(mediaType, sourceId) {
 // Downloads a Drive cover image to local storage for a restored entry.
 // Returns the local file path, or null if no matching cover was found
 // in Drive (the entry still gets restored either way — just without a
-// thumbnail until the page is browsed again).
-export async function downloadCoverForRestore(mediaType, sourceId, localDir) {
+// thumbnail until the page is browsed again). fileName: the local file's
+// name, if not "<id>.jpg" (fetchMissingCovers uses a new one, so a
+// broken picture isn't shown from cache).
+export async function downloadCoverForRestore(mediaType, sourceId, localDir, fileName = null) {
   const fileId = await findCoverFileId(mediaType, sourceId);
   if (!fileId) return null;
 
@@ -272,13 +274,39 @@ export async function downloadCoverForRestore(mediaType, sourceId, localDir) {
   if (!dirInfo.exists) {
     await FileSystem.makeDirectoryAsync(localDir, { intermediates: true });
   }
-  const localPath = `${localDir}${sourceId}.jpg`;
-  await FileSystem.downloadAsync(
+  const localPath = `${localDir}${fileName || `${sourceId}.jpg`}`;
+  const result = await FileSystem.downloadAsync(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
     localPath,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+  // downloadAsync doesn't fail on an error reply: it saves the error
+  // message as the file, which showed as a blank cover. Only a real
+  // picture is kept.
+  if (result.status !== 200 || !(await isImageFile(localPath))) {
+    await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+    throw new Error(`Cover download failed: ${result.status}`);
+  }
   return localPath;
+}
+
+// Whether a local file starts like a JPEG, PNG, GIF or WebP picture.
+export async function isImageFile(path) {
+  try {
+    const head = atob(
+      await FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.Base64, position: 0, length: 12 })
+    );
+    const bytes = Array.from(head, (c) => c.charCodeAt(0));
+    const starts = (...b) => b.every((v, i) => bytes[i] === v);
+    return (
+      starts(0xff, 0xd8) || // JPEG
+      starts(0x89, 0x50, 0x4e, 0x47) || // PNG
+      starts(0x47, 0x49, 0x46) || // GIF
+      (starts(0x52, 0x49, 0x46, 0x46) && head.slice(8, 12) === 'WEBP')
+    );
+  } catch (e) {
+    return false;
+  }
 }
 
 // Uploads a local image file to MangaTracker/<mediaType>/ in Drive.

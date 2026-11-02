@@ -236,6 +236,16 @@ later point, e.g. after adding entries on a second device — existing
 local entries are never touched or overwritten by either path, only
 added to.
 
+Covers come back the same way, and keep trying until they do
+(`fetchMissingCovers` in `src/backup.js`): after Connect Drive and
+Restore, and on its own once a day when Drive sync is allowed, every
+entry whose cover isn't on the phone — or isn't a picture — gets it from
+Drive again, and counts as synced. Restore says how many it's fetching.
+A download that fails is no longer kept (`downloadAsync` used to save
+the error message as the cover, which showed as a blank thumbnail).
+Before uploading a "Local only" cover the app checks whether Drive
+already has it, and then only marks it synced, so nothing goes up twice.
+
 ## MyAnimeList export / import
 
 **Settings → MyAnimeList** (⚙️, top right) has **⬆ Export Manga**,
@@ -420,7 +430,8 @@ finish date and sets progress to the total when the total is known.
   category (Manga / Manhwa / Anime), status (Read/Watched, Want to
   Read/Watch, Reading/Watching) and rating (♥ Favourite, ★10 … ★6, ★1–5,
   No score). Each row takes any number of choices, and **Any** (none
-  chosen) is where every row starts each time the window opens. It opens
+  chosen) clears a row. The window opens with the choices you left last
+  time (the `randomChoice` setting). It opens
   the pick's details, where ▶ Watch/Read takes you to the next
   episode/chapter and **🎲 Pick again** picks another. Picks don't repeat
   until every match has been shown.
@@ -812,7 +823,11 @@ so nothing renders blank.
   magnifier that searches it in that tab (a link opens there).
 - `src/SyncStatusPill.js` / `src/syncStatus.js` — the pill beside the
   Settings button. While a backup, restore or MAL import runs it shows
-  **Backup**, **Restore** or **Import**, filling from the left as it goes (full = done); then
+  **Backup 37%**, **Restore 37%** or **Import 37%**, filling from the left
+  as it goes (full = done). Tapping it opens the details: the
+  percentage, a bar and each part's count (Entries checked, Covers,
+  Covers uploaded, Backup files, Lists) as x / total, live until it's
+  done; **Hide** closes it and the work carries on. Then
   "✓ Backed up" / "✓ Restored 12" for 2 seconds, or a red "⚠ Backup
   failed" that stays until tapped (it then shows the error) or until a
   later backup works. It appears after half a second, so quick automatic
