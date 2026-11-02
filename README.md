@@ -894,7 +894,9 @@ so nothing renders blank.
   the bottom, so a swipe that only reaches the end of a chapter on the
   way never jumps away by itself.
   `src/tabBarWatch.js`, run inside each page, handles these and reports
-  scrolling; the bars always show on the Library and Notepad.
+  scrolling; the bars always show on the Library and Notepad. A page
+  that's still loading in the background counts as loaded once you
+  scroll it, so the bars hide on busy pages too.
   Deleting a Library entry or a Notepad item happens at once with an
   **Undo** bar for 5 seconds instead of an "Are you sure?" (`src/undo.js`,
   `src/UndoBar.js`); it's only really deleted (and taken off Drive) after

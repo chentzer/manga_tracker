@@ -462,6 +462,11 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   const handleTabBarActivity = useCallback(
     (tabKey, kind) => {
       if (kind === 'loading' || kind === 'loaded' || kind === 'error') pageStates.current[tabKey] = kind;
+      // Scrolling means the page is up, even if it hasn't finished loading
+      // (busy sites can take ages to fire onLoad, which kept the bars up).
+      if ((kind === 'scroll' || kind === 'pullTop') && pageStates.current[tabKey] === 'loading') {
+        pageStates.current[tabKey] = 'loaded';
+      }
       if (kind === 'videoPlay' || kind === 'videoStop' || kind === 'loading') {
         if (kind === 'videoPlay') videoTabs.current.add(tabKey);
         else videoTabs.current.delete(tabKey);
