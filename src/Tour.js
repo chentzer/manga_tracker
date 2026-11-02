@@ -83,7 +83,7 @@ export function tourSteps({ siteTab, siteTabs }) {
           {
             tab: siteTab,
             target: `siteTab.${anime.key}`,
-            text: 'On Anime, double-tap the left or right side of a video to skip back or forward.',
+            text: 'On Anime, double-tap the left or right side of a video to skip back or forward. The screen stays on while it plays.',
           },
         ]
       : []),

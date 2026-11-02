@@ -922,6 +922,12 @@ so nothing renders blank.
   join it with `ref={tourTarget('key')}`, and the steps are
   `tourSteps()` in Tour.js — update them whenever a tab or feature is
   added, moved or removed.
+  **The screen stays on while a video plays** on the tab you're looking
+  at (any browsing tab, e.g. an anime episode), so the phone's screen
+  timeout doesn't turn it off mid-episode: `src/tabBarWatch.js` reports
+  `videoPlay` / `videoStop`, and `setVideoKeepAwake` in
+  `src/keepAwake.js` holds the screen on meanwhile. Only videos in the
+  page itself count, not a player framed from another site.
   An error that would close the app shows on screen instead, with
   **Share error** and **Try again** (`src/CrashScreen.js`).
   All tabs stay mounted simultaneously at all times — switching

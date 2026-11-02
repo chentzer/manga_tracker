@@ -7,6 +7,18 @@ import { onSyncStatus } from './syncStatus';
 // backups don't need it. Returns a function that stops watching.
 const TAG = 'drive-sync';
 
+// Keeps the screen on while a video plays on the tab on screen (App.js,
+// from tabBarWatch.js's videoPlay / videoStop): watching anime otherwise
+// lets the phone's screen timeout turn it off mid-episode.
+const VIDEO_TAG = 'video';
+let videoAwake = false;
+export function setVideoKeepAwake(on) {
+  if (on === videoAwake) return;
+  videoAwake = on;
+  if (on) Promise.resolve(activateKeepAwakeAsync(VIDEO_TAG)).catch(() => {});
+  else Promise.resolve(deactivateKeepAwake(VIDEO_TAG)).catch(() => {});
+}
+
 export function keepAwakeWhileSyncing() {
   let awake = false;
   const stop = onSyncStatus(({ active }) => {

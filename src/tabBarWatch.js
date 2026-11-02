@@ -8,6 +8,10 @@
 //               already at the very top, which brings the row back.
 //   'library' — dragged up PULL_LIBRARY px past the very bottom of the page
 //               and let go: App.js opens the Library.
+//   'videoPlay' / 'videoStop' — a video in the page started playing / none
+//               plays any more (paused, ended or gone): App.js keeps the
+//               screen on meanwhile. Only videos in the page itself, not in
+//               a player framed from another site.
 // Pulling on to PULL_REFRESH px and letting go reloads the page; a small
 // pill at the top says "Pull to refresh" / "Release to refresh" meanwhile.
 // At the bottom a pill says "Pull up for Library" / "Release for Library".
@@ -147,6 +151,28 @@ export const TAB_BAR_WATCH_JS = `
     // Android can cancel the touch when it takes over the drag; a pull that
     // already went far enough still counts.
     window.addEventListener('touchcancel', end, { capture: true, passive: true });
+
+    // Playing video: media events don't bubble, so they're caught on the
+    // way down; a check every few seconds catches a video that went away.
+    var playing = false;
+    function checkVideos() {
+      var now = false;
+      var vids = document.querySelectorAll('video');
+      for (var i = 0; i < vids.length; i++) {
+        var v = vids[i];
+        if (!v.paused && !v.ended && v.readyState > 2) { now = true; break; }
+      }
+      if (now === playing) return;
+      playing = now;
+      post(now ? 'videoPlay' : 'videoStop');
+    }
+    ['playing', 'pause', 'ended', 'emptied', 'waiting'].forEach(function(name) {
+      document.addEventListener(name, function() { setTimeout(checkVideos, 50); }, true);
+    });
+    setInterval(checkVideos, 5000);
+    window.addEventListener('pagehide', function() {
+      if (playing) { playing = false; post('videoStop'); }
+    });
   })();
   true;
 `;

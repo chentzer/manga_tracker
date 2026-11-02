@@ -47,7 +47,7 @@ import { classify } from './src/quickSearch';
 import QuickSearchPicker from './src/QuickSearchPicker';
 import { SNOOZE_CHOICES, snoozeMinutes, setSnoozeMinutes } from './src/snooze';
 import { beginSync } from './src/syncStatus';
-import { keepAwakeWhileSyncing } from './src/keepAwake';
+import { keepAwakeWhileSyncing, setVideoKeepAwake } from './src/keepAwake';
 import { exportMalList, pickAndImportMalList, MAL_LISTS, isImportedSourceId } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
@@ -454,9 +454,20 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   useEffect(() => {
     if (tourOpen) setTabBarHiddenAnimated(false);
   }, [tourOpen, setTabBarHiddenAnimated]);
+  // Tabs with a video playing (tabBarWatch.js): the screen stays on while
+  // the tab on screen is one of them (keepAwake.js).
+  const videoTabs = useRef(new Set());
+  useEffect(() => setVideoKeepAwake(videoTabs.current.has(tab)), [tab]);
+  useEffect(() => () => setVideoKeepAwake(false), []);
   const handleTabBarActivity = useCallback(
     (tabKey, kind) => {
       if (kind === 'loading' || kind === 'loaded' || kind === 'error') pageStates.current[tabKey] = kind;
+      if (kind === 'videoPlay' || kind === 'videoStop' || kind === 'loading') {
+        if (kind === 'videoPlay') videoTabs.current.add(tabKey);
+        else videoTabs.current.delete(tabKey);
+        setVideoKeepAwake(videoTabs.current.has(tabRef.current));
+        if (kind !== 'loading') return;
+      }
       if (tabKey !== tabRef.current) return; // a tab in the background
       if (kind === 'loading' || kind === 'error') {
         clearTimeout(hideTimer.current);
