@@ -50,6 +50,8 @@ import QuickSearchPicker from './src/QuickSearchPicker';
 import { SNOOZE_CHOICES, snoozeMinutes, setSnoozeMinutes } from './src/snooze';
 import { beginSync } from './src/syncStatus';
 import { keepAwakeWhileSyncing, setVideoKeepAwake } from './src/keepAwake';
+import { startBackgroundSync } from './src/backgroundSync';
+import { KeyboardPad, useKeyboardOpen } from './src/keyboard';
 import { exportMalList, pickAndImportMalList, MAL_LISTS, isImportedSourceId } from './src/malList';
 import {
   DATA_SAVER_DEFAULTS,
@@ -422,6 +424,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   // down at the very top of the page brings it back (src/tabBarWatch.js
   // reports both). Always shown on the Library tab.
   const [tabBarHidden, setTabBarHidden] = useState(false);
+  const keyboardOpen = useKeyboardOpen();
   // Only a loaded page can bring the bars back (the pull is read by a
   // script in the page), so they stay shown while a tab's page is loading
   // or failed to load, and before its first page has loaded: pageStates
@@ -519,6 +522,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
 
   // The screen stays on while Backup Now / Restore run (keepAwake.js).
   useEffect(() => keepAwakeWhileSyncing(), []);
+  // ...and they keep going after you leave the app, with a progress
+  // notification (backgroundSync.js).
+  useEffect(() => startBackgroundSync(), []);
   // Drive sync held back for Wi-Fi runs as soon as the phone is on Wi-Fi
   // again, or the setting is turned off.
   const catchUpDriveSync = useCallback(async () => {
@@ -978,6 +984,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Everything moves up above the keyboard while you type (keyboard.js). */}
+      <KeyboardPad style={styles.keyboardPad}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         {/* Tapping the header brings the bars back, e.g. on a page that
@@ -1111,7 +1119,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
 
       {/* The bottom bar: Browse, Library, Browser, Notepad. Hides with
           the site chooser while a page sits still (see tabBarHidden). */}
-      <View style={[styles.bottomBar, tabBarHidden && styles.tabBarHidden]} accessibilityRole="tablist">
+      {/* Hidden while typing, so the keyboard leaves more room. */}
+      <View style={[styles.bottomBar, (tabBarHidden || keyboardOpen) && styles.tabBarHidden]} accessibilityRole="tablist">
         {SECTIONS.map((section) => {
           const active = sectionOfTab(tab) === section.key;
           return (
@@ -1156,7 +1165,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         transparent
         onRequestClose={() => setSettingsVisible(false)}
       >
-        <View style={styles.settingsOverlay}>
+        <KeyboardPad style={styles.settingsOverlay}>
           {/* Scrolls when the settings don't fit on the screen. */}
           <ScrollView style={styles.settingsCard} contentContainerStyle={styles.settingsCardContent}>
             <Text style={styles.settingsTitle}>Settings</Text>
@@ -1417,8 +1426,9 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
               <Text style={styles.settingsCloseButtonText}>Close</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </KeyboardPad>
       </Modal>
+      </KeyboardPad>
     </SafeAreaView>
   );
 }
@@ -1443,6 +1453,7 @@ const styles = themed(StyleSheet.create({
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
   // Material's navigation bar: icon over label, the active one in a pill.
+  keyboardPad: { flex: 1 },
   bottomBar: { flexDirection: 'row', backgroundColor: '#16213e', paddingTop: 6, paddingBottom: 4 },
   bottomItem: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' },
   bottomIconPill: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 16 },

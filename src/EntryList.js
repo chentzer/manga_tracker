@@ -45,6 +45,7 @@ import {
 import FocusImage from './FocusImage';
 import RatePrompt from './RatePrompt';
 import { TAP_SLOP } from './touch';
+import { KeyboardPad } from './keyboard';
 import { tourTarget } from './Tour';
 import Icon, { IconText } from './Icon';
 import { offerUndo } from './undo';
@@ -618,7 +619,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
 
   return (
     <Modal visible animationType="fade" transparent onRequestClose={onClose}>
-      <View style={styles.detailOverlay}>
+      <KeyboardPad style={styles.detailOverlay}>
         <View style={styles.detailCard}>
           <View style={styles.groupPageHeader}>
             <Marquee style={styles.groupPageTitle} containerStyle={styles.groupNameBox}>
@@ -750,7 +751,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardPad>
     </Modal>
   );
 }
@@ -810,7 +811,7 @@ function DetailModal({
   const update = (fields) => onUpdate(entry, fields);
   return (
     <Modal visible={!!entry} animationType="slide" onRequestClose={onClose} transparent>
-      <View style={styles.detailOverlay}>
+      <KeyboardPad style={styles.detailOverlay}>
         <View style={styles.detailCard}>
           <ScrollView keyboardShouldPersistTaps="handled">
             <ConflictReview entry={entry} onResolve={(key, useMal) => onResolveConflict(entry, key, useMal)} />
@@ -997,7 +998,7 @@ function DetailModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardPad>
 
       <FullImageModal
         uri={entry.local_image_path}
@@ -1096,7 +1097,7 @@ function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles,
   if (!artist) return null;
   return (
     <Modal visible={!!artist} animationType="slide" onRequestClose={onClose} transparent>
-      <View style={styles.detailOverlay}>
+      <KeyboardPad style={styles.detailOverlay}>
         <View style={styles.detailCard}>
           <ScrollView scrollEnabled={!moving}>
             {artist.cover && moving ? (
@@ -1190,7 +1191,7 @@ function ArtistDetailModal({ artist, isFavorite, onToggleFavorite, onShowTitles,
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardPad>
 
       <FullImageModal uri={artist.cover} visible={fullImageVisible} onClose={() => setFullImageVisible(false)} />
     </Modal>
@@ -1228,7 +1229,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
   const anyChip = (list, clear) => chip(list.length === 0, 'Any', clear);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={styles.detailOverlay}>
+      <KeyboardPad style={styles.detailOverlay}>
         <View style={styles.randomCard}>
           <ScrollView>
             <Text style={styles.detailTitle}>
@@ -1294,7 +1295,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardPad>
     </Modal>
   );
 }
@@ -2671,7 +2672,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         animationType="slide"
         onRequestClose={() => setArtistModalVisible(false)}
       >
-        <View style={styles.logModal}>
+        <KeyboardPad style={styles.logModal}>
           <View style={styles.logHeader}>
             <Text style={styles.logTitle}>Filter by Artist</Text>
             <TouchableOpacity onPress={() => setArtistModalVisible(false)}>
@@ -2712,7 +2713,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               <Text style={styles.logLine}>No artists recorded yet.</Text>
             ) : null}
           </ScrollView>
-        </View>
+        </KeyboardPad>
       </Modal>
     </View>
   );
@@ -2871,6 +2872,7 @@ const styles = themed(StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 32,
     maxHeight: '85%',
+    flexShrink: 1,
   },
   randomHint: { fontSize: 12, color: '#666', marginTop: 4 },
   randomPickButton: { backgroundColor: '#e94560' },
@@ -3040,6 +3042,8 @@ const styles = themed(StyleSheet.create({
     borderTopRightRadius: 16,
     padding: 20,
     maxHeight: '85%',
+    // Gets shorter, rather than going under the keyboard (KeyboardPad).
+    flexShrink: 1,
   },
   detailImage: { width: '100%', height: 220, borderRadius: 10, backgroundColor: '#eee' },
   detailTitle: { fontSize: 20, fontWeight: '700', marginTop: 14 },

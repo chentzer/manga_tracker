@@ -118,7 +118,7 @@ export function tourSteps({ siteTab, siteTabs }) {
     { target: 'header.sync', optional: true, text: 'This shows Google Drive backup and sync, with how far it has got. Tap it while it runs for the details.' },
     {
       target: 'header.settings',
-      text: 'Settings: Google Drive backup, MyAnimeList import and export, your own Sites, App lock, Block ads, Data saver — and this tour again.',
+      text: 'Settings: Google Drive backup (it keeps going if you leave the app), MyAnimeList import and export, your own Sites, App lock, Block ads, Data saver — and this tour again.',
     },
   ];
 }

@@ -847,6 +847,13 @@ so nothing renders blank.
   cover uploads always do. Progress is one step per type's file plus one
   per cover uploaded (Backup Now counts the covers up front), or one per
   row for a restore.
+  These syncs (and MyAnimeList imports) keep going if you leave the app
+  or turn the screen off: `src/backgroundSync.js` runs the
+  `modules/sync-service` add-on, a foreground service (type dataSync)
+  whose notification shows the pill's progress ("37% · Covers 185 / 500")
+  and which holds the CPU awake until the sync ends; tapping it opens the
+  app. Quiet automatic backups never start it. On Android 13+ the app
+  asks once to show notifications; said no, the sync still carries on.
 - `src/EntryList.js` — accepts an `active` prop and re-fetches whenever it
   becomes `true`, since the component now stays permanently mounted
   (App.js toggles visibility rather than mounting/unmounting on tab
@@ -920,7 +927,11 @@ so nothing renders blank.
   the bottom, so a swipe that only reaches the end of a chapter on the
   way never jumps away by itself.
   `src/tabBarWatch.js`, run inside each page, handles these and reports
-  scrolling; the bars always show on the Library and Notepad. A page
+  scrolling; the bars always show on the Library and Notepad.
+  The keyboard never covers what you're typing: the app draws edge to
+  edge, so Android doesn't make room by itself, and `src/keyboard.js`'s
+  `KeyboardPad` (round the whole app and each pop-up sheet) moves things
+  up above it; the bottom tabs hide while it's open. A page
   that's still loading in the background counts as loaded once you
   scroll it, so the bars hide on busy pages too.
   Deleting a Library entry or a Notepad item happens at once with an

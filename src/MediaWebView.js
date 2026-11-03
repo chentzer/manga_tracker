@@ -42,6 +42,7 @@ import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { galleryFolderFor, safeFileName, saveFileToGallery } from './gallery';
 import { TAP_SLOP } from './touch';
+import { KeyboardPad } from './keyboard';
 import { tourTarget } from './Tour';
 import PageError from './PageError';
 import Icon from './Icon';
@@ -1740,7 +1741,7 @@ const MediaWebView = forwardRef(function MediaWebView({
             animationType="slide"
             onRequestClose={() => setHtmlModalVisible(false)}
           >
-            <View style={styles.logModal}>
+            <KeyboardPad style={styles.logModal}>
               <View style={styles.logHeader}>
                 <Text style={styles.logTitle}>Page HTML</Text>
                 <TouchableOpacity onPress={() => setHtmlModalVisible(false)}>
@@ -1757,7 +1758,7 @@ const MediaWebView = forwardRef(function MediaWebView({
                 editable={false}
                 selectTextOnFocus
               />
-            </View>
+            </KeyboardPad>
           </Modal>
         </>
       ) : null}
@@ -1786,7 +1787,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         </TouchableOpacity>
       </Modal>
       <Modal visible={logVisible} animationType="slide" onRequestClose={() => setLogVisible(false)}>
-        <View style={styles.logModal}>
+        <KeyboardPad style={styles.logModal}>
           <View style={styles.logHeader}>
             <Text style={styles.logTitle}>{config.label} debug log</Text>
             <TouchableOpacity onPress={() => setLogVisible(false)}>
@@ -1805,7 +1806,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           <TouchableOpacity style={styles.logClearButton} onPress={() => setDebugLog([])}>
             <Text style={styles.logClearButtonText}>Clear log</Text>
           </TouchableOpacity>
-        </View>
+        </KeyboardPad>
       </Modal>
       <WebView
         ref={webviewRef}

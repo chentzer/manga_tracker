@@ -24,6 +24,7 @@ import { AD_BLOCK_JS, isAdUrl } from './adBlock';
 import { TAB_BAR_WATCH_JS } from './tabBarWatch';
 import { IMAGE_HOLD_JS, saveHeldPicture, getHoldToSave } from './imageHold';
 import { TAP_SLOP } from './touch';
+import { KeyboardPad } from './keyboard';
 import { tourTarget } from './Tour';
 import PageError from './PageError';
 import Icon from './Icon';
@@ -509,7 +510,7 @@ const BrowserTab = forwardRef(function BrowserTab(
       ) : null}
 
       <Modal visible={!!bookmarks} transparent animationType="fade" onRequestClose={() => setBookmarks(null)}>
-        <View style={styles.overlay}>
+        <KeyboardPad style={styles.overlay}>
           <View style={styles.sheet}>
             {bookmarks ? (
               <>
@@ -592,7 +593,7 @@ const BrowserTab = forwardRef(function BrowserTab(
               </>
             ) : null}
           </View>
-        </View>
+        </KeyboardPad>
       </Modal>
     </View>
   );
