@@ -625,6 +625,17 @@ export function insertEntry({ sourceId, mediaType, title, altTitle, author, sour
   );
 }
 
+// The entry's cover on the phone, fetched again from Drive (backup.js
+// fetchMissingCovers). It came from Drive, so it's synced: left
+// 'pending', it would show "Local only" and be uploaded again.
+export function setLocalImagePath(sourceId, mediaType, path) {
+  db.runSync("UPDATE entries SET local_image_path = ?, sync_status = 'synced' WHERE source_id = ? AND media_type = ?", [
+    path,
+    sourceId,
+    mediaType,
+  ]);
+}
+
 export function markSynced(sourceId, mediaType, driveFileId) {
   db.runSync(
     "UPDATE entries SET drive_file_id = ?, sync_status = 'synced' WHERE source_id = ? AND media_type = ?",
