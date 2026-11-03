@@ -41,8 +41,9 @@ class SyncServiceModule : Module() {
       if (SyncForegroundService.running) SyncForegroundService.show(ctx, title, text, done, total, upload)
     }
 
+    // Returns whether it was running.
     Function("stop") {
-      val ctx = context ?: return@Function
+      val ctx = context ?: return@Function false
       ctx.stopService(Intent(ctx, SyncForegroundService::class.java))
     }
   }
