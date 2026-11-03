@@ -700,17 +700,20 @@ so nothing renders blank.
 - **Groups (Manga, Anime)** — `groupField` in mediaTypes.js,
   `src/groups.js`. Entries saved one by one (volumes, parts, seasons) can
   be put in a named group from the detail sheet: **Add to a group…**
-  picks an existing group or creates one with the name you type, and a
-  chip suggests one from the title ("Summer Days 4" goes with "Summer
-  Days", or makes a new group with the other parts already saved). In a
-  group the sheet shows its name and every entry in it (each opens with a
-  tap), **✎ Edit group** and **Remove this from group**. Tapping the
-  group's name opens its own page (`GroupModal`): every entry with its
-  cover, opening on tap. Its **✎ Edit** button turns the page into the
-  editor: rename the group (for every entry), sort it in one tap (**Part
-  number**, **Title**, **Date added**), move an entry with ▲ / ▼, take one
-  out with ✕, and **+ Add more** (search the type). Long titles and group
-  names scroll sideways (`src/Marquee.js`) instead of being cut off. To
+  opens a sheet listing your groups, each with a cover and how many it
+  has (the box filters them, or names a new one), and a chip suggests one
+  from the title ("Summer Days 4" goes with "Summer Days", or makes a new
+  group with the other parts already saved). In a group the sheet shows
+  it as one card: its name, "N entries ›" and a strip of the covers (this
+  one ringed), each opening with a tap, plus **✎ Edit group** and **Take
+  out of group** (with Undo). The card's header opens the group's own
+  page (`GroupModal`), full screen with a back arrow: the covers in a
+  grid. **Edit** renames it in the title bar, sorts it from one **Sort
+  by** menu (Part number, Title A–Z, Date added; dragging makes it
+  Custom), reorders by dragging ≡ (`DragList`; a screen reader gets Move
+  up / Move down), takes an entry out with ✕ (with Undo) and **+ Add
+  entries** (likely parts first, or a search; tick several, then Add).
+  Long titles and group names scroll sideways (`src/Marquee.js`) instead of being cut off. To
   see groups only, pick **🗂 Groups** next to Titles / Artists: one row
   per group (A–Z, searchable) with a cover, its name and how many it has;
   tap a row to open the group's page, or hold it to open it in Edit. The
@@ -883,9 +886,11 @@ so nothing renders blank.
   genres). A scrollable minimum-score filter (★9+, ★8+, etc), a scrollable
   status filter (Reading/Watching, Read/Watched, On Hold, Dropped, Want
   to Read/Watch — combined generic wording here since this filter spans
-  both media types at once), and a scrollable
+  both media types at once, plus **🔥 Super Want**), and a scrollable
   row of tag filter chips
-  (multi-select — an entry must have *all* selected tags to match) — all
+  (multi-select — an entry must have *all* selected tags to match; hold
+  a chip to make it a favourite tag, marked ★ and listed first, saved on
+  the phone as the `favoriteTags` setting) — all
   client-side over the already-loaded list, so toggling any of them is
   instant. Each row shows its score (★ 8) and progress (12/24 ep).
   Tapping a row opens a detail sheet showing the full title, author,
@@ -898,7 +903,11 @@ so nothing renders blank.
   the entry's own media type — "Reading"/"Read"/"Want to Read" for
   manga, "Watching"/"Watched"/"Want to Watch" for anime, via each type's
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to
-  unset), a tag
+  unset; double-tap **Want to** for **Super Want to Read / Watch**, a red
+  🔥 chip and row badge for the ones you want most — stored as Want to
+  with priority High, and one tap takes it back to plain Want to; in
+  the list a ♥ favourite has a thin pink outline and a Super Want a red
+  one, pink top and left with red bottom and right when it's both), a tag
   editor (add/remove free-text tags), and a **Delete** button that removes just that one entry and
   its local thumbnail after a confirmation prompt (Google Drive is left
   untouched). New entries start as Plan to Read/Watch and move to

@@ -660,6 +660,10 @@ const MediaWebView = forwardRef(function MediaWebView({
   // its async download+upload — resulting in two separate Drive uploads
   // of the same image. This in-memory guard closes that gap.
   const inFlightSourceIds = useRef(new Set());
+  // Entries whose payload is being saved (the 18+ question, thumbnail
+  // download, insert): a second payload for the same one (the reader
+  // injected again after a reload) is ignored.
+  const savingSourceIds = useRef(new Set());
   const [debugLog, setDebugLog] = useState([]);
   const [logVisible, setLogVisible] = useState(false);
   // Tracks whether the currently-loaded page corresponds to an entry
@@ -1022,7 +1026,18 @@ const MediaWebView = forwardRef(function MediaWebView({
       }
       setCurrentEntryKey(existing ? `${config.key}:${sourceId}` : null);
       if (inFlightSourceIds.current.has(sourceId)) {
-        logDebug(`Matched ${sourceId} — already being processed, skipping duplicate trigger.`);
+        // The page loaded again before its reader answered — a bot check
+        // reloads the same address once you're through, which ends the
+        // reader injected into the check page. Read the new page; a
+        // second answer is ignored.
+        if (pendingSourceId.current === sourceId && !savingSourceIds.current.has(sourceId)) {
+          logDebug(`Matched ${sourceId} again — reading the reloaded page.`);
+          setTimeout(() => {
+            webviewRef.current?.injectJavaScript(source.extractMetadataJs);
+          }, 400);
+        } else {
+          logDebug(`Matched ${sourceId} — already being processed, skipping duplicate trigger.`);
+        }
         return;
       }
       inFlightSourceIds.current.add(sourceId);
@@ -1490,6 +1505,9 @@ const MediaWebView = forwardRef(function MediaWebView({
         return;
       }
 
+      if (savingSourceIds.current.has(sourceId)) return;
+      savingSourceIds.current.add(sourceId);
+
       // 18+ titles (site genres, or AniList by MAL id) are only recorded
       // if you say so; a "Don't add" isn't asked again until the app
       // restarts.
@@ -1516,6 +1534,7 @@ const MediaWebView = forwardRef(function MediaWebView({
           logDebug(`Matched ${sourceId} — 18+, not recording it.`);
           clearPending();
           inFlightSourceIds.current.delete(sourceId);
+          savingSourceIds.current.delete(sourceId);
           return;
         }
         logDebug(`Matched ${sourceId} — 18+, recording it as asked.`);
@@ -1613,6 +1632,7 @@ const MediaWebView = forwardRef(function MediaWebView({
       } finally {
         clearPending();
         inFlightSourceIds.current.delete(sourceId);
+        savingSourceIds.current.delete(sourceId);
       }
     },
     [config, isSignedInToGoogle, checkUrlAndExtract, logDebug, applyProgress, saveHeldPicture, learnTotal]

@@ -62,6 +62,8 @@ export const ICONS = {
   on_hold: 'pause-circle-outline',
   dropped: 'close-circle-outline',
   want_to_read: 'bookmark-outline',
+  // Super Want to Read/Watch: Want to with priority 'high' (EntryList.js).
+  super_want: 'fire',
 };
 
 export default function Icon({ name, size = 18, color, style }) {
