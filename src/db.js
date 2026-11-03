@@ -570,7 +570,19 @@ export function fillMissingEntryFields(sourceId, mediaType, { title, altTitle, a
     alt_title: altTitle || null,
     author: author ? String(author).trim() || null : null,
   };
-  const fields = Object.fromEntries(Object.entries(candidates).filter(([k, v]) => v && empty(entry[k])));
+  // A title saved as this title with its other names run on after it
+  // (a site that put every language in its heading, e.g. "Today's Asuka
+  // ShowKyou no Asuka Show今日の…") counts as missing, so it's replaced.
+  const runTogether =
+    title &&
+    altTitle &&
+    typeof entry.title === 'string' &&
+    entry.title !== title &&
+    entry.title.startsWith(title) &&
+    entry.title.includes(altTitle);
+  const fields = Object.fromEntries(
+    Object.entries(candidates).filter(([k, v]) => v && (empty(entry[k]) || (k === 'title' && runTogether)))
+  );
   if (coverPath) fields.local_image_path = coverPath;
   const keys = Object.keys(fields);
   if (keys.length === 0) return [];

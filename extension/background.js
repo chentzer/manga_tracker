@@ -58,19 +58,26 @@ async function registerPageScript() {
   } catch (err) {
     // Not registered yet.
   }
-  if (!origins.length) return;
-  const granted = await chrome.permissions.contains({ origins });
-  if (!granted) return;
+  // Each site on its own: one site whose access wasn't granted (e.g. one
+  // added later) used to leave every site without the page script.
+  const checks = await Promise.all(origins.map((o) => chrome.permissions.contains({ origins: [o] })));
+  const granted = origins.filter((o, i) => checks[i]);
+  if (!granted.length) return;
   await chrome.scripting.registerContentScripts([
     {
       id: CONTENT_SCRIPT_ID,
-      matches: origins,
+      matches: granted,
       js: ['sites.generated.js', 'rules.js', 'content.js'],
       runAt: 'document_idle',
       persistAcrossSessions: true,
     },
   ]);
 }
+
+// Access given or taken away (options page, or Chrome's own site
+// settings): the page script follows.
+chrome.permissions.onAdded.addListener(() => registerPageScript().catch(console.warn));
+chrome.permissions.onRemoved.addListener(() => registerPageScript().catch(console.warn));
 
 chrome.runtime.onInstalled.addListener(() => {
   registerPageScript().catch(console.warn);
