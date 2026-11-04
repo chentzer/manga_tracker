@@ -26,13 +26,14 @@ function emit() {
 }
 
 // { active: null | { kind, done, total, show, parts }, result }
-// parts: the labelled jobs of this activity, running or finished —
-// [{ label, done, total }] — for the details the pill opens.
+// parts: the labelled jobs still running — [{ label, done, total }] — for
+// the details the pill opens. A finished job's row goes; its steps still
+// count towards the percentage.
 export function getSyncStatus() {
   if (!activity) return { active: null, result };
   const done = activity.done + jobs.reduce((n, j) => n + j.done, 0);
   const total = activity.total + jobs.reduce((n, j) => n + j.total, 0);
-  const parts = [...activity.finished, ...jobs.filter((j) => j.label)].map((j) => ({
+  const parts = jobs.filter((j) => j.label).map((j) => ({
     label: j.label,
     done: Math.min(j.done, j.total),
     total: j.total,
@@ -60,7 +61,7 @@ export function clearSyncResult() {
 // ("Covers"), listed with its own x / total in the pill's details.
 // Returns the job's handle.
 export function beginSync(kind, { show = false, total = 0, label = null } = {}) {
-  if (!activity) activity = { kind, show: false, done: 0, total: 0, error: null, summary: null, finished: [] };
+  if (!activity) activity = { kind, show: false, done: 0, total: 0, error: null, summary: null };
   if (kind !== 'backup') activity.kind = kind;
   activity.show = activity.show || show;
   const job = { kind, done: 0, total, label };
@@ -88,7 +89,6 @@ export function beginSync(kind, { show = false, total = 0, label = null } = {}) 
       jobs = jobs.filter((j) => j !== job);
       activity.done += job.total; // a finished job counts as all done
       activity.total += job.total;
-      if (job.label) activity.finished.push({ label: job.label, done: job.total, total: job.total });
       if (!ok) activity.error = activity.error || error || 'Something went wrong.';
       if (summary && (kind === activity.kind || !activity.summary)) activity.summary = summary;
       if (!jobs.length) {

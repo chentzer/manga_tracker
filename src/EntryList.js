@@ -11,11 +11,11 @@ import {
   Linking,
   ScrollView,
   Alert,
+  AppState,
   TextInput,
   Switch,
   BackHandler,
   Platform,
-  ToastAndroid,
   Animated,
   PanResponder,
 } from 'react-native';
@@ -30,6 +30,7 @@ import {
   getSetting,
   setSetting,
 } from './db';
+import { showToast } from './toast';
 import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId, refreshFromAniList } from './malList';
@@ -52,6 +53,7 @@ import { TAP_SLOP } from './touch';
 import { KeyboardPad } from './keyboard';
 import { tourTarget } from './Tour';
 import Icon, { IconText } from './Icon';
+import ZoomableImage from './ZoomableImage';
 import { offerUndo } from './undo';
 import UndoBar from './UndoBar';
 import { themed, themeColor, useDarkMode } from './theme';
@@ -314,7 +316,7 @@ function TagEditor({ tags, onChange }) {
         <TextInput
           style={styles.tagInput}
           placeholder="Add a tag…"
-          placeholderTextColor={themeColor('#767676')}
+          placeholderTextColor={themeColor('#666')}
           value={input}
           onChangeText={setInput}
           onSubmitEditing={addTag}
@@ -332,9 +334,7 @@ function TagEditor({ tags, onChange }) {
 function FullImageModal({ uri, visible, onClose }) {
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <TouchableOpacity style={styles.fullImageOverlay} activeOpacity={1} onPress={onClose}>
-        {uri ? <Image source={{ uri }} style={styles.fullImage} resizeMode="contain" /> : null}
-      </TouchableOpacity>
+      {uri ? <ZoomableImage uri={uri} onClose={onClose} /> : null}
     </Modal>
   );
 }
@@ -614,7 +614,7 @@ function GroupPickerSheet({ visible, groups, onClose, onPick }) {
             value={text}
             onChangeText={setText}
             placeholder="Search your groups, or name a new one"
-            placeholderTextColor={themeColor('#767676')}
+            placeholderTextColor={themeColor('#666')}
             returnKeyType="done"
             onSubmitEditing={() => text.trim() && onPick(matches.length === 1 && query ? matches[0].name : text)}
           />
@@ -622,7 +622,7 @@ function GroupPickerSheet({ visible, groups, onClose, onPick }) {
             {text.trim() && !exact ? (
               <TouchableOpacity style={styles.groupPickRow} onPress={() => onPick(text)} accessibilityRole="button">
                 <View style={[styles.groupPickCover, styles.groupPickNew]}>
-                  <Icon name="plus" size={22} color="#0f3460" />
+                  <Icon name="plus" size={22} color="#1d1f20" />
                 </View>
                 <Text style={styles.groupPickName} numberOfLines={2}>
                   New group “{text.trim()}”
@@ -822,7 +822,7 @@ function GroupModal({ visible, editing, onEditing, name, members, sameType, curr
                   accessibilityState={{ selected: sortKey === s.key }}
                 >
                   <Text style={styles.groupMenuText}>{s.label}</Text>
-                  {sortKey === s.key ? <Icon name="check" size={20} color="#0f3460" /> : null}
+                  {sortKey === s.key ? <Icon name="check" size={20} color="#1d1f20" /> : null}
                 </TouchableOpacity>
               ))}
               {sortKey === 'custom' ? <Text style={styles.groupHint}>Now: your own order.</Text> : null}
@@ -1014,7 +1014,7 @@ function AddEntriesSheet({ visible, name, sameType, onClose, onAdd }) {
             value={search}
             onChangeText={setSearch}
             placeholder="Search titles…"
-            placeholderTextColor={themeColor('#767676')}
+            placeholderTextColor={themeColor('#666')}
           />
           {!query && likely.length ? <Text style={styles.groupHint}>Looks like part of this group:</Text> : null}
           <ScrollView keyboardShouldPersistTaps="handled">
@@ -1028,7 +1028,7 @@ function AddEntriesSheet({ visible, name, sameType, onClose, onAdd }) {
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: on }}
                 >
-                  <Icon name={on ? 'checked' : 'unchecked'} size={24} color="#0f3460" />
+                  <Icon name={on ? 'checked' : 'unchecked'} size={24} color="#1d1f20" />
                   <GroupCover entry={e} style={styles.groupPickCover} />
                   <View style={styles.groupPageText}>
                     <Text style={styles.groupPickName} numberOfLines={2}>
@@ -1328,9 +1328,14 @@ const SORTS = [
   { key: 'rating', label: 'Top Rated' },
 ];
 // key: a minimum score, or 'favorite' for ♥ favourites only.
+// The chips are drawn small, so the filters don't push the list down; this
+// makes each one 48 dp to tap.
+const CHIP_SLOP = { top: 9, bottom: 9 };
 const RATING_FILTERS = [
   { key: null, label: 'Any score' },
   { key: 'favorite', icon: 'heart', label: 'Favourites' },
+  // Entries with no cover on the phone: opening the page fills one in.
+  { key: 'noCover', icon: 'noCover', label: 'No cover' },
   { key: 9, icon: 'star', label: '9+' },
   { key: 8, icon: 'star', label: '8+' },
   { key: 7, icon: 'star', label: '7+' },
@@ -1346,6 +1351,94 @@ const READ_STATUS_FILTERS = [
   { key: 'want_to_read', icon: 'want_to_read', label: 'Want to Read/Watch' },
   { key: 'super_want', icon: 'super_want', label: 'Super Want' },
 ];
+
+// One entry in the Library's list. Memoised: a long list redraws only the
+// rows whose details, or whether they're picked, changed. dark isn't read
+// here but redraws the row when Dark mode is switched.
+const EntryRow = React.memo(function EntryRow({ item, picking, isPicked, showType, onPress, onLongPress, dark }) { // eslint-disable-line no-unused-vars
+  const superWant = isSuperWant(item);
+  return (
+    <TouchableOpacity
+      style={[
+        styles.row,
+        item.favorite || superWant ? styles.rowOutlined : null,
+        item.favorite ? styles.rowFavorite : null,
+        superWant ? (item.favorite ? styles.rowBoth : styles.rowSuperWant) : null,
+        isPicked && styles.rowPicked,
+      ]}
+      onPress={() => onPress(item)}
+      // Hold a title to select it, then tap others to add them.
+      onLongPress={() => onLongPress(item)}
+      accessibilityRole="button"
+      accessibilityState={picking ? { selected: isPicked } : undefined}
+    >
+      {picking ? (
+        <Text style={styles.pickMark}>
+          <Icon name={isPicked ? 'checked' : 'unchecked'} size={24} />
+        </Text>
+      ) : null}
+      {item.local_image_path ? (
+        <Image source={{ uri: item.local_image_path }} style={styles.thumb} />
+      ) : (
+        <View style={[styles.thumb, styles.thumbPlaceholder]} />
+      )}
+      <View style={styles.meta}>
+        {item.favorite || superWant ? (
+          <View style={styles.rowLabels}>
+            {item.favorite ? (
+              <Text style={styles.rowLabelFavorite}>
+                <Icon name="heart" size={12} /> FAVOURITE
+              </Text>
+            ) : null}
+            {superWant ? (
+              <Text style={styles.rowLabelSuper}>
+                <Icon name="super_want" size={12} /> SUPER WANT
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+        <Text style={styles.name} numberOfLines={2}>
+          {item.title || item.source_id}
+        </Text>
+        {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
+        <View style={styles.metaRow}>
+          {item.score ? (
+            <Text style={styles.scoreBadge}>
+              <Icon name="star" size={13} /> {item.score}
+            </Text>
+          ) : null}
+          {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
+          {item.mal_conflicts ? (
+            <Text style={styles.conflictBadge}>
+              <Icon name="warning" size={13} /> differs from MAL
+            </Text>
+          ) : null}
+          {item.group_name ? (
+            <Text style={styles.progressBadge} numberOfLines={1}>
+              {item.group_name}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.metaRow}>
+          {/* Its kind, when the list shows them all. */}
+          {showType ? <Text style={styles.typeBadge}>{MEDIA_TYPES[item.media_type]?.label || item.media_type}</Text> : null}
+          {/* Super Want has its label above. */}
+          {item.read_status && !superWant ? (
+            <Text style={styles.readStatusBadge}>
+              <Icon name={item.read_status} size={15} />
+            </Text>
+          ) : null}
+          {/* Only what's not in Drive yet: most rows are, so it was noise. */}
+          {item.sync_status === 'synced' ? null : (
+            <Text style={styles.status}>
+              <Icon name="localOnly" size={12} /> Local only
+            </Text>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 // The 🎲 Random button's choices. Each row allows several choices at once
 // (e.g. Manga + Anime); a row with nothing chosen means "any".
@@ -1530,6 +1623,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
     <TouchableOpacity
       key={`${icon}${label}`}
       style={[styles.filterChip, active && styles.filterChipActive]}
+      hitSlop={CHIP_SLOP}
       onPress={onPress}
     >
       <Text style={active ? styles.filterTextActive : styles.filterText}>
@@ -1625,6 +1719,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [artistModalVisible, setArtistModalVisible] = useState(false);
   const [minRating, setMinRating] = useState(null);
   const [readStatusFilter, setReadStatusFilter] = useState(null);
+  // The Library's search box: part of a title or alternative title.
+  const [titleQuery, setTitleQuery] = useState('');
   const [tagFilters, setTagFilters] = useState([]); // array of selected tag strings (AND logic)
   const [genreFilters, setGenreFilters] = useState([]); // selected genres (AND logic, like tags)
   const [selectedKey, setSelectedKey] = useState(null); // `${media_type}:${source_id}` or null
@@ -1700,6 +1796,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     if (!focusKey) return;
     setFilter(null);
     setMinRating(null);
+    setTitleQuery('');
     setReadStatusFilter(null);
     setTagFilters([]);
     setGenreFilters([]);
@@ -1720,12 +1817,18 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   // keeping them here means toggling either stays instant with no
   // extra query.
   const filteredEntries = entries.filter((e) => {
+    const query = titleQuery.trim().toLowerCase();
+    if (query && ![e.title, e.alt_title, e.source_id].some((v) => String(v || '').toLowerCase().includes(query))) {
+      return false;
+    }
     if (artistFilter.trim()) {
       const needle = artistFilter.trim().toLowerCase();
       if (!e.author || !e.author.toLowerCase().includes(needle)) return false;
     }
     if (minRating === 'favorite') {
       if (!e.favorite) return false;
+    } else if (minRating === 'noCover') {
+      if (e.local_image_path) return false;
     } else if (minRating !== null && (e.score || 0) < minRating) return false;
     if (readStatusFilter === 'super_want') {
       if (!isSuperWant(e)) return false;
@@ -1779,7 +1882,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       setSetting('favoriteTags', JSON.stringify([...next]));
       setFavoriteTags(next);
       if (Platform.OS === 'android') {
-        ToastAndroid.show(next.has(key) ? `#${tag} is a favourite tag` : `#${tag} is no longer a favourite`, ToastAndroid.SHORT);
+        showToast(next.has(key) ? `#${tag} is a favourite tag` : `#${tag} is no longer a favourite`);
       }
     },
     [favoriteTags]
@@ -1847,13 +1950,33 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   // makes an otherwise-invisible failure actually visible, rather than
   // the app quietly falling behind until a manual Backup Now happens to
   // catch it later.
-  const backupSilently = useCallback(() => {
+  // A few seconds after the last change, so tapping through ratings is one
+  // sync of the whole library rather than one each. At once if you've left
+  // the app (the wait might not finish).
+  const backupTimer = useRef(null);
+  const backupNow = useCallback(() => {
+    clearTimeout(backupTimer.current);
+    backupTimer.current = null;
     maybeBackupLibraryToDrive().then((result) => {
       if (result.attempted && !result.success) {
         Alert.alert('Drive backup failed', result.error || 'Unknown error — try Backup Now in Settings.');
       }
     });
   }, []);
+  const backupSilently = useCallback(() => {
+    if (AppState.currentState !== 'active') {
+      backupNow();
+      return;
+    }
+    clearTimeout(backupTimer.current);
+    backupTimer.current = setTimeout(backupNow, 3000);
+  }, [backupNow]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && backupTimer.current) backupNow();
+    });
+    return () => sub.remove();
+  }, [backupNow]);
 
   const rate = useCallback(
     (item, score) => {
@@ -2218,7 +2341,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterSummary = [
     ...(artistFilter ? [{ icon: 'people', text: artistFilter }] : []),
-    ...(minRating === 'favorite' ? [{ icon: 'heart' }] : minRating ? [{ icon: 'star', text: `${minRating}+` }] : []),
+    ...(minRating === 'noCover' ? [{ icon: 'noCover' }] : minRating === 'favorite' ? [{ icon: 'heart' }] : minRating ? [{ icon: 'star', text: `${minRating}+` }] : []),
     ...(readStatusFilter ? [{ icon: readStatusFilter }] : []),
     ...(conflictsOnly ? [{ icon: 'warning' }] : []),
     ...genreFilters.map((g) => ({ text: g })),
@@ -2444,29 +2567,65 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
     [openGroup, groupsTypeEntries]
   );
 
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  const togglePickRef = useRef(togglePick);
+  const handleRowPress = useCallback((item) => {
+    const key = `${item.media_type}:${item.source_id}`;
+    if (pickedRef.current) togglePickRef.current(key);
+    else setSelectedKey(key);
+  }, []);
+  const handleRowLongPress = useCallback((item) => {
+    const key = `${item.media_type}:${item.source_id}`;
+    if (pickedRef.current) togglePickRef.current(key);
+    else setPicked(new Set([key]));
+  }, []);
+  const renderEntryRow = useCallback(
+    ({ item }) => (
+      <EntryRow
+        item={item}
+        picking={!!picked}
+        isPicked={!!picked && picked.has(`${item.media_type}:${item.source_id}`)}
+        showType={filter === null}
+        onPress={handleRowPress}
+        onLongPress={handleRowLongPress}
+        dark={dark}
+      />
+    ),
+    [picked, filter, handleRowPress, handleRowLongPress, dark]
+  );
+  // Random picks a title: beside the search box in every view.
+  const randomButton = (
+    <TouchableOpacity
+      ref={tourTarget('library.random')}
+      style={styles.randomIconButton}
+      onPress={openRandom}
+      accessibilityRole="button"
+      accessibilityLabel="Random: pick a title for me"
+    >
+      <Text style={styles.randomIconText}><Icon name="random" size={24} /></Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
-      <View style={styles.topButtons}>
-        <TouchableOpacity ref={tourTarget('library.random')} style={[styles.randomTopButton, styles.topButton]} onPress={openRandom}>
-          <Text style={styles.randomTopButtonText}>
-            <Icon name="random" size={16} /> Random
-          </Text>
-        </TouchableOpacity>
-        {/* Only while something is waiting for a score (ToRate.js). */}
-        {toRate.count ? (
-          <TouchableOpacity style={[styles.toRateButton, styles.topButton]} onPress={() => setToRateVisible(true)}>
+      {/* Only while something is waiting for a score (ToRate.js). */}
+      {toRate.count ? (
+        <View style={styles.topButtons}>
+          <TouchableOpacity style={[styles.toRateButton, styles.topButton]} onPress={() => setToRateVisible(true)} accessibilityRole="button">
             <Text style={styles.toRateButtonText}>
               <Icon name="starOutline" size={16} /> To rate · {toRate.count}
             </Text>
           </TouchableOpacity>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
       <View ref={tourTarget('library.types')} style={[styles.filterBar, styles.filterBarWrap]}>
         {FILTERS.map((f) => (
           <TouchableOpacity
             key={f.key ?? 'all'}
             style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
+            hitSlop={CHIP_SLOP}
             onPress={() => setFilter(f.key)}
           >
             <Text style={filter === f.key ? styles.filterTextActive : styles.filterText}>{f.label}</Text>
@@ -2486,6 +2645,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               <TouchableOpacity
                 key={v.key}
                 style={[styles.filterChip, active && styles.filterChipActive]}
+                hitSlop={CHIP_SLOP}
                 onPress={() => setSectionView(filter, v.key)}
               >
                 <Text style={active ? styles.filterTextActive : styles.filterText}>
@@ -2505,7 +2665,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               value={peopleQuery}
               onChangeText={setPeopleQuery}
               placeholder="Search groups…"
-              placeholderTextColor={themeColor('#767676')}
+              placeholderTextColor={themeColor('#666')}
               autoCorrect={false}
               returnKeyType="search"
             />
@@ -2514,6 +2674,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
                 <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
               </TouchableOpacity>
             ) : null}
+            {randomButton}
           </View>
           <FlatList
             extraData={dark}
@@ -2559,7 +2720,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
               value={peopleQuery}
               onChangeText={setPeopleQuery}
               placeholder="Search artists…"
-              placeholderTextColor={themeColor('#767676')}
+              placeholderTextColor={themeColor('#666')}
               autoCorrect={false}
               returnKeyType="search"
             />
@@ -2568,6 +2729,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
                 <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
               </TouchableOpacity>
             ) : null}
+            {randomButton}
           </View>
           <FlatList
             extraData={dark}
@@ -2612,27 +2774,52 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         </>
       ) : (
         <>
-      {/* Filters fold away into one bar (summary of what's on + Clear), so
-          the list keeps the screen; tap the bar to show them all. */}
+      {/* Search and the Filters button share a row, so the list keeps the
+          screen; what's on shows under them, with ✕ to clear it. */}
       <View style={styles.filterToggleRow}>
-        <TouchableOpacity ref={tourTarget('library.filters')} style={styles.filterToggle} onPress={() => setFiltersOpen((o) => !o)}>
+        <TextInput
+          style={styles.tagInput}
+          value={titleQuery}
+          onChangeText={setTitleQuery}
+          placeholder="Search titles…"
+          placeholderTextColor={themeColor('#666')}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {titleQuery ? (
+          <TouchableOpacity style={styles.artistFilterClearButton} onPress={() => setTitleQuery('')} accessibilityLabel="Clear search">
+            <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          ref={tourTarget('library.filters')}
+          style={styles.filterToggle}
+          onPress={() => setFiltersOpen((o) => !o)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: filtersOpen }}
+        >
           <Text style={styles.filterToggleText} numberOfLines={1}>
             <Icon name="filters" size={16} /> Filters
+          </Text>
+          <Text style={styles.filterToggleArrow}><Icon name={filtersOpen ? 'chevronUp' : 'chevronDown'} size={16} /></Text>
+        </TouchableOpacity>
+        {randomButton}
+      </View>
+      {activeFilterSummary.length ? (
+        <View style={styles.filterSummaryRow}>
+          <Text style={styles.filterSummaryText} numberOfLines={1}>
             {activeFilterSummary.map((s, i) => (
               <React.Fragment key={i}>
-                {' · '}
+                {i ? ' · ' : ''}
                 <IconText icon={s.icon} size={14}>{s.text}</IconText>
               </React.Fragment>
             ))}
           </Text>
-          <Text style={styles.filterToggleArrow}>{filtersOpen ? '▴' : '▾'}</Text>
-        </TouchableOpacity>
-        {activeFilterSummary.length ? (
-          <TouchableOpacity style={styles.artistFilterClearButton} onPress={clearFilters} accessibilityLabel="Clear">
+          <TouchableOpacity onPress={clearFilters} hitSlop={TAP_SLOP} accessibilityRole="button" accessibilityLabel="Clear filters">
             <Text style={styles.artistFilterClear}><Icon name="close" size={18} /></Text>
           </TouchableOpacity>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
       {filtersOpen ? (
       <View style={styles.filterPanel}>
       <View style={[styles.filterBar, styles.filterBarWrap]}>
@@ -2640,6 +2827,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           <TouchableOpacity
             key={s.key}
             style={[styles.filterChip, sort === s.key && styles.filterChipActive]}
+            hitSlop={CHIP_SLOP}
             onPress={() => setSort(s.key)}
           >
             <Text style={sort === s.key ? styles.filterTextActive : styles.filterText}>
@@ -2650,6 +2838,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         {conflictCount > 0 || conflictsOnly ? (
           <TouchableOpacity
             style={[styles.filterChip, styles.reviewChip, conflictsOnly && styles.filterChipActive]}
+            hitSlop={CHIP_SLOP}
             onPress={() => setConflictsOnly((v) => !v)}
           >
             <Text style={conflictsOnly ? styles.filterTextActive : styles.reviewChipText}>
@@ -2685,6 +2874,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           <TouchableOpacity
             key={r.key ?? 'any'}
             style={[styles.filterChip, minRating === r.key && styles.filterChipActive]}
+            hitSlop={CHIP_SLOP}
             onPress={() => setMinRating(r.key)}
           >
             <Text style={minRating === r.key ? styles.filterTextActive : styles.filterText}>
@@ -2704,6 +2894,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
           <TouchableOpacity
             key={r.key ?? 'any'}
             style={[styles.filterChip, readStatusFilter === r.key && styles.filterChipActive]}
+            hitSlop={CHIP_SLOP}
             onPress={() => setReadStatusFilter(r.key)}
           >
             <Text style={readStatusFilter === r.key ? styles.filterTextActive : styles.filterText}>
@@ -2724,6 +2915,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             <TouchableOpacity
               key={genre}
               style={[styles.filterChip, genreFilters.includes(genre) && styles.filterChipActive]}
+              hitSlop={CHIP_SLOP}
               onPress={() => toggleGenreFilter(genre)}
             >
               <Text style={genreFilters.includes(genre) ? styles.filterTextActive : styles.filterText}>
@@ -2744,6 +2936,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
             <TouchableOpacity
               key={tag}
               style={[styles.filterChip, tagFilters.includes(tag) && styles.filterChipActive]}
+              hitSlop={CHIP_SLOP}
               onPress={() => toggleTagFilter(tag)}
               onLongPress={() => toggleFavoriteTag(tag)}
               accessibilityHint={favoriteTags.has(tag.toLowerCase()) ? 'Hold to remove from favourite tags' : 'Hold to make it a favourite tag'}
@@ -2803,82 +2996,16 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
 
       <FlatList
         ref={tourTarget('library.list')}
-        extraData={[dark, picked]}
+        extraData={picked}
         style={styles.list}
         data={displayEntries}
         keyExtractor={(item) => `${item.media_type}:${item.source_id}`}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.row,
-              item.favorite || isSuperWant(item) ? styles.rowOutlined : null,
-              item.favorite ? styles.rowFavorite : null,
-              isSuperWant(item) ? (item.favorite ? styles.rowBoth : styles.rowSuperWant) : null,
-              picked && picked.has(keyOf(item)) && styles.rowPicked,
-            ]}
-            onPress={() => (picked ? togglePick(keyOf(item)) : setSelectedKey(keyOf(item)))}
-            // Hold a title to select it, then tap others to add them.
-            onLongPress={() => (picked ? togglePick(keyOf(item)) : setPicked(new Set([keyOf(item)])))}
-            accessibilityState={picked ? { selected: picked.has(keyOf(item)) } : undefined}
-          >
-            {picked ? (
-              <Text style={styles.pickMark}>
-                <Icon name={picked.has(keyOf(item)) ? 'checked' : 'unchecked'} size={24} />
-              </Text>
-            ) : null}
-            {item.local_image_path ? (
-              <Image source={{ uri: item.local_image_path }} style={styles.thumb} />
-            ) : (
-              <View style={[styles.thumb, styles.thumbPlaceholder]} />
-            )}
-            <View style={styles.meta}>
-              <Text style={styles.name} numberOfLines={2}>
-                {item.title || item.source_id}
-              </Text>
-              {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
-              <View style={styles.metaRow}>
-                {item.score ? (
-                  <Text style={styles.scoreBadge}>
-                    <Icon name="star" size={13} /> {item.score}
-                  </Text>
-                ) : null}
-                {progressText(item) ? <Text style={styles.progressBadge}>{progressText(item)}</Text> : null}
-                {item.mal_conflicts ? (
-                  <Text style={styles.conflictBadge}>
-                    <Icon name="warning" size={13} /> differs from MAL
-                  </Text>
-                ) : null}
-                {item.group_name ? (
-                  <Text style={styles.progressBadge} numberOfLines={1}>
-                    {item.group_name}
-                  </Text>
-                ) : null}
-              </View>
-              <View style={styles.metaRow}>
-                <Text style={styles.typeBadge}>{item.media_type}</Text>
-                {item.favorite ? (
-                  <Text style={styles.heartBadge} accessibilityLabel="Favourite">
-                    <Icon name="heart" size={14} />
-                  </Text>
-                ) : null}
-                {item.read_status ? (
-                  <Text style={styles.readStatusBadge}>
-                    <Icon name={isSuperWant(item) ? 'super_want' : item.read_status} size={15} />
-                  </Text>
-                ) : null}
-                <Text style={styles.status}>
-                  <Icon name={item.sync_status === 'synced' ? 'cloud' : 'localOnly'} size={12} />{' '}
-                  {item.sync_status === 'synced' ? 'Synced' : 'Local only'}
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={renderEntryRow}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {entries.length === 0
-              ? 'Nothing recorded yet — start browsing in one of the tabs above.'
+              ? 'Nothing recorded yet. Open a site tab, and the titles you visit are saved here.'
               : 'No entries match your current filters.'}
           </Text>
         }
@@ -3076,11 +3203,11 @@ const styles = themed(StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#eee',
   },
-  filterChipActive: { backgroundColor: '#0f3460' },
+  filterChipActive: { backgroundColor: '#1d1f20' },
   statusFilterBar: { flexGrow: 0 },
   statusFilterBarContent: { padding: 10, gap: 8 },
-  filterText: { color: '#333', fontSize: 13 },
-  filterTextActive: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterText: { color: '#333', fontSize: 14 },
+  filterTextActive: { color: '#fff', fontSize: 14, fontWeight: '600' },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3112,7 +3239,7 @@ const styles = themed(StyleSheet.create({
   },
   artistClearRowText: { color: '#c0392b', fontSize: 14, fontWeight: '600' },
   artistSectionHeader: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: '#666',
     textTransform: 'uppercase',
@@ -3122,8 +3249,8 @@ const styles = themed(StyleSheet.create({
   },
   artistRow: { paddingHorizontal: 16, paddingVertical: 12 },
   artistRowActive: { backgroundColor: '#e8edf5' },
-  artistRowText: { fontSize: 15, color: '#222' },
-  artistRowTextActive: { fontSize: 15, color: '#0f3460', fontWeight: '700' },
+  artistRowText: { fontSize: 16, color: '#222' },
+  artistRowTextActive: { fontSize: 16, color: '#1d1f20', fontWeight: '700' },
   logModal: { flex: 1, backgroundColor: '#fff' },
   logHeader: {
     flexDirection: 'row',
@@ -3133,15 +3260,15 @@ const styles = themed(StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  logTitle: { fontSize: 17, fontWeight: '700' },
-  logClose: { color: '#0f3460', fontSize: 15 },
+  logTitle: { fontSize: 22, fontWeight: '700' },
+  logClose: { color: '#1d1f20', fontSize: 16 },
   logScroll: { flex: 1 },
   logLine: { padding: 16, color: '#666', fontSize: 14 },
   list: { flex: 1 },
   // Select mode (hold a title).
-  rowPicked: { backgroundColor: '#e3ebfb' },
-  pickMark: { color: '#16213e', marginRight: 10, minWidth: 24 },
-  selectBar: { backgroundColor: '#16213e', paddingVertical: 6 },
+  rowPicked: { backgroundColor: '#ececec', borderColor: '#1d1f20', borderWidth: 2, padding: 12 },
+  pickMark: { color: '#1d1f20', marginRight: 10, minWidth: 24 },
+  selectBar: { backgroundColor: '#1d1f20', paddingVertical: 6 },
   selectTop: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 12, minHeight: 48 },
   selectClose: { color: '#fff' },
   selectCount: { color: '#fff', fontSize: 16, fontWeight: '700', flex: 1 },
@@ -3150,68 +3277,75 @@ const styles = themed(StyleSheet.create({
   selectActions: { paddingHorizontal: 8, gap: 8 },
   selectAction: {
     backgroundColor: '#fff',
-    borderRadius: 18,
+    borderRadius: 24,
     paddingHorizontal: 14,
     minHeight: 40,
     justifyContent: 'center',
     marginVertical: 4,
   },
   selectActionOff: { opacity: 0.5 },
-  selectActionText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
+  selectActionText: { color: '#1d1f20', fontSize: 14, fontWeight: '600' },
   selectActionDanger: { color: '#c0392b' },
   selectSheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
   selectSheet: { backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: '80%' },
-  selectSheetTitle: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 8 },
+  selectSheetTitle: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 8 },
   selectSheetRow: { minHeight: 48, justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
   selectSheetRowText: { fontSize: 16, color: '#222' },
   selectSheetCancel: { alignSelf: 'flex-end', minHeight: 48, justifyContent: 'center', paddingHorizontal: 12, marginTop: 8 },
-  selectSheetCancelText: { color: '#666', fontSize: 15 },
+  selectSheetCancelText: { color: '#666', fontSize: 16 },
+  // Each entry is a rounded card.
   row: {
     flexDirection: 'row',
-    padding: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
+    padding: 13,
+    marginHorizontal: 10,
+    marginVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#f5f5f5',
     alignItems: 'center',
   },
-  // A thin coloured outline round the row instead of the grey line:
-  // pink (the heart's colour) for ♥ favourites, red (the Super chip's)
-  // for 🔥 Super Want; an entry that's both is pink on the top and left,
-  // red on the bottom and right. The padding keeps the content in place.
-  rowOutlined: { borderWidth: 2, padding: 10 },
+  // A coloured border and label: pink for ♥ favourites, red for 🔥 Super
+  // Want; an entry that's both is pink on the top and left, red on the bottom
+  // and right, with both labels. The padding keeps the content in place.
+  rowOutlined: { borderWidth: 2, padding: 12 },
+  rowLabels: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 10, marginBottom: 3 },
+  rowLabelFavorite: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, color: '#c2184b' },
+  rowLabelSuper: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, color: '#b3261e' },
   rowFavorite: { borderColor: '#e94560' },
   rowSuperWant: { borderColor: '#b3261e' },
   rowBoth: { borderBottomColor: '#b3261e', borderRightColor: '#b3261e' },
-  thumb: { width: 56, height: 56, borderRadius: 6, backgroundColor: '#eee' },
+  thumb: { width: 80, height: 80, borderRadius: 8, backgroundColor: '#eee' },
   // Groups (GroupDetails, GroupModal and their sheets).
   groupActionButton: { minHeight: 48, justifyContent: 'center' },
-  groupAddButton: { flex: 1, minHeight: 48, backgroundColor: '#0f3460', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  groupBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#16213e', paddingHorizontal: 4, minHeight: 56 },
+  groupAddButton: { flex: 1, minHeight: 48, backgroundColor: '#1d1f20', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  groupBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1d1f20', paddingHorizontal: 4, minHeight: 56 },
   groupBarAction: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   groupBarButton: { minWidth: 48, minHeight: 48, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
-  groupBarInput: { flex: 1, color: '#ffffff', fontSize: 18, borderBottomWidth: 2, borderBottomColor: '#ffffff', paddingVertical: 6 },
-  groupBarTitle: { fontSize: 19, fontWeight: '700', color: '#ffffff' },
+  groupBarInput: { flex: 1, color: '#ffffff', fontSize: 22, borderBottomWidth: 2, borderBottomColor: '#ffffff', paddingVertical: 6 },
+  groupBarTitle: { fontSize: 22, fontWeight: '700', color: '#ffffff' },
   groupButtonText: { color: '#fff', fontWeight: '600' },
   groupButtonOff: { opacity: 0.4 },
-  groupCard: { borderWidth: 1, borderColor: '#dde3ee', borderRadius: 10, padding: 10, marginTop: 4 },
+  groupCard: { borderWidth: 1, borderColor: '#dde3ee', borderRadius: 12, padding: 10, marginTop: 4 },
   groupCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
-  groupCoverThis: { borderWidth: 3, borderColor: '#0f3460' },
+  groupCoverThis: { borderWidth: 3, borderColor: '#1d1f20' },
   groupEditBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16, paddingTop: 12 },
-  groupEditChip: { minHeight: 40, borderWidth: 1, borderColor: '#0f3460', borderRadius: 20, paddingHorizontal: 14, justifyContent: 'center' },
-  groupEditChipText: { color: '#0f3460', fontWeight: '700', fontSize: 14 },
+  groupEditChip: { minHeight: 40, borderWidth: 1, borderColor: '#1d1f20', borderRadius: 24, paddingHorizontal: 14, justifyContent: 'center' },
+  groupEditChipText: { color: '#1d1f20', fontWeight: '700', fontSize: 14 },
   groupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6, marginTop: 8 },
-  groupGridCover: { width: '100%', aspectRatio: 0.72, borderRadius: 6, backgroundColor: '#eee' },
+  groupGridCover: { width: '100%', aspectRatio: 0.72, borderRadius: 8, backgroundColor: '#eee' },
   groupGridItem: { width: '33.33%', paddingHorizontal: 6, marginBottom: 14 },
   groupGridNumber: { color: '#666', fontWeight: '700' },
-  groupGridTitle: { fontSize: 13, color: '#222', marginTop: 4 },
-  groupHint: { fontSize: 13, color: '#666', marginBottom: 8 },
+  groupGridTitle: { fontSize: 14, color: '#222', marginTop: 4 },
+  groupHint: { fontSize: 14, color: '#666', marginBottom: 8 },
   groupMenu: { backgroundColor: '#fff', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16 },
   groupMenuOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 32 },
   groupMenuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
-  groupMenuText: { fontSize: 15, color: '#222' },
+  groupMenuText: { fontSize: 16, color: '#222' },
   groupMenuTitle: { fontSize: 16, fontWeight: '700', color: '#222', paddingVertical: 10 },
-  groupNumber: { minWidth: 28, fontWeight: '700', color: '#0f3460' },
+  groupNumber: { minWidth: 28, fontWeight: '700', color: '#1d1f20' },
   groupPickCover: { width: 40, height: 56, borderRadius: 4, backgroundColor: '#eee' },
-  groupPickName: { fontSize: 15, color: '#222', fontWeight: '600', flexShrink: 1 },
+  groupPickName: { fontSize: 16, color: '#222', fontWeight: '600', flexShrink: 1 },
   groupPickNew: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef1f8' },
   groupPickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 6 },
   groupRowDragged: { backgroundColor: '#eef1f8', elevation: 6, zIndex: 10 },
@@ -3220,25 +3354,25 @@ const styles = themed(StyleSheet.create({
   groupScroll: { flex: 1 },
   groupScrollContent: { padding: 16, paddingBottom: 80 },
   groupSheetSearch: { flex: 0, marginBottom: 8 },
-  groupSheetTitle: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 10 },
+  groupSheetTitle: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 10 },
   groupStrip: { gap: 8, paddingTop: 4 },
-  groupStripCover: { width: 56, height: 78, borderRadius: 6, backgroundColor: '#eee' },
+  groupStripCover: { width: 56, height: 78, borderRadius: 8, backgroundColor: '#eee' },
   groupStripItem: { alignItems: 'center', minWidth: 48 },
   groupStripNumber: { fontSize: 12, color: '#666', marginTop: 2 },
-  groupStripNumberThis: { color: '#0f3460', fontWeight: '700' },
-  groupSubText: { color: '#666', fontSize: 13 },
+  groupStripNumberThis: { color: '#1d1f20', fontWeight: '700' },
+  groupSubText: { color: '#666', fontSize: 14 },
   thumbPlaceholder: { justifyContent: 'center', alignItems: 'center' },
   meta: { marginLeft: 12, flex: 1 },
   name: { fontSize: 16, fontWeight: '600' },
-  author: { fontSize: 13, color: '#666', marginTop: 2 },
+  author: { fontSize: 14, color: '#666', marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
-  scoreBadge: { fontSize: 13, color: '#f5a623', fontWeight: '700' },
+  scoreBadge: { fontSize: 14, color: '#b26a00', fontWeight: '700' },
   conflictBadge: { fontSize: 12, color: '#b9770e' },
   reviewChip: { backgroundColor: '#fdf2d8' },
-  reviewChipText: { color: '#b9770e', fontSize: 13, fontWeight: '600' },
+  reviewChipText: { color: '#b9770e', fontSize: 14, fontWeight: '600' },
   conflictBox: {
     backgroundColor: '#fdf6e3',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
     marginBottom: 12,
   },
@@ -3256,7 +3390,7 @@ const styles = themed(StyleSheet.create({
     padding: 8,
   },
   conflictWhich: { fontSize: 11, color: '#666' },
-  conflictValue: { fontSize: 13, color: '#333', marginTop: 2 },
+  conflictValue: { fontSize: 14, color: '#333', marginTop: 2 },
   detailNextButton: {
     flex: 1,
     backgroundColor: '#e3ecfa',
@@ -3264,7 +3398,7 @@ const styles = themed(StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
   },
-  detailNextButtonText: { color: '#0f3460', fontSize: 14, fontWeight: '700' },
+  detailNextButtonText: { color: '#1d1f20', fontSize: 14, fontWeight: '700' },
   randomCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -3275,20 +3409,11 @@ const styles = themed(StyleSheet.create({
     flexShrink: 1,
   },
   randomHint: { fontSize: 12, color: '#666', marginTop: 4 },
-  randomPickButton: { backgroundColor: '#e94560' },
+  randomPickButton: { backgroundColor: '#d62f4b' },
   topButtons: { flexDirection: 'row', gap: 8, marginHorizontal: 10, marginTop: 8 },
   topButton: { flex: 1, marginHorizontal: 0, marginTop: 0 },
-  randomTopButton: {
-    marginHorizontal: 10,
-    marginTop: 8,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    backgroundColor: '#e94560',
-  },
-  toRateButton: { paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#16213e' },
+  toRateButton: { paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#1d1f20' },
   toRateButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  randomTopButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   pickAgainButton: {
     marginTop: 12,
     paddingVertical: 12,
@@ -3296,21 +3421,30 @@ const styles = themed(StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#e8edf5',
   },
-  pickAgainButtonText: { color: '#0f3460', fontWeight: '700', fontSize: 15 },
+  pickAgainButtonText: { color: '#1d1f20', fontWeight: '700', fontSize: 16 },
   filterToggleRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 6 },
   filterToggle: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f2f2f2',
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    minHeight: 48,
   },
-  filterToggleText: { flex: 1, color: '#333', fontSize: 13, fontWeight: '600' },
+  filterToggleText: { color: '#333', fontSize: 14, fontWeight: '600' },
+  filterSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingBottom: 8 },
+  filterSummaryText: { flex: 1, color: '#333', fontSize: 14 },
+  randomIconButton: {
+    minWidth: 48,
+    minHeight: 48,
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  randomIconText: { color: '#333' },
   filterToggleArrow: { color: '#666', fontSize: 14, marginLeft: 8 },
   filterPanel: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
-  heartBadge: { fontSize: 14, color: '#e94560' },
   artistListRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3320,8 +3454,8 @@ const styles = themed(StyleSheet.create({
     borderBottomColor: '#ddd',
   },
   artistListImage: { width: 180, height: 120, borderRadius: 8, backgroundColor: '#eee' },
-  artistListName: { fontSize: 17, fontWeight: '700', color: '#222' },
-  favoriteStar: { fontSize: 20, color: '#f5a623', marginLeft: 8 },
+  artistListName: { fontSize: 22, fontWeight: '700', color: '#222' },
+  favoriteStar: { fontSize: 22, color: '#b26a00', marginLeft: 8 },
   artistDetailCount: { fontSize: 14, color: '#666', marginTop: 4 },
   favoriteButton: {
     marginTop: 14,
@@ -3332,21 +3466,21 @@ const styles = themed(StyleSheet.create({
     borderColor: '#f5a623',
   },
   favoriteButtonActive: { backgroundColor: '#f5a623' },
-  favoriteButtonText: { color: '#c47f00', fontWeight: '700', fontSize: 15 },
+  favoriteButtonText: { color: '#c47f00', fontWeight: '700', fontSize: 16 },
   favoriteButtonTextActive: { color: '#fff' },
-  focusEditor: { width: '100%', aspectRatio: 1.5, borderRadius: 10, backgroundColor: '#eee', marginBottom: 6 },
+  focusEditor: { width: '100%', aspectRatio: 1.5, borderRadius: 12, backgroundColor: '#eee', marginBottom: 6 },
   zoomRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   zoomChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#eee' },
-  zoomChipActive: { backgroundColor: '#0f3460' },
+  zoomChipActive: { backgroundColor: '#1d1f20' },
   zoomText: { color: '#333', fontSize: 12 },
   zoomTextActive: { color: '#fff', fontSize: 12, fontWeight: '700' },
   linkHint: { fontSize: 11, color: '#666', marginBottom: 6 },
   focusButtons: { flexDirection: 'row', gap: 8, marginBottom: 6 },
   focusButton: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
   focusButtonText: { color: '#333', fontWeight: '600' },
-  focusSave: { backgroundColor: '#16213e' },
+  focusSave: { backgroundColor: '#1d1f20' },
   focusSaveText: { color: '#fff', fontWeight: '700' },
-  moveText: { color: '#1a73e8', fontSize: 13, fontWeight: '600', marginTop: 8 },
+  moveText: { color: '#1a73e8', fontSize: 14, fontWeight: '600', marginTop: 8 },
   peopleSearchRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 8 },
   heartButton: {
     marginTop: 12,
@@ -3356,8 +3490,8 @@ const styles = themed(StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e94560',
   },
-  heartButtonActive: { backgroundColor: '#e94560' },
-  heartButtonText: { color: '#e94560', fontWeight: '700', fontSize: 15 },
+  heartButtonActive: { backgroundColor: '#d62f4b' },
+  heartButtonText: { color: '#e94560', fontWeight: '700', fontSize: 16 },
   heartButtonTextActive: { color: '#fff' },
   progressBadge: { fontSize: 12, color: '#555' },
   scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
@@ -3371,7 +3505,7 @@ const styles = themed(StyleSheet.create({
   scoreChipActive: { backgroundColor: '#f5a623' },
   scoreText: { color: '#333', fontSize: 14 },
   scoreTextActive: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  scoreLabel: { fontSize: 13, color: '#555', marginTop: 6 },
+  scoreLabel: { fontSize: 14, color: '#555', marginTop: 6 },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   stepButton: {
     width: 34,
@@ -3381,7 +3515,7 @@ const styles = themed(StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepButtonText: { fontSize: 18, color: '#0f3460', fontWeight: '700' },
+  stepButtonText: { fontSize: 22, color: '#1d1f20', fontWeight: '700' },
   countInput: {
     minWidth: 56,
     backgroundColor: '#f2f2f2',
@@ -3391,7 +3525,7 @@ const styles = themed(StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  countOf: { fontSize: 13, color: '#666' },
+  countOf: { fontSize: 14, color: '#666' },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dateInput: {
     minWidth: 140,
@@ -3401,9 +3535,9 @@ const styles = themed(StyleSheet.create({
     paddingVertical: 7,
   },
   dateValue: { fontSize: 14, color: '#222' },
-  datePlaceholder: { fontSize: 14, color: '#767676' },
+  datePlaceholder: { fontSize: 14, color: '#666' },
   dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e3ecfa' },
-  dateButtonText: { color: '#0f3460', fontSize: 13, fontWeight: '600' },
+  dateButtonText: { color: '#1d1f20', fontSize: 14, fontWeight: '600' },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3422,7 +3556,7 @@ const styles = themed(StyleSheet.create({
   typeBadge: {
     fontSize: 11,
     textTransform: 'uppercase',
-    color: '#0f3460',
+    color: '#1d1f20',
     backgroundColor: '#e8edf5',
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -3445,10 +3579,10 @@ const styles = themed(StyleSheet.create({
     // Gets shorter, rather than going under the keyboard (KeyboardPad).
     flexShrink: 1,
   },
-  detailImage: { width: '100%', height: 220, borderRadius: 10, backgroundColor: '#eee' },
-  detailTitle: { fontSize: 20, fontWeight: '700', marginTop: 14 },
+  detailImage: { width: '100%', height: 220, borderRadius: 12, backgroundColor: '#eee' },
+  detailTitle: { fontSize: 22, fontWeight: '700', marginTop: 14 },
   detailAltTitle: { fontSize: 14, color: '#666', marginTop: 2, fontStyle: 'italic' },
-  detailAuthor: { fontSize: 15, color: '#666', marginTop: 4 },
+  detailAuthor: { fontSize: 16, color: '#666', marginTop: 4 },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3456,7 +3590,7 @@ const styles = themed(StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#eee',
   },
-  detailLabel: { fontSize: 13, color: '#666', marginTop: 12, marginBottom: 4 },
+  detailLabel: { fontSize: 14, color: '#666', marginTop: 12, marginBottom: 4 },
   detailValue: { fontSize: 14, color: '#333' },
   detailUrlButton: {
     marginTop: 14,
@@ -3464,10 +3598,10 @@ const styles = themed(StyleSheet.create({
     borderRadius: 8,
     padding: 10,
   },
-  detailUrlText: { color: '#0f3460', fontSize: 13 },
+  detailUrlText: { color: '#1d1f20', fontSize: 14 },
   // Site / MyAnimeList rows: the link takes the rest of the row.
   detailLinkWrap: { flex: 1, marginLeft: 16, alignItems: 'flex-end', justifyContent: 'center' },
-  detailLink: { fontSize: 14, color: '#0f3460', textDecorationLine: 'underline' },
+  detailLink: { fontSize: 14, color: '#1d1f20', textDecorationLine: 'underline' },
   detailFooterRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   detailDeleteButton: {
     backgroundColor: '#fde2e2',
@@ -3479,13 +3613,13 @@ const styles = themed(StyleSheet.create({
   detailDeleteButtonText: { color: '#c0392b', fontWeight: '600' },
   detailCloseButtonFlex: {
     flex: 1,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
   },
   detailCloseButtonText: { color: '#fff', fontWeight: '600' },
-  readStatusBadge: { fontSize: 13 },
+  readStatusBadge: { fontSize: 14 },
   readStatusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   readStatusChip: {
     paddingHorizontal: 12,
@@ -3493,19 +3627,19 @@ const styles = themed(StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#f0f0f0',
   },
-  readStatusChipActive: { backgroundColor: '#0f3460' },
+  readStatusChipActive: { backgroundColor: '#1d1f20' },
   superWantChip: { backgroundColor: '#b3261e' },
   superWantHint: { width: '100%', fontSize: 12, color: '#666' },
-  readStatusText: { color: '#333', fontSize: 13 },
-  readStatusTextActive: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  readStatusText: { color: '#333', fontSize: 14 },
+  readStatusTextActive: { color: '#fff', fontSize: 14, fontWeight: '600' },
   tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
   tagChip: {
     backgroundColor: '#e8edf5',
-    borderRadius: 14,
+    borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  tagChipText: { color: '#0f3460', fontSize: 12 },
+  tagChipText: { color: '#1d1f20', fontSize: 12 },
   tagInputRow: { flexDirection: 'row', gap: 8 },
   tagInput: {
     flex: 1,
@@ -3516,7 +3650,7 @@ const styles = themed(StyleSheet.create({
     fontSize: 14,
   },
   tagAddButton: {
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingHorizontal: 16,
     justifyContent: 'center',
@@ -3526,32 +3660,25 @@ const styles = themed(StyleSheet.create({
   // Genres can be a long list: they wrap under their label.
   detailGenres: { flex: 1, marginLeft: 16, textAlign: 'right' },
   tagFilterBarContent: { paddingHorizontal: 10, gap: 8 },
-  fullImageOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullImage: { width: '100%', height: '100%' },
   groupLink: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },
   groupLeave: { color: '#c0392b' },
-  groupName: { fontSize: 15, fontWeight: '700', color: '#0f3460' },
+  groupName: { fontSize: 16, fontWeight: '700', color: '#1d1f20' },
   groupNameBox: { flex: 1 },
-  groupOpen: { fontSize: 15, fontWeight: '700', color: '#1a73e8' },
-  groupRowName: { fontSize: 15, fontWeight: '700', color: '#222' },
+  groupOpen: { fontSize: 16, fontWeight: '700', color: '#1a73e8' },
+  groupRowName: { fontSize: 16, fontWeight: '700', color: '#222' },
   groupRowNameBox: { alignSelf: 'stretch' },
-  groupPageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4, borderRadius: 6 },
+  groupPageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4, borderRadius: 8 },
   groupPageThumb: { width: 44, height: 60, borderRadius: 4, backgroundColor: '#eee' },
   groupPageText: { flex: 1 },
   groupPageItemTitle: { color: '#333', fontSize: 14, fontWeight: '600' },
   groupTool: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   groupActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 8 },
-  groupHint: { fontSize: 13, color: '#666', marginTop: 8 },
+  groupHint: { fontSize: 14, color: '#666', marginTop: 8 },
   groupButtonOff: { opacity: 0.4 },
   groupSuggestion: {
     alignSelf: 'flex-start',
     marginTop: 10,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 8,

@@ -49,15 +49,15 @@ const styles = themed(
       padding: 24,
     },
     icon: { color: '#666', marginBottom: 12 },
-    title: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 6, textAlign: 'center' },
+    title: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 6, textAlign: 'center' },
     hint: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20 },
     retry: {
-      backgroundColor: '#16213e',
+      backgroundColor: '#1d1f20',
       borderRadius: 24,
       paddingHorizontal: 24,
       minHeight: 48,
       justifyContent: 'center',
     },
-    retryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+    retryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   })
 );

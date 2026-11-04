@@ -7,6 +7,22 @@ import Constants from 'expo-constants';
 // process for this scope is much lighter than full drive access.
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
+// Every Drive request gives up after a while instead of waiting forever: on a
+// weak connection one stuck request held a whole sync or restore. Uploads get
+// longer.
+const REQUEST_TIMEOUT_MS = 45 * 1000;
+const UPLOAD_TIMEOUT_MS = 3 * 60 * 1000;
+function timedFetch(url, options = {}) {
+  const controller = new AbortController();
+  const limit = String(url).includes('/upload/') ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), limit);
+  return fetch(url, { ...options, signal: controller.signal })
+    .catch((err) => {
+      throw controller.signal.aborted ? new Error('Google Drive took too long to answer') : err;
+    })
+    .finally(() => clearTimeout(timer));
+}
+
 let signedIn = false;
 let cachedRootFolderId = null;
 const cachedTypeFolderIds = {}; // e.g. { manga: 'abc123', anime: 'def456' }
@@ -96,22 +112,36 @@ export function isDriveConnected() {
   return signedIn;
 }
 
-// Finds (or creates) a folder by name under an optional parent.
+// Makes text safe inside a quoted Drive search value: ' ends a value and \
+// escapes, so a name containing either could break the search.
+function q(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// Drive's reply as JSON. An error reply throws: read as "nothing there", one
+// failed search would make a sync overwrite Drive without merging it first.
+async function okJson(res, what) {
+  if (!res.ok) throw new Error(`${what} failed: ${res.status}`);
+  return res.json();
+}
+
+// Finds (or creates) a folder by name under an optional parent. The oldest of
+// any duplicates, so every device uses the same one.
 async function findOrCreateFolder(name, parentId = null) {
   const token = await getToken();
-  let query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  if (parentId) query += ` and '${parentId}' in parents`;
+  let query = `name='${q(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  if (parentId) query += ` and '${q(parentId)}' in parents`;
 
-  const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`,
+  const searchRes = await timedFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  const searchData = await searchRes.json();
+  const searchData = await okJson(searchRes, 'Drive folder search');
   if (searchData.files && searchData.files.length > 0) {
     return searchData.files[0].id;
   }
 
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+  const createRes = await timedFetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -123,7 +153,7 @@ async function findOrCreateFolder(name, parentId = null) {
       ...(parentId ? { parents: [parentId] } : {}),
     }),
   });
-  const created = await createRes.json();
+  const created = await okJson(createRes, 'Drive folder create');
   return created.id;
 }
 
@@ -140,16 +170,43 @@ async function getOrCreateTypeFolder(mediaType) {
   return typeFolderId;
 }
 
-// Finds a non-folder file by exact name under a parent, or null.
-async function findFile(name, parentId) {
+// Backup files read or written this session: name -> { id, modifiedTime, text }.
+// A sync asks only whether a file changed, and downloads it only if it did.
+const knownFiles = {};
+
+// A file's { id, modifiedTime } by exact name under a parent, or null. The
+// oldest of any duplicates, so every device uses the same one.
+async function fileInfo(name, parentId) {
   const token = await getToken();
-  const query = `name='${name}' and '${parentId}' in parents and trashed=false`;
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+  const headers = { Authorization: `Bearer ${token}` };
+  const known = knownFiles[name];
+  if (known) {
+    const res = await timedFetch(
+      `https://www.googleapis.com/drive/v3/files/${known.id}?fields=id,modifiedTime,trashed`,
+      { headers }
+    );
+    if (res.ok) {
+      const file = await res.json();
+      if (!file.trashed) return file;
+    } else if (res.status !== 404) {
+      throw new Error(`Drive file check failed: ${res.status}`);
+    }
+    delete knownFiles[name];
+  }
+  const query = `name='${q(name)}' and '${q(parentId)}' in parents and trashed=false`;
+  const res = await timedFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,modifiedTime)&orderBy=createdTime`,
+    { headers }
   );
-  const data = await res.json();
-  return data.files && data.files.length > 0 ? data.files[0].id : null;
+  const data = await okJson(res, 'Drive file search');
+  return data.files && data.files.length > 0 ? data.files[0] : null;
+}
+
+async function backupRootId() {
+  if (!cachedRootFolderId) {
+    cachedRootFolderId = await findOrCreateFolder('MangaTracker');
+  }
+  return cachedRootFolderId;
 }
 
 // Creates or overwrites a CSV file at the root of the MangaTracker Drive
@@ -157,7 +214,7 @@ async function findFile(name, parentId) {
 // growing pile of dated backups. Called once per media type (e.g.
 // "manga-backup.csv", "anime-backup.csv") so each type's data lives in
 // its own file rather than one combined one. Returns the file id.
-export function backupCsvToDrive(csvContent, fileName = 'library-backup.csv') {
+export function backupCsvToDrive(csvContent, fileName) {
   return uploadTextFileToDrive(csvContent, fileName, 'text/csv');
 }
 
@@ -165,29 +222,29 @@ export function backupCsvToDrive(csvContent, fileName = 'library-backup.csv') {
 // MangaTracker Drive folder. Returns the file id.
 export async function uploadTextFileToDrive(content, fileName, mimeType) {
   const token = await getToken();
-  if (!cachedRootFolderId) {
-    cachedRootFolderId = await findOrCreateFolder('MangaTracker');
-  }
+  const rootId = await backupRootId();
+  const existing = await fileInfo(fileName, rootId);
+  const written = (file) => {
+    knownFiles[fileName] = { id: file.id, modifiedTime: file.modifiedTime, text: content };
+    return file.id;
+  };
 
-  const existingId = await findFile(fileName, cachedRootFolderId);
-
-  if (existingId) {
+  if (existing) {
     // Content-only update — no need to touch metadata, so a simple
     // media upload is enough (cheaper than the multipart create path).
-    const res = await fetch(
-      `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`,
+    const res = await timedFetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media&fields=id,modifiedTime`,
       {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': mimeType },
         body: content,
       }
     );
-    if (!res.ok) throw new Error(`Drive update of ${fileName} failed: ${res.status}`);
-    return existingId;
+    return written(await okJson(res, `Drive update of ${fileName}`));
   }
 
   const boundary = 'manga_tracker_backup_' + Date.now();
-  const metadata = { name: fileName, parents: [cachedRootFolderId] };
+  const metadata = { name: fileName, parents: [rootId] };
   const body =
     `--${boundary}\r\n` +
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
@@ -197,7 +254,7 @@ export async function uploadTextFileToDrive(content, fileName, mimeType) {
     `${content}\r\n` +
     `--${boundary}--`;
 
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+  const res = await timedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -205,9 +262,7 @@ export async function uploadTextFileToDrive(content, fileName, mimeType) {
     },
     body,
   });
-  if (!res.ok) throw new Error(`Drive upload of ${fileName} failed: ${res.status}`);
-  const data = await res.json();
-  return data.id;
+  return written(await okJson(res, `Drive upload of ${fileName}`));
 }
 
 // Builds the "code - title" filename format used for cover uploads,
@@ -217,21 +272,37 @@ export function buildDriveDisplayName(sourceId, title) {
   return title ? `${sourceId} - ${title}` : sourceId;
 }
 
-// Downloads the raw text content of a backup CSV file, or null if it
-// doesn't exist yet (e.g. never backed up from this account before).
-export async function fetchBackupCsvContent(fileName = 'library-backup.csv') {
+// A backup file's { text, modifiedTime }, or null if it doesn't exist yet
+// (e.g. never backed up from this account before). Throws if Drive can't
+// say, so nothing is written without knowing what's there.
+export async function fetchBackupFile(fileName) {
   const token = await getToken();
-  if (!cachedRootFolderId) {
-    cachedRootFolderId = await findOrCreateFolder('MangaTracker');
+  const info = await fileInfo(fileName, await backupRootId());
+  if (!info) return null;
+  const known = knownFiles[fileName];
+  if (known && known.id === info.id && known.modifiedTime === info.modifiedTime) {
+    return { text: known.text, modifiedTime: info.modifiedTime };
   }
-  const fileId = await findFile(fileName, cachedRootFolderId);
-  if (!fileId) return null;
-
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+  const res = await timedFetch(`https://www.googleapis.com/drive/v3/files/${info.id}?alt=media`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Failed to download backup CSV: ${res.status}`);
-  return res.text();
+  const text = await res.text();
+  knownFiles[fileName] = { id: info.id, modifiedTime: info.modifiedTime, text };
+  return { text, modifiedTime: info.modifiedTime };
+}
+
+// Its text alone, or null.
+export async function fetchBackupCsvContent(fileName) {
+  const file = await fetchBackupFile(fileName);
+  return file ? file.text : null;
+}
+
+// Whether a file changed in Drive since fetchBackupFile saw this modifiedTime
+// (null: it wasn't there), e.g. a save from the browser extension.
+export async function backupFileChangedSince(fileName, modifiedTime) {
+  const info = await fileInfo(fileName, await backupRootId());
+  return (info ? info.modifiedTime : null) !== (modifiedTime || null);
 }
 
 // Finds a cover image in MangaTracker/<mediaType>/ whose filename starts
@@ -240,12 +311,13 @@ export async function fetchBackupCsvContent(fileName = 'library-backup.csv') {
 export async function findCoverFileId(mediaType, sourceId) {
   const token = await getToken();
   const folderId = await getOrCreateTypeFolder(mediaType);
-  const query = `'${folderId}' in parents and trashed=false and name contains '${sourceId}'`;
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`,
+  const query = `'${q(folderId)}' in parents and trashed=false and name contains '${q(sourceId)}'`;
+  // Newest first: if an old cover is still there, the new one wins.
+  const res = await timedFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime desc&pageSize=1000`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  const data = await res.json();
+  const data = await okJson(res, 'Cover lookup');
   // "contains" is a substring match, not "starts with" — Drive's query
   // language doesn't support anchoring, so double-check here to avoid
   // e.g. source id "123" matching a file actually named "9123 - X.jpg",
@@ -275,11 +347,28 @@ export async function downloadCoverForRestore(mediaType, sourceId, localDir, fil
     await FileSystem.makeDirectoryAsync(localDir, { intermediates: true });
   }
   const localPath = `${localDir}${fileName || `${sourceId}.jpg`}`;
-  const result = await FileSystem.downloadAsync(
+  // Stopped after a while, so one stuck cover doesn't hold the rest.
+  const download = FileSystem.createDownloadResumable(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
     localPath,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+  let timer;
+  const result = await Promise.race([
+    download.downloadAsync(),
+    new Promise((resolve, reject) => {
+      timer = setTimeout(() => {
+        download.pauseAsync().catch(() => {});
+        reject(new Error('Cover download took too long'));
+      }, REQUEST_TIMEOUT_MS);
+    }),
+  ])
+    .catch(async (err) => {
+      await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      throw err;
+    })
+    .finally(() => clearTimeout(timer));
+  if (!result) throw new Error('Cover download stopped');
   // downloadAsync doesn't fail on an error reply: it saves the error
   // message as the file, which showed as a blank cover. Only a real
   // picture is kept.
@@ -290,7 +379,7 @@ export async function downloadCoverForRestore(mediaType, sourceId, localDir, fil
   return localPath;
 }
 
-// Whether a local file starts like a JPEG, PNG, GIF or WebP picture.
+// Whether a local file starts like a JPEG, PNG, GIF, WebP or AVIF picture.
 export async function isImageFile(path) {
   try {
     const head = atob(
@@ -302,7 +391,8 @@ export async function isImageFile(path) {
       starts(0xff, 0xd8) || // JPEG
       starts(0x89, 0x50, 0x4e, 0x47) || // PNG
       starts(0x47, 0x49, 0x46) || // GIF
-      (starts(0x52, 0x49, 0x46, 0x46) && head.slice(8, 12) === 'WEBP')
+      (starts(0x52, 0x49, 0x46, 0x46) && head.slice(8, 12) === 'WEBP') ||
+      head.slice(4, 8) === 'ftyp' // AVIF, HEIC
     );
   } catch (e) {
     return false;
@@ -336,7 +426,7 @@ export async function uploadImageToDrive(mediaType, displayName, localImagePath)
     `${base64Data}\r\n` +
     `--${boundary}--`;
 
-  const res = await fetch(
+  const res = await timedFetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
     {
       method: 'POST',

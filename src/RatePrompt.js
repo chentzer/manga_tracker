@@ -54,7 +54,7 @@ const styles = themed(
   StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 20 },
     card: { backgroundColor: '#fff', borderRadius: 12, padding: 18 },
-    heading: { fontSize: 18, fontWeight: '700', color: '#222' },
+    heading: { fontSize: 22, fontWeight: '700', color: '#222' },
     message: { fontSize: 14, color: '#666', marginTop: 6 },
     grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
     score: {
@@ -69,13 +69,13 @@ const styles = themed(
       paddingHorizontal: 12,
       paddingVertical: 9,
     },
-    scoreCurrent: { backgroundColor: '#16213e', borderColor: '#16213e' },
-    scoreNumber: { fontSize: 16, fontWeight: '700', color: '#16213e', minWidth: 22 },
-    scoreLabel: { flex: 1, fontSize: 13, color: '#555' },
+    scoreCurrent: { backgroundColor: '#1d1f20', borderColor: '#1d1f20' },
+    scoreNumber: { fontSize: 16, fontWeight: '700', color: '#1d1f20', minWidth: 22 },
+    scoreLabel: { flex: 1, fontSize: 14, color: '#555' },
     scoreTextCurrent: { color: '#fff' },
     action: { alignItems: 'center', paddingVertical: 12, marginTop: 10, borderRadius: 8, backgroundColor: '#e3ecfa' },
-    actionText: { color: '#0f3460', fontSize: 15, fontWeight: '600' },
+    actionText: { color: '#1d1f20', fontSize: 16, fontWeight: '600' },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
-    closeText: { color: '#666', fontSize: 15 },
+    closeText: { color: '#666', fontSize: 16 },
   })
 );

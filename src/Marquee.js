@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { reduceMotion } from './reduceMotion';
 
 // One line of text that, when it's too long for its space, scrolls slowly
 // sideways to show the rest, waits, and starts over (a marquee). Short
@@ -19,7 +20,7 @@ export default function Marquee({ children, style, containerStyle }) {
 
   useEffect(() => {
     x.setValue(0);
-    if (!boxWidth || overflow <= 2) return undefined;
+    if (!boxWidth || overflow <= 2 || reduceMotion()) return undefined;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(PAUSE),
@@ -36,6 +37,17 @@ export default function Marquee({ children, style, containerStyle }) {
     loop.start();
     return () => loop.stop();
   }, [x, boxWidth, overflow, children]);
+
+  // With the phone's Remove animations setting on, it stays still.
+  if (reduceMotion()) {
+    return (
+      <View style={[{ flexShrink: 1 }, containerStyle]}>
+        <Text style={textStyle} numberOfLines={1}>
+          {children}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View

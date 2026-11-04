@@ -13,7 +13,6 @@ import {
   ScrollView,
   LayoutAnimation,
   Platform,
-  ToastAndroid,
   AppState,
   Linking,
 } from 'react-native';
@@ -22,6 +21,7 @@ import { getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library
 import { useShareIntent } from 'expo-share-intent';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
+import { showToast } from './src/toast';
 import { initDb, getSetting, setSetting, addNote, getAllEntries, clearAllEntries } from './src/db';
 import MediaWebView from './src/MediaWebView';
 import BrowserTab from './src/BrowserTab';
@@ -39,6 +39,8 @@ import SyncStatusPill from './src/SyncStatusPill';
 import Notepad from './src/Notepad';
 import { CrashGuard, installCrashHandler } from './src/CrashScreen';
 import UndoBar from './src/UndoBar';
+import Snackbar from './src/Snackbar';
+import { reduceMotion } from './src/reduceMotion';
 import Icon from './src/Icon';
 import { TAP_SLOP } from './src/touch';
 import Tour, { tourSteps, tourTarget } from './src/Tour';
@@ -155,7 +157,7 @@ function AppMain() {
       addNote(shared); // no notebook = Inbox
       setNotepadRefreshKey((k) => k + 1);
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Saved to Notepad › Inbox', ToastAndroid.SHORT);
+        showToast('Saved to Notepad › Inbox');
       }
       // Only reaches Drive if this run of the app is already signed in;
       // otherwise AppContent catches it up once Drive is signed in.
@@ -396,23 +398,15 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       }).then((result) => {
         if (Platform.OS !== 'android') return;
         if (result.ok) {
-          ToastAndroid.show(`Screenshot saved to ${result.folder}`, ToastAndroid.SHORT);
+          showToast(`Screenshot saved to ${result.folder}`);
         } else if (result.reason === 'permission') {
-          ToastAndroid.show(
-            'Screenshot left in Screenshots — allow full photo access for AniManga Tracker to file it.',
-            ToastAndroid.LONG
-          );
+          showToast('Screenshot not filed. Allow full photo access for AniManga Tracker.', true);
         } else if (result.reason === 'not-found') {
-          ToastAndroid.show(
-            'Couldn’t find the new screenshot to file — it’s still in Screenshots.',
-            ToastAndroid.LONG
-          );
+          showToast('Couldn’t file that screenshot. It’s still in Screenshots.', true);
         } else {
-          // Names the step and error, so a failure can be reported exactly.
-          ToastAndroid.show(
-            `Couldn’t file that screenshot (failed while ${result.step}: ${result.error}) — it’s still in Screenshots.`,
-            ToastAndroid.LONG
-          );
+          // The step and error go to the log, so a failure can be reported exactly.
+          console.warn(`Filing a screenshot failed while ${result.step}: ${result.error}`);
+          showToast('Couldn’t file that screenshot. It’s still in Screenshots.', true);
         }
       });
     });
@@ -437,7 +431,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     if (hidden && tourOpenRef.current) return;
     if (tabBarHiddenRef.current === hidden) return;
     tabBarHiddenRef.current = hidden;
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!reduceMotion()) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setTabBarHidden(hidden);
   }, []);
   const scheduleTabBarHide = useCallback(() => {
@@ -590,6 +584,12 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     );
   };
   const [settingsVisible, setSettingsVisible] = useState(false);
+  // The category page open in Settings (SETTINGS_PAGES), or null for the list.
+  const [settingsPage, setSettingsPage] = useState(null);
+  const closeSettings = () => {
+    setSettingsVisible(false);
+    setSettingsPage(null);
+  };
   // The Notepad (src/Notepad.js), opened from the 📝 button on the Library.
   // Settings → Buttons: which optional controls the browsing tabs show
   // (MediaWebView.js). All on unless turned off.
@@ -653,7 +653,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       } else {
         handleOpenInTab(entry.media_type, { url: entry.source_url });
         if (Platform.OS === 'android') {
-          ToastAndroid.show(`In your Library: ${entry.title || entry.alt_title}`, ToastAndroid.SHORT);
+          showToast(`In your Library: ${entry.title || entry.alt_title}`);
         }
       }
     } else if (result.kind === 'search') {
@@ -986,7 +986,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
     <SafeAreaView style={styles.safeArea}>
       {/* Everything moves up above the keyboard while you type (keyboard.js). */}
       <KeyboardPad style={styles.keyboardPad}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
       <View style={styles.header}>
         {/* Tapping the header brings the bars back, e.g. on a page that
             can't (still loading, or failed to load). */}
@@ -1016,7 +1016,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
-            <Icon name="settings" size={24} color="#ffffff" />
+            <Icon name="settings" size={24} color={themeColor('#222')} />
           </TouchableOpacity>
         </View>
       </View>
@@ -1114,6 +1114,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
             onSearch={handleNoteSearch}
           />
         </View>
+        <Snackbar />
         <UndoBar />
       </View>
 
@@ -1137,7 +1138,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 <Icon
                   name={(active && section.iconOn) || section.icon}
                   size={24}
-                  color={active ? '#ff7a90' : '#a0a0b4'}
+                  color={themeColor(active ? '#c2184b' : '#666')}
                 />
               </View>
               <Text style={active ? styles.bottomLabelActive : styles.bottomLabel}>{section.label}</Text>
@@ -1163,268 +1164,322 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
         visible={settingsVisible}
         animationType="fade"
         transparent
-        onRequestClose={() => setSettingsVisible(false)}
+        onRequestClose={() => (settingsPage ? setSettingsPage(null) : closeSettings())}
       >
         <KeyboardPad style={styles.settingsOverlay}>
           {/* Scrolls when the settings don't fit on the screen. */}
           <ScrollView style={styles.settingsCard} contentContainerStyle={styles.settingsCardContent}>
-            <Text style={styles.settingsTitle}>Settings</Text>
-
-            <Text style={styles.settingsSectionTitle}>Google Drive</Text>
-            <View style={styles.settingsRow}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>
-                  {isSignedInToGoogle ? (
-                    <>
-                      <Icon name="cloud" size={16} /> Cloud sync is on
-                    </>
-                  ) : (
-                    'Cloud sync is off'
-                  )}
-                </Text>
-                <Text style={styles.settingsHint}>
-                  {isSignedInToGoogle
-                    ? 'Your library and covers are backed up to Google Drive automatically.'
-                    : 'Connect Google Drive to back up your library and covers automatically.'}
-                </Text>
-              </View>
-              <TouchableOpacity style={styles.settingsSmallButton} onPress={handleGoogleSignIn} disabled={restoring}>
-                <Text style={styles.settingsSmallButtonText}>{isSignedInToGoogle ? 'Reconnect' : 'Connect'}</Text>
-              </TouchableOpacity>
-            </View>
-            {isSignedInToGoogle ? (
-              <View style={styles.settingsButtonRow}>
-                <TouchableOpacity style={styles.settingsWideButton} onPress={handleBackupNow} disabled={restoring}>
-                  <Text style={styles.settingsSmallButtonText}>Backup Now</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.settingsWideButton} onPress={handleRestoreFromDrive} disabled={restoring}>
-                  <Text style={styles.settingsSmallButtonText}>{restoring ? 'Restoring…' : 'Restore'}</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-
-            <Text style={styles.settingsSectionTitle}>MyAnimeList</Text>
-            <Text style={styles.settingsHint}>
-              Export or import MAL list files. Manga includes manhwa. Exports are also saved to Google
-              Drive when it's connected; imports add missing titles and mark differences to review.
-            </Text>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Include 18+ titles</Text>
-                <Text style={styles.settingsHint}>
-                  Off: titles AniList marks adult (or Hentai) are left out of exports.
-                </Text>
-              </View>
-              <Switch value={malExportAdult} onValueChange={toggleMalExportAdult} />
-            </View>
-            <View style={styles.settingsButtonRow}>
-              {MAL_LISTS.map((l) => (
-                <TouchableOpacity
-                  key={l.key}
-                  style={styles.settingsWideButton}
-                  onPress={() => runMalExport(l.key)}
-                  disabled={malBusy}
-                >
-                  <Text style={styles.settingsSmallButtonText}>
-                    <Icon name="upload" size={15} /> Export {l.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity style={styles.settingsWideButton} onPress={handleMalImport} disabled={malBusy}>
-              <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : <><Icon name="downloaded" size={15} /> Import MAL list</>}</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.settingsSectionTitle}>Sites</Text>
-            <Text style={[styles.settingsHint, styles.settingsRowGap]}>
-              Add a website to a tab: it joins that tab's site list, and its pages are saved like the tab's own
-              sites (title, picture, author and tags read from the page; home, search and tag pages are left out).
-              The tab reloads when you add or remove one.
-            </Text>
-            {customSites.map((site) => (
-              <View key={`${site.type}:${site.domain}`} style={[styles.settingsRow, styles.settingsRowGap]}>
-                <View style={styles.settingsRowText}>
-                  <Text style={styles.settingsLabel}>{site.domain}</Text>
-                  <Text style={styles.settingsHint}>{MEDIA_TYPE_LIST.find((m) => m.key === site.type)?.label}</Text>
-                </View>
-                <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={() => removeSite(site)}>
-                  <Text style={styles.settingsSmallButtonText}>Remove</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <View style={styles.settingsRowGap}>
-              <View style={styles.siteChoiceRow}>
-                {MEDIA_TYPE_LIST.map((m) => (
-                  <TouchableOpacity
-                    key={m.key}
-                    style={[styles.siteChoice, newSite.type === m.key && styles.siteChoiceOn]}
-                    onPress={() => setNewSite((n) => ({ ...n, type: m.key }))}
-                  >
-                    <Text style={styles.settingsSmallButtonText}>{m.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.siteAddRow}>
-                <TextInput
-                  style={styles.siteInput}
-                  value={newSite.address}
-                  onChangeText={(address) => setNewSite((n) => ({ ...n, address }))}
-                  placeholder="Website, e.g. example.com"
-                  placeholderTextColor={themeColor('#767676')}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  onSubmitEditing={addSite}
-                />
-                <TouchableOpacity style={styles.settingsSmallButton} onPress={addSite}>
-                  <Text style={styles.settingsSmallButtonText}>Add</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <Text style={styles.settingsSectionTitle}>Library</Text>
-            <View style={styles.settingsRowGap}>
-              <Text style={styles.settingsLabel}>Snooze chapter questions</Text>
-              <Text style={styles.settingsHint}>
-                How long "Just looking" (Start rereading?), "Keep" (Ahead of your record) and Snooze
-                (volumes) stop the question from coming back. Just looking and Keep only quiet that title.
-              </Text>
-              <View style={styles.settingsChoiceRow}>
-                {SNOOZE_CHOICES.map((choice) => (
-                  <TouchableOpacity
-                    key={choice.minutes}
-                    style={[styles.settingsChoice, snooze === choice.minutes && styles.settingsChoiceActive]}
-                    onPress={() => changeSnooze(choice.minutes)}
-                  >
-                    <Text style={[styles.settingsChoiceText, snooze === choice.minutes && styles.settingsChoiceTextActive]}>
-                      {choice.short}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Clear All</Text>
-                <Text style={styles.settingsHint}>
-                  Deletes every entry in every tab from this phone. Your Drive backup keeps them, and
-                  the next sync brings them back fresh from Drive.
-                </Text>
-              </View>
-              <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={handleClearAll}>
-                <Text style={styles.settingsSmallButtonText}>Clear All</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.settingsSectionTitle}>App</Text>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Dark mode</Text>
-                <Text style={styles.settingsHint}>
-                  The Library, Notepad, Settings, the Browser tab and pop-ups turn dark. Websites keep
-                  their own colours.
-                </Text>
-              </View>
-              <Switch value={dark} onValueChange={setDarkMode} />
-            </View>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>App lock</Text>
-                <Text style={styles.settingsHint}>
-                  Asks for your fingerprint or phone PIN when the app opens and whenever you come
-                  back to it. Turning this on or off asks for it too.
-                </Text>
-              </View>
-              <Switch value={lockEnabled} onValueChange={changeLockEnabled} />
-            </View>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Block ads</Text>
-                <Text style={styles.settingsHint}>
-                  Stops pop-ups, ad networks and ad boxes on every tab. Turn off if a site stops working;
-                  takes effect when a page next loads.
-                </Text>
-              </View>
-              <Switch value={blockAds} onValueChange={toggleBlockAds} />
-            </View>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Hold to save pictures</Text>
-                <Text style={styles.settingsHint}>
-                  Hold a finger on a picture in a browsing tab to save it to your gallery. Off, a long
-                  press does what the site does. Takes effect when a page next loads.
-                </Text>
-              </View>
-              <Switch value={holdToSave} onValueChange={toggleHoldToSave} accessibilityLabel="Hold to save pictures" />
-            </View>
-            <View style={styles.settingsRow}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Show debug tools</Text>
-                <Text style={styles.settingsHint}>
-                  Adds the debug log bar and a "Capture HTML" button to each browsing tab, for
-                  troubleshooting extraction issues.
-                </Text>
-              </View>
-              <Switch value={showDebugTools} onValueChange={toggleDebugTools} />
-            </View>
-            <View style={[styles.settingsRow, styles.settingsRowGap]}>
-              <View style={styles.settingsRowText}>
-                <Text style={styles.settingsLabel}>Tour</Text>
-                <Text style={styles.settingsHint}>Walks through every tab and feature on the real screen.</Text>
-              </View>
+            {settingsPage ? (
               <TouchableOpacity
-                style={styles.settingsSmallButton}
-                onPress={() => {
-                  setSettingsVisible(false);
-                  setTimeout(() => setTourOpen(true), 400);
-                }}
+                style={styles.settingsBack}
+                onPress={() => setSettingsPage(null)}
+                hitSlop={TAP_SLOP}
                 accessibilityRole="button"
+                accessibilityLabel="Back to Settings"
               >
-                <Text style={styles.settingsSmallButtonText}>Show the tour</Text>
+                <Text style={styles.settingsBackArrow}><Icon name="chevronLeft" size={28} /></Text>
+                <Text style={styles.settingsTitleInline}>
+                  {SETTINGS_PAGES.find((p) => p.key === settingsPage).title}
+                </Text>
               </TouchableOpacity>
-            </View>
-            {Platform.OS === 'android' && Platform.Version >= 31 ? (
-              <View style={[styles.settingsRow, styles.settingsRowSpaced]}>
-                <View style={styles.settingsRowText}>
-                  <Text style={styles.settingsLabel}>Delete screenshots without asking</Text>
-                  <Text style={styles.settingsHint}>
-                    After filing a screenshot, Android asks before removing the original. Turn on
-                    "Media management" for AniManga Tracker on the next screen to skip that question.
-                  </Text>
-                </View>
-                <TouchableOpacity style={styles.settingsSmallButton} onPress={openMediaManagementSettings}>
-                  <Text style={styles.settingsSmallButtonText}>Open</Text>
+            ) : (
+              <>
+                <Text style={styles.settingsTitle}>Settings</Text>
+                {SETTINGS_PAGES.map((p) => (
+                  <TouchableOpacity
+                    key={p.key}
+                    style={styles.settingsCategory}
+                    onPress={() => setSettingsPage(p.key)}
+                    accessibilityRole="button"
+                  >
+                    <View style={styles.settingsRowText}>
+                      <Text style={styles.settingsLabel}>{p.title}</Text>
+                      <Text style={styles.settingsHint}>{p.hint}</Text>
+                    </View>
+                    <Text style={styles.settingsChevron}><Icon name="chevronRight" size={24} /></Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={styles.settingsCloseButton} onPress={closeSettings}>
+                  <Text style={styles.settingsCloseButtonText}>Close</Text>
                 </TouchableOpacity>
-              </View>
+              </>
+            )}
+
+            {settingsPage === 'backup' ? (
+              <>
+                <View style={styles.settingsRow}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>
+                      {isSignedInToGoogle ? (
+                        <>
+                          <Icon name="cloud" size={16} /> Cloud sync is on
+                        </>
+                      ) : (
+                        'Cloud sync is off'
+                      )}
+                    </Text>
+                    <Text style={styles.settingsHint}>
+                      {isSignedInToGoogle
+                        ? 'Your library and covers are backed up to Google Drive automatically.'
+                        : 'Connect Google Drive to back up your library and covers automatically.'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={styles.settingsSmallButton} onPress={handleGoogleSignIn} disabled={restoring}>
+                    <Text style={styles.settingsSmallButtonText}>{isSignedInToGoogle ? 'Reconnect' : 'Connect'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {isSignedInToGoogle ? (
+                  <View style={styles.settingsButtonRow}>
+                    <TouchableOpacity style={styles.settingsWideButton} onPress={handleBackupNow} disabled={restoring}>
+                      <Text style={styles.settingsSmallButtonText}>Backup Now</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.settingsWideButton} onPress={handleRestoreFromDrive} disabled={restoring}>
+                      <Text style={styles.settingsSmallButtonText}>{restoring ? 'Restoring…' : 'Restore'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                <Text style={styles.settingsSectionTitle}>Data saver</Text>
+                {DATA_SAVER_SETTINGS.map((item, i) => (
+                  <View
+                    key={item.key}
+                    style={[styles.settingsRow, i < DATA_SAVER_SETTINGS.length - 1 && styles.settingsRowGap]}
+                  >
+                    <View style={styles.settingsRowText}>
+                      <Text style={styles.settingsLabel}>{item.label}</Text>
+                      <Text style={styles.settingsHint}>{item.hint}</Text>
+                    </View>
+                    <Switch value={dataSaver[item.key]} onValueChange={(value) => toggleDataSaver(item.key, value)} />
+                  </View>
+                ))}
+              </>
             ) : null}
-
-            <Text style={styles.settingsSectionTitle}>Buttons</Text>
-            {BUTTON_SETTINGS.map((button, i) => (
-              <View key={button.key} style={[styles.settingsRow, i < BUTTON_SETTINGS.length - 1 && styles.settingsRowGap]}>
-                <View style={styles.settingsRowText}>
-                  <Text style={styles.settingsLabel}>{button.label}</Text>
-                  <Text style={styles.settingsHint}>{button.hint}</Text>
+            {settingsPage === 'mal' ? (
+              <>
+                <Text style={styles.settingsHint}>
+                  Export or import MAL list files. Manga includes manhwa. Exports are also saved to Google
+                  Drive when it's connected; imports add missing titles and mark differences to review.
+                </Text>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Include 18+ titles</Text>
+                    <Text style={styles.settingsHint}>
+                      Off: titles AniList marks adult (or Hentai) are left out of exports.
+                    </Text>
+                  </View>
+                  <Switch value={malExportAdult} onValueChange={toggleMalExportAdult} />
                 </View>
-                <Switch value={buttons[button.key]} onValueChange={(value) => toggleButton(button, value)} />
-              </View>
-            ))}
-
-            <Text style={styles.settingsSectionTitle}>Data saver</Text>
-            {DATA_SAVER_SETTINGS.map((item, i) => (
-              <View
-                key={item.key}
-                style={[styles.settingsRow, i < DATA_SAVER_SETTINGS.length - 1 && styles.settingsRowGap]}
-              >
-                <View style={styles.settingsRowText}>
-                  <Text style={styles.settingsLabel}>{item.label}</Text>
-                  <Text style={styles.settingsHint}>{item.hint}</Text>
+                <View style={styles.settingsButtonRow}>
+                  {MAL_LISTS.map((l) => (
+                    <TouchableOpacity
+                      key={l.key}
+                      style={styles.settingsWideButton}
+                      onPress={() => runMalExport(l.key)}
+                      disabled={malBusy}
+                    >
+                      <Text style={styles.settingsSmallButtonText}>
+                        <Icon name="upload" size={15} /> Export {l.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-                <Switch value={dataSaver[item.key]} onValueChange={(value) => toggleDataSaver(item.key, value)} />
-              </View>
-            ))}
-            <TouchableOpacity style={styles.settingsCloseButton} onPress={() => setSettingsVisible(false)}>
-              <Text style={styles.settingsCloseButtonText}>Close</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.settingsWideButton} onPress={handleMalImport} disabled={malBusy}>
+                  <Text style={styles.settingsSmallButtonText}>{malBusy ? 'Working…' : <><Icon name="downloaded" size={15} /> Import MAL list</>}</Text>
+                </TouchableOpacity>
+
+              </>
+            ) : null}
+            {settingsPage === 'sites' ? (
+              <>
+                <Text style={[styles.settingsHint, styles.settingsRowGap]}>
+                  Add a website to a tab: it joins that tab's site list, and its pages are saved like the tab's own
+                  sites (title, picture, author and tags read from the page; home, search and tag pages are left out).
+                  The tab reloads when you add or remove one.
+                </Text>
+                {customSites.map((site) => (
+                  <View key={`${site.type}:${site.domain}`} style={[styles.settingsRow, styles.settingsRowGap]}>
+                    <View style={styles.settingsRowText}>
+                      <Text style={styles.settingsLabel}>{site.domain}</Text>
+                      <Text style={styles.settingsHint}>{MEDIA_TYPE_LIST.find((m) => m.key === site.type)?.label}</Text>
+                    </View>
+                    <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={() => removeSite(site)}>
+                      <Text style={styles.settingsSmallButtonText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={styles.settingsRowGap}>
+                  <View style={styles.siteChoiceRow}>
+                    {MEDIA_TYPE_LIST.map((m) => (
+                      <TouchableOpacity
+                        key={m.key}
+                        style={[styles.siteChoice, newSite.type === m.key && styles.siteChoiceOn]}
+                        onPress={() => setNewSite((n) => ({ ...n, type: m.key }))}
+                      >
+                        <Text style={styles.settingsSmallButtonText}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={styles.siteAddRow}>
+                    <TextInput
+                      style={styles.siteInput}
+                      value={newSite.address}
+                      onChangeText={(address) => setNewSite((n) => ({ ...n, address }))}
+                      placeholder="Website, e.g. example.com"
+                      placeholderTextColor={themeColor('#666')}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                      onSubmitEditing={addSite}
+                    />
+                    <TouchableOpacity style={styles.settingsSmallButton} onPress={addSite}>
+                      <Text style={styles.settingsSmallButtonText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+              </>
+            ) : null}
+            {settingsPage === 'library' ? (
+              <>
+                <View style={styles.settingsRowGap}>
+                  <Text style={styles.settingsLabel}>Snooze chapter questions</Text>
+                  <Text style={styles.settingsHint}>
+                    How long "Just looking" (Start rereading?), "Keep" (Ahead of your record) and Snooze
+                    (volumes) stop the question from coming back. Just looking and Keep only quiet that title.
+                  </Text>
+                  <View style={styles.settingsChoiceRow}>
+                    {SNOOZE_CHOICES.map((choice) => (
+                      <TouchableOpacity
+                        key={choice.minutes}
+                        style={[styles.settingsChoice, snooze === choice.minutes && styles.settingsChoiceActive]}
+                        onPress={() => changeSnooze(choice.minutes)}
+                      >
+                        <Text style={[styles.settingsChoiceText, snooze === choice.minutes && styles.settingsChoiceTextActive]}>
+                          {choice.short}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Clear All</Text>
+                    <Text style={styles.settingsHint}>
+                      Deletes every entry in every tab from this phone. Your Drive backup keeps them, and
+                      the next sync brings them back fresh from Drive.
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={[styles.settingsSmallButton, styles.settingsDangerButton]} onPress={handleClearAll}>
+                    <Text style={styles.settingsSmallButtonText}>Clear All</Text>
+                  </TouchableOpacity>
+                </View>
+
+              </>
+            ) : null}
+            {settingsPage === 'browsing' ? (
+              <>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Block ads</Text>
+                    <Text style={styles.settingsHint}>
+                      Stops pop-ups, ad networks and ad boxes on every tab. Turn off if a site stops working;
+                      takes effect when a page next loads.
+                    </Text>
+                  </View>
+                  <Switch value={blockAds} onValueChange={toggleBlockAds} />
+                </View>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Hold to save pictures</Text>
+                    <Text style={styles.settingsHint}>
+                      Hold a finger on a picture in a browsing tab to save it to your gallery. Off, a long
+                      press does what the site does. Takes effect when a page next loads.
+                    </Text>
+                  </View>
+                  <Switch value={holdToSave} onValueChange={toggleHoldToSave} accessibilityLabel="Hold to save pictures" />
+                </View>
+                {Platform.OS === 'android' && Platform.Version >= 31 ? (
+                  <View style={[styles.settingsRow, styles.settingsRowSpaced]}>
+                    <View style={styles.settingsRowText}>
+                      <Text style={styles.settingsLabel}>Delete screenshots without asking</Text>
+                      <Text style={styles.settingsHint}>
+                        After filing a screenshot, Android asks before removing the original. Turn on
+                        "Media management" for AniManga Tracker on the next screen to skip that question.
+                      </Text>
+                    </View>
+                    <TouchableOpacity style={styles.settingsSmallButton} onPress={openMediaManagementSettings}>
+                      <Text style={styles.settingsSmallButtonText}>Open</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                <Text style={styles.settingsSectionTitle}>Buttons</Text>
+                {BUTTON_SETTINGS.map((button, i) => (
+                  <View key={button.key} style={[styles.settingsRow, i < BUTTON_SETTINGS.length - 1 && styles.settingsRowGap]}>
+                    <View style={styles.settingsRowText}>
+                      <Text style={styles.settingsLabel}>{button.label}</Text>
+                      <Text style={styles.settingsHint}>{button.hint}</Text>
+                    </View>
+                    <Switch value={buttons[button.key]} onValueChange={(value) => toggleButton(button, value)} />
+                  </View>
+                ))}
+
+              </>
+            ) : null}
+            {settingsPage === 'appearance' ? (
+              <>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Dark mode</Text>
+                    <Text style={styles.settingsHint}>
+                      The Library, Notepad, Settings, the Browser tab and pop-ups turn dark. Websites keep
+                      their own colours.
+                    </Text>
+                  </View>
+                  <Switch value={dark} onValueChange={setDarkMode} />
+                </View>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>App lock</Text>
+                    <Text style={styles.settingsHint}>
+                      Asks for your fingerprint or phone PIN when the app opens and whenever you come
+                      back to it. Turning this on or off asks for it too.
+                    </Text>
+                  </View>
+                  <Switch value={lockEnabled} onValueChange={changeLockEnabled} />
+                </View>
+              </>
+            ) : null}
+            {settingsPage === 'help' ? (
+              <>
+                <View style={styles.settingsRow}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Show debug tools</Text>
+                    <Text style={styles.settingsHint}>
+                      Adds the debug log bar and a "Capture HTML" button to each browsing tab, for
+                      troubleshooting extraction issues.
+                    </Text>
+                  </View>
+                  <Switch value={showDebugTools} onValueChange={toggleDebugTools} />
+                </View>
+                <View style={[styles.settingsRow, styles.settingsRowGap]}>
+                  <View style={styles.settingsRowText}>
+                    <Text style={styles.settingsLabel}>Tour</Text>
+                    <Text style={styles.settingsHint}>Walks through every tab and feature on the real screen.</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.settingsSmallButton}
+                    onPress={() => {
+                      closeSettings();
+                      setTimeout(() => setTourOpen(true), 400);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.settingsSmallButtonText}>Show the tour</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
           </ScrollView>
         </KeyboardPad>
       </Modal>
@@ -1433,8 +1488,19 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
   );
 }
 
+// Settings is a short list of these, each opening its own page.
+const SETTINGS_PAGES = [
+  { key: 'backup', title: 'Backup & sync', hint: 'Google Drive, Backup, Restore, Data saver' },
+  { key: 'mal', title: 'MyAnimeList', hint: 'Export and import MAL list files' },
+  { key: 'sites', title: 'Sites', hint: 'Websites you added to the tabs' },
+  { key: 'library', title: 'Library', hint: 'Snooze chapter questions, Clear All' },
+  { key: 'browsing', title: 'Browsing', hint: 'Block ads, saving pictures, screenshots, buttons' },
+  { key: 'appearance', title: 'Appearance & security', hint: 'Dark mode, App lock' },
+  { key: 'help', title: 'Help', hint: 'The tour, debug tools' },
+];
+
 const styles = themed(StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#1a1a2e' },
+  safeArea: { flex: 1, backgroundColor: '#f5f5f5' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1442,24 +1508,24 @@ const styles = themed(StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  title: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  title: { color: '#222', fontSize: 22, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerSettingsButton: { paddingHorizontal: 4, paddingVertical: 2 },
-  tabBar: { flexDirection: 'row', backgroundColor: '#16213e' },
+  tabBar: { flexDirection: 'row', backgroundColor: '#f5f5f5' },
   tabBarHidden: { height: 0, overflow: 'hidden' },
-  tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center' },
-  tabActive: { color: '#ff7a90', fontWeight: '700' },
-  tabInactive: { color: '#a0a0b4' },
+  tabItem: { flex: 1, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  tabActive: { color: '#c2184b', fontWeight: '700' },
+  tabInactive: { color: '#666' },
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
   // Material's navigation bar: icon over label, the active one in a pill.
   keyboardPad: { flex: 1 },
-  bottomBar: { flexDirection: 'row', backgroundColor: '#16213e', paddingTop: 6, paddingBottom: 4 },
+  bottomBar: { flexDirection: 'row', backgroundColor: '#f5f5f5', paddingTop: 6, paddingBottom: 4 },
   bottomItem: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' },
   bottomIconPill: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 16 },
-  bottomIconPillActive: { backgroundColor: '#3a2340' },
-  bottomLabel: { color: '#a0a0b4', fontSize: 12, marginTop: 2 },
-  bottomLabelActive: { color: '#ff7a90', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  bottomIconPillActive: { backgroundColor: '#fde2e2' },
+  bottomLabel: { color: '#666', fontSize: 12, marginTop: 2 },
+  bottomLabelActive: { color: '#c2184b', fontSize: 12, fontWeight: '700', marginTop: 2 },
   settingsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1473,15 +1539,27 @@ const styles = themed(StyleSheet.create({
     maxHeight: '90%',
   },
   settingsCardContent: { padding: 20 },
+  settingsCategory: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
+  },
+  settingsChevron: { color: '#666', marginLeft: 12 },
+  settingsBack: { flexDirection: 'row', alignItems: 'center', minHeight: 48, marginBottom: 8 },
+  settingsBackArrow: { color: '#333', marginRight: 10 },
+  settingsTitleInline: { flex: 1, fontSize: 22, fontWeight: '700', color: '#222' },
   settingsSectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: '#666',
     marginTop: 20,
     marginBottom: 8,
     textTransform: 'uppercase',
   },
-  settingsTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16 },
+  settingsTitle: { fontSize: 22, fontWeight: '700', marginBottom: 16 },
   settingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1490,35 +1568,41 @@ const styles = themed(StyleSheet.create({
   },
   settingsRowGap: { marginBottom: 16 },
   settingsRowText: { flex: 1 },
-  settingsLabel: { fontSize: 15, fontWeight: '600', color: '#222' },
+  settingsLabel: { fontSize: 16, fontWeight: '600', color: '#222' },
   settingsHint: { fontSize: 12, color: '#666', marginTop: 4 },
   settingsCloseButton: {
     marginTop: 20,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   settingsCloseButtonText: { color: '#fff', fontWeight: '600' },
   settingsButtonRow: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 12 },
   settingsWideButton: {
     flex: 1,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   settingsSmallButton: {
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 14,
+    minHeight: 48,
+    justifyContent: 'center',
   },
   settingsSmallButtonText: { color: '#fff', fontWeight: '600' },
   settingsDangerButton: { backgroundColor: '#c0392b' },
   siteChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  siteChoice: { backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
-  siteChoiceOn: { backgroundColor: '#0f3460', borderWidth: 1, borderColor: '#5b8def' },
+  siteChoice: { backgroundColor: '#1d1f20', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12, minHeight: 48, justifyContent: 'center' },
+  siteChoiceOn: { backgroundColor: '#1d1f20', borderWidth: 1, borderColor: '#1d1f20' },
   siteAddRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   siteInput: {
     flex: 1,
@@ -1533,13 +1617,13 @@ const styles = themed(StyleSheet.create({
   settingsRowSpaced: { marginTop: 16 },
   settingsChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   settingsChoice: {
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#16213e',
+    borderColor: '#1d1f20',
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  settingsChoiceActive: { backgroundColor: '#16213e' },
-  settingsChoiceText: { fontSize: 13, color: '#16213e' },
+  settingsChoiceActive: { backgroundColor: '#1d1f20' },
+  settingsChoiceText: { fontSize: 14, color: '#1d1f20' },
   settingsChoiceTextActive: { color: '#fff', fontWeight: '600' },
 }));

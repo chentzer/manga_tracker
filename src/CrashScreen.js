@@ -103,13 +103,13 @@ export class CrashGuard extends Component {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#1a1a2e', padding: 24, paddingTop: 56 },
-  title: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  wrap: { flex: 1, backgroundColor: '#121212', padding: 24, paddingTop: 56 },
+  title: { color: '#fff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
   hint: { color: '#c8c8d8', fontSize: 14, marginBottom: 16 },
   box: { flex: 1, backgroundColor: '#0f0f1e', borderRadius: 8, padding: 12 },
   error: { color: '#ffb4bf', fontSize: 12, fontFamily: 'monospace' },
   row: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  button: { flex: 1, minHeight: 48, borderRadius: 24, backgroundColor: '#e94560', alignItems: 'center', justifyContent: 'center' },
-  secondary: { backgroundColor: '#16213e' },
-  buttonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  button: { flex: 1, minHeight: 48, borderRadius: 24, backgroundColor: '#d62f4b', alignItems: 'center', justifyContent: 'center' },
+  secondary: { backgroundColor: '#1d1f20' },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

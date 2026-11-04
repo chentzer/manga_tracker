@@ -127,9 +127,9 @@ const styles = themed(
   StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 16 },
     card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, maxHeight: '85%' },
-    heading: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 6 },
+    heading: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 6 },
     scroll: { flexGrow: 0 },
-    section: { fontSize: 13, fontWeight: '700', color: '#666', textTransform: 'uppercase', marginTop: 12 },
+    section: { fontSize: 14, fontWeight: '700', color: '#666', textTransform: 'uppercase', marginTop: 12 },
     hint: { fontSize: 12, color: '#666', marginTop: 4, marginBottom: 4 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
     rowMain: {
@@ -149,8 +149,8 @@ const styles = themed(
     rowMeta: { fontSize: 12, color: '#666', marginTop: 2 },
     rateText: { color: '#e94560', fontWeight: '700', fontSize: 14 },
     skip: { paddingHorizontal: 4 },
-    skipText: { color: '#666', fontSize: 13 },
+    skipText: { color: '#666', fontSize: 14 },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
-    closeText: { color: '#666', fontSize: 15 },
+    closeText: { color: '#666', fontSize: 16 },
   })
 );

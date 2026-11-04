@@ -1,6 +1,5 @@
-// Settings → Dark mode: the white screens (Library, Notepad, Settings,
-// the Browser tab, sheets and pop-ups) turn dark. The header, tab row and
-// coloured buttons are already dark and stay as they are.
+// Settings → Dark mode: every screen and bar turns dark. Coral and the other
+// status colours stay; a filled button or chosen chip turns a mid grey.
 //
 // Each file keeps its light styles as written, wrapped in themed(): while
 // Dark mode is on, a style's background, text and border colours are
@@ -41,10 +40,11 @@ export function useDarkMode() {
   return useSyncExternalStore(subscribe, isDarkMode);
 }
 
-// Light colour → dark colour, by what it colours.
-const SURFACE = '#1c1c2b'; // pages, cards, sheets
-const RAISED = '#26263a'; // bars, inputs, chips
-const LINE = '#34344a';
+// Light colour → dark colour, by what it colours. True neutrals, one tone
+// step apart, so the covers and the coral are the only colour on screen.
+const SURFACE = '#121212'; // pages, cards, sheets
+const RAISED = '#1e1e1e'; // bars, inputs, chips
+const LINE = '#333333';
 const BACKGROUNDS = {
   '#fff': SURFACE,
   '#ffffff': SURFACE,
@@ -59,51 +59,54 @@ const BACKGROUNDS = {
   '#eef1f8': RAISED,
   '#eef0f5': RAISED,
   '#e8edf5': RAISED,
-  '#eee': '#2e2e44',
-  '#eeeeee': '#2e2e44',
-  '#e0e0e0': '#34344a',
-  '#ddd': '#34344a',
-  '#ccc': '#44445a',
+  '#e3ecfa': RAISED, // light blue
+  '#eee': '#2a2a2a',
+  '#eeeeee': '#2a2a2a',
+  '#ececec': '#2c2c2c', // a selected card
+  '#e0e0e0': LINE,
+  '#ddd': LINE,
+  '#ccc': '#444444',
+  '#1d1f20': '#5a5a5a', // filled buttons and chosen chips, white text on them
   '#fde2e2': '#4a2026', // light red
   '#fdecea': '#4a2026',
   '#fff3cd': '#4a3b12', // light yellow / orange
   '#fff4e5': '#4a3b12',
   '#fdf2d8': '#4a3b12',
   '#fdf6e3': '#4a3b12',
-  '#e3ecfa': RAISED, // light blue
   '#e8f5e9': '#1f3b25', // light green
 };
 const TEXTS = {
-  '#000': '#f0f0f5',
-  '#000000': '#f0f0f5',
-  '#111': '#ececf1',
-  '#222': '#ececf1',
-  '#333': '#e2e2ea',
-  '#444': '#c8c8d4',
-  '#555': '#b8b8c6',
-  '#666': '#a8a8b8',
-  '#767676': '#9c9cb0', // placeholders
-  '#777': '#9c9cb0',
-  '#888': '#9c9cb0',
-  '#999': '#9c9cb0',
-  '#aaa': '#a4a4b8',
-  '#0f3460': '#8fb3ff', // navy text
-  '#16213e': '#c9d4ff',
+  '#000': '#ececec',
+  '#000000': '#ececec',
+  '#111': '#ececec',
+  '#222': '#ececec',
+  '#333': '#e2e2e2',
+  '#444': '#c8c8c8',
+  '#555': '#b8b8b8',
+  '#666': '#a8a8a8',
+  '#777': '#9e9e9e',
+  '#888': '#9e9e9e',
+  '#999': '#9e9e9e',
+  '#aaa': '#a8a8a8',
+  '#1d1f20': '#ececec', // ink text
   '#1a73e8': '#6ea8ff',
   '#c0392b': '#ff7468', // red text (Delete, errors)
+  '#b26a00': '#f5a623', // scores and favourite stars
+  '#c2184b': '#ff7a93', // the active tab, the Favourite label
+  '#b3261e': '#ff8a80', // the Super Want label
   '#7a4b00': '#ffd479', // text on the yellow banners
   '#664d03': '#ffd479',
-  '#4a5578': '#b8c2e0',
+  '#4a5578': '#b8b8b8',
 };
 const BORDERS = {
   '#eee': LINE,
   '#eeeeee': LINE,
   '#e0e0e0': LINE,
   '#ddd': LINE,
-  '#ccc': '#44445a',
-  '#bbb': '#4e4e66',
+  '#ccc': '#444444',
+  '#bbb': '#555555',
   '#f0d9a8': '#6b5520',
-  '#0f3460': '#8fb3ff', // navy outlines (Edit button)
+  '#1d1f20': '#aaaaaa', // ink outlines (Edit button)
 };
 const BY_PROP = {
   backgroundColor: BACKGROUNDS,

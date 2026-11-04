@@ -24,6 +24,8 @@ import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 import { beginSync } from './syncStatus';
 import {
   backupCsvToDrive,
+  backupFileChangedSince,
+  fetchBackupFile,
   uploadImageToDrive,
   buildDriveDisplayName,
   isDriveConnected,
@@ -299,10 +301,13 @@ async function mergeTypeFromDrive(mediaType, csvText) {
   for (const row of plan.add) {
     let localImagePath = null;
     try {
+      // A new file name: an entry deleted here and saved again elsewhere
+      // would otherwise keep showing the old picture cached.
       localImagePath = await downloadCoverForRestore(
         mediaType,
         row.source_id,
-        `${FileSystem.documentDirectory}${mediaType}-covers/`
+        `${FileSystem.documentDirectory}${mediaType}-covers/`,
+        `${row.source_id}-${Date.now()}.jpg`
       );
     } catch (err) {
       // Added without a cover; a later restore can pick it up.
@@ -356,17 +361,10 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
   }
   const errors = [];
   let changedFromDrive = 0;
-  const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length, label: 'Backup files' });
+  const job = beginSync('backup', { show: force, total: MEDIA_TYPE_LIST.length + 1, label: 'Backup files' });
   for (const mediaConfig of MEDIA_TYPE_LIST) {
     try {
-      // Changes made elsewhere (the browser extension, another phone)
-      // come in first, so writing the file doesn't undo them; the file is
-      // only written when it would change.
-      const fileName = backupFileNameFor(mediaConfig.key);
-      const remote = await fetchBackupCsvContent(fileName);
-      if (remote) changedFromDrive += await mergeTypeFromDrive(mediaConfig.key, remote);
-      const csv = entriesToCsv(mediaConfig.key);
-      if (csv !== (remote || '').trim()) await backupCsvToDrive(csv, fileName);
+      changedFromDrive += await syncTypeFile(mediaConfig.key);
     } catch (err) {
       console.warn(`Drive backup failed for ${mediaConfig.key}:`, err.message);
       errors.push(`${mediaConfig.label}: ${err.message}`);
@@ -379,6 +377,7 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
     console.warn('Drive backup failed for favourite artists:', err.message);
     errors.push(`Favourite artists: ${err.message}`);
   }
+  job.step(); // the favourite artists file: the "+ 1" in the total
   job.end({ ok: errors.length === 0, error: errors.join('\n') });
   if (changedFromDrive > 0) driveChangeListeners.forEach((listener) => listener(changedFromDrive));
   return {
@@ -387,6 +386,27 @@ export async function maybeBackupLibraryToDrive({ force = false } = {}) {
     success: errors.length === 0,
     error: errors.length > 0 ? errors.join('; ') : null,
   };
+}
+
+// One type's file: Drive's merged in (changes made elsewhere, the browser
+// extension or another phone), then written back only if that changes it. If
+// Drive's file changed meanwhile, writing would erase that: it starts over
+// from the new file. Returns how many entries changed here.
+async function syncTypeFile(mediaType) {
+  const fileName = backupFileNameFor(mediaType);
+  let changed = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const remote = await fetchBackupFile(fileName);
+    const remoteText = remote ? remote.text : '';
+    if (remoteText) changed += await mergeTypeFromDrive(mediaType, remoteText);
+    const csv = entriesToCsv(mediaType);
+    if (csv === remoteText.trim()) return changed;
+    if (!(await backupFileChangedSince(fileName, remote && remote.modifiedTime))) {
+      await backupCsvToDrive(csv, fileName);
+      return changed;
+    }
+  }
+  throw new Error(`${fileName} kept changing in Drive. It's tried again at the next backup.`);
 }
 
 // How many covers uploadPendingImages has to upload.
@@ -467,6 +487,8 @@ async function runFetchMissingCovers(force) {
 
   const job = beginSync('restore', { show: force, total: missing.length, label: 'Covers' });
   let fetched = 0;
+  // Covers Drive has but that didn't come down: named when it ends.
+  const failed = [];
   for (const entry of missing) {
     try {
       // A new file name: the Library may still have the broken one cached.
@@ -485,10 +507,20 @@ async function runFetchMissingCovers(force) {
       }
     } catch (err) {
       console.warn(`Couldn't fetch the cover for ${entry.source_id}:`, err.message);
+      failed.push(entry);
     }
     job.step();
   }
-  job.end({ summary: fetched ? `${fetched} cover${fetched === 1 ? '' : 's'} back` : null });
+  const named = failed.slice(0, 15).map((e) => e.title || e.source_id);
+  job.end({
+    ok: failed.length === 0,
+    error: failed.length
+      ? `${failed.length} cover${failed.length === 1 ? '' : 's'} didn't download: ${named.join(', ')}${
+          failed.length > named.length ? ` and ${failed.length - named.length} more` : ''
+        }. Library → Filters → No cover lists them; they're tried again later.`
+      : null,
+    summary: fetched ? `${fetched} cover${fetched === 1 ? '' : 's'} back` : null,
+  });
   if (fetched) driveChangeListeners.forEach((listener) => listener(fetched));
   return fetched;
 }

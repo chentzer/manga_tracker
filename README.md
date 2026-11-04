@@ -593,12 +593,6 @@ so nothing renders blank.
   it starts — some streaming sites detect Android WebView's default
   User-Agent (which includes a "wv" marker) and specifically block it;
   spoofing a plain mobile Chrome UA avoids that. An optional
-  `doubleTapSeekSeconds` enables double-tap-to-seek on any `<video>`
-  element — left half rewinds, right half fast-forwards, YouTube-style
-  — via `buildDoubleTapSeekJs()`; harmless to leave on a type with no
-  video (nothing for a click to land on). Listens on `window` in the
-  capturing phase rather than on `<video>` — players wrap the raw
-  element in their own overlay/controls layer, so a listener on
   `<video>` never hears anything; a tap's position is checked against
   each `<video>`'s bounding box instead. The player mustn't see the
   double tap as well (it would show its controls, or run its own seek),
@@ -1197,3 +1191,13 @@ store review entirely, which suits a personal tracker like this well.
 - Adding a third media type (articles, songs, etc.) only requires a new
   entry in `src/mediaTypes.js` — the webview, storage, and library screens
   are all generic and will pick it up automatically.
+
+## Added in this batch
+
+- Video controls on any `<video>` in every tab (`src/videoGestures.js`): double-tap the left or right half, or swipe sideways, to seek; keep tapping to go further.
+- Pinch to zoom on covers (`src/ZoomableImage.js`), opened from a title's details.
+- Short messages show as a Material snackbar above the bottom bar (`src/toast.js`, `src/Snackbar.js`), two lines at most.
+- Library: search by title, a No cover filter, entries as rounded cards with Favourite and Super Want labels, and the dice for Random beside the search box.
+- Settings is a short list of categories, each with its own page.
+- A Drive error no longer reads as "no such file", so nothing is overwritten without being read first; a backup starts over if the file changed while it worked. Edits wait 3 seconds before a sync, and a file that hasn't changed isn't downloaded again.
+- Dark mode uses neutral greys, Light mode's bars are light, and font sizes and corners follow Material's scales.

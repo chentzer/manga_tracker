@@ -40,22 +40,22 @@ export default function QuickSearchPicker({ pick, onChoose, onClose }) {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#16213e', borderRadius: 12, padding: 16 },
-  title: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  card: { backgroundColor: '#1d1f20', borderRadius: 12, padding: 16 },
+  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
   query: { color: '#bbb', fontSize: 14, marginTop: 4, marginBottom: 12 },
   button: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1f4068',
+    backgroundColor: '#444444',
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginTop: 8,
   },
-  buttonFirst: { backgroundColor: '#e94560' },
-  buttonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  buttonFirst: { backgroundColor: '#d62f4b' },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   count: { color: '#fff', opacity: 0.8, fontSize: 12 },
   cancel: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
-  cancelText: { color: '#aaa', fontSize: 15 },
+  cancelText: { color: '#aaa', fontSize: 16 },
 });

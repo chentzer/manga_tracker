@@ -9,7 +9,6 @@ import {
   ScrollView,
   Alert,
   Platform,
-  ToastAndroid,
   Keyboard,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -29,9 +28,11 @@ import {
   markSyncFailed,
   fillMissingEntryFields,
 } from './db';
+import { showToast } from './toast';
 import { isImportedSourceId, refreshFromAniList, findImportedByTitle, isAdultTitle } from './malList';
 import { todayString } from './malFormat';
-import { uploadImageToDrive, buildDriveDisplayName } from './GoogleDriveService';
+import { uploadImageToDrive, buildDriveDisplayName, isImageFile } from './GoogleDriveService';
+import { VIDEO_GESTURES_JS } from './videoGestures';
 import { maybeBackupLibraryToDrive } from './backup';
 import { suppressNextRelock } from './relockGuard';
 import { snoozeUntil, snoozeLabel } from './snooze';
@@ -190,187 +191,13 @@ async function downloadImageLocally(imageUrl, mediaType, sourceId, refererUrl) {
   const result = await FileSystem.downloadAsync(imageUrl, localPath, {
     headers: refererUrl ? { Referer: refererUrl } : undefined,
   });
+  // A failed request, or a 200 that's a web page (a login page): saved, it
+  // would show as a blank cover and go up to Drive.
+  if (result.status < 200 || result.status >= 300 || !(await isImageFile(localPath))) {
+    await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+    throw new Error(`The image address didn't return a picture (HTTP ${result.status})`);
+  }
   return result.uri;
-}
-
-// Double-tap the left half of a <video> to rewind, right half to fast-
-// forward — YouTube-style, since most players' own controls aren't
-// designed for touch-friendly seeking. Opt-in per media type via
-// `doubleTapSeekSeconds` in mediaTypes.js (a number, or omit/0 to
-// disable) — harmless to include on a type with no <video> element
-// (manga pages), since there'd just be nothing for a click to land on.
-//
-// The site's player must not see a double tap as well: it would show
-// its controls (or run its own double-tap seek) on top of ours. So a tap over a <video> is held back, listening on
-// window in the capturing phase (this runs before the page's own
-// scripts, so it's first): pointerdown and touchstart go through, but
-// the tap's ending (pointerup, touchend and the mouse/click events the
-// browser makes from it) waits up to DOUBLE_TAP_MS. A second tap in
-// that time seeks: the first tap is cancelled for the player
-// (pointercancel / touchcancel) and the second one never reaches it.
-// Otherwise the held events are sent on to where they were going,
-// unchanged, so a single tap still shows the controls, just 300 ms
-// later. A drag (the seek bar, scrolling), a long press, a second
-// finger and taps on a link (video previews on list pages) aren't held.
-//
-// The player's own "dblclick" handler (commonly for toggling
-// fullscreen) is blocked too,
-// for the same "landed over a video" area.
-function buildDoubleTapSeekJs(seconds) {
-  return `
-    (function() {
-      if (window.__mangaTrackerSeekInstalled) return;
-      window.__mangaTrackerSeekInstalled = true;
-
-      var DOUBLE_TAP_MS = 300;
-      var SEEK_SECONDS = ${seconds};
-      var replayed = new WeakSet(); // events this script sent itself
-      var tap = null; // the tap being held: { x, y, start, target, pointerId, pointerType, touch, held, ended }
-      var timer = null; // after a held tap ends: sends it on unless a second tap comes
-      var swallowing = false; // the second tap of a double tap: hidden from the page
-
-      // Finds whichever <video> the tap actually landed within,
-      // even if its real target was an overlay/controls element
-      // layered on top of it rather than the <video> itself.
-      function findVideoUnderPoint(x, y) {
-        var videos = document.querySelectorAll('video');
-        for (var i = 0; i < videos.length; i++) {
-          var rect = videos[i].getBoundingClientRect();
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            return videos[i];
-          }
-        }
-        return null;
-      }
-
-      function seek(video, x) {
-        var rect = video.getBoundingClientRect();
-        var duration = video.duration || Infinity;
-        if (x - rect.left < rect.width / 2) {
-          video.currentTime = Math.max(0, video.currentTime - SEEK_SECONDS);
-        } else {
-          video.currentTime = Math.min(duration, video.currentTime + SEEK_SECONDS);
-        }
-      }
-
-      function send(target, e) {
-        replayed.add(e);
-        try { target.dispatchEvent(e); } catch (err) {}
-      }
-
-      // A copy of a held event (an event can't be sent twice).
-      function copyOf(e) {
-        var init = {};
-        for (var k in e) init[k] = e[k];
-        ['touches', 'targetTouches', 'changedTouches'].forEach(function(k) {
-          if (e[k]) init[k] = Array.prototype.slice.call(e[k]);
-        });
-        return new e.constructor(e.type, init);
-      }
-
-      // Sends the held tap on, as it was.
-      function release() {
-        clearTimeout(timer);
-        timer = null;
-        var t = tap;
-        tap = null;
-        if (!t) return;
-        t.held.forEach(function(e) {
-          try { send(e.target, copyOf(e)); } catch (err) {}
-        });
-      }
-
-      // The player saw the first tap start; tell it the tap was called off.
-      function cancel(t) {
-        try {
-          send(t.target, new PointerEvent('pointercancel', {
-            bubbles: true, pointerId: t.pointerId, pointerType: t.pointerType, isPrimary: true
-          }));
-        } catch (err) {}
-        if (t.touch) {
-          try {
-            send(t.target, new TouchEvent('touchcancel', {
-              bubbles: true, touches: [], targetTouches: [], changedTouches: [t.touch]
-            }));
-          } catch (err) {}
-        }
-      }
-
-      window.addEventListener('pointerdown', function(e) {
-        if (replayed.has(e) || !e.isPrimary) return;
-        var video = findVideoUnderPoint(e.clientX, e.clientY);
-        if (tap && tap.ended && video) {
-          // The second tap: seek, and keep both taps from the player.
-          clearTimeout(timer);
-          timer = null;
-          cancel(tap);
-          tap = null;
-          swallowing = true;
-          e.stopPropagation();
-          seek(video, e.clientX);
-          return;
-        }
-        release();
-        swallowing = false;
-        if (!video || (e.target.closest && e.target.closest('a[href]'))) return;
-        tap = {
-          x: e.clientX, y: e.clientY, start: Date.now(), target: e.target,
-          pointerId: e.pointerId, pointerType: e.pointerType, touch: null, held: [], ended: false
-        };
-      }, true);
-
-      window.addEventListener('touchstart', function(e) {
-        if (replayed.has(e)) return;
-        if (swallowing) return e.stopPropagation();
-        if (e.touches.length > 1) return release();
-        if (tap && !tap.ended && !tap.touch) tap.touch = e.changedTouches[0];
-      }, true);
-
-      window.addEventListener('pointermove', function(e) {
-        if (replayed.has(e)) return;
-        if (swallowing) return e.stopPropagation();
-        if (tap && !tap.ended && Math.abs(e.clientX - tap.x) + Math.abs(e.clientY - tap.y) > 10) release();
-      }, true);
-
-      window.addEventListener('touchmove', function(e) {
-        if (swallowing && !replayed.has(e)) e.stopPropagation();
-      }, true);
-
-      ['pointerup', 'touchend', 'mousedown', 'mouseup', 'click'].forEach(function(type) {
-        window.addEventListener(type, function(e) {
-          if (replayed.has(e)) return;
-          if (swallowing) {
-            e.stopPropagation();
-            // No mouse events or click from it either.
-            if (type === 'touchend' && e.cancelable) e.preventDefault();
-            if (type === 'click') e.preventDefault();
-            return;
-          }
-          if (!tap) return;
-          if (!tap.ended && Date.now() - tap.start > 500) return release(); // a long press
-          e.stopPropagation();
-          if (type === 'click') e.preventDefault(); // its copy does what it would have
-          tap.held.push(e);
-          if (type === 'pointerup') {
-            tap.ended = true;
-            timer = setTimeout(release, DOUBLE_TAP_MS);
-          }
-        }, true);
-      });
-
-      document.addEventListener(
-        'dblclick',
-        function(e) {
-          if (findVideoUnderPoint(e.clientX, e.clientY)) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        },
-        true
-      );
-    })();
-    true;
-  `;
 }
 
 // Runs once when the page first loads. Polls location.href so that
@@ -853,10 +680,7 @@ const MediaWebView = forwardRef(function MediaWebView({
     updateEntryFields(entry.source_id, entry.media_type, fields);
     maybeBackupLibraryToDrive();
     if (Platform.OS === 'android') {
-      ToastAndroid.show(
-        prompt.complete ? `Completed${score ? ` · ${score}/10` : ''}` : `Score: ${score}/10`,
-        ToastAndroid.SHORT
-      );
+      showToast(prompt.complete ? `Completed${score ? ` · ${score}/10` : ''}` : `Score: ${score}/10`);
     }
   }, []);
 
@@ -1141,7 +965,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         logDebug(`Blocked opening another app: ${request.url.slice(0, 120)}`);
         if (Platform.OS === 'android' && Date.now() - appLinkNoticeAt.current > 10000) {
           appLinkNoticeAt.current = Date.now();
-          ToastAndroid.show('Blocked: the page tried to open another app.', ToastAndroid.SHORT);
+          showToast('Blocked: the page tried to open another app.');
         }
         return false;
       }
@@ -1248,7 +1072,7 @@ const MediaWebView = forwardRef(function MediaWebView({
       if (savingHeldPicture.current) return;
       savingHeldPicture.current = true;
       const toast = (text, long = false) =>
-        Platform.OS === 'android' && ToastAndroid.show(text, long ? ToastAndroid.LONG : ToastAndroid.SHORT);
+        Platform.OS === 'android' && showToast(text, long);
       try {
         const resolved = pageUrl ? resolveSource(config, pageUrl) : null;
         const label = (resolved && resolved.source.extractId(resolved.match)) || getHostname(pageUrl) || 'picture';
@@ -1310,7 +1134,7 @@ const MediaWebView = forwardRef(function MediaWebView({
       if (payload.type === 'holdImage') {
         if (!getHoldToSave()) return; // switched off (a page loaded before)
         if (payload.error) {
-          if (Platform.OS === 'android') ToastAndroid.show("This picture can't be saved.", ToastAndroid.SHORT);
+          if (Platform.OS === 'android') showToast("This picture can't be saved.");
           return;
         }
         if (!payload.url && !payload.dataUrl) return;
@@ -1369,9 +1193,13 @@ const MediaWebView = forwardRef(function MediaWebView({
           fileNameBase = safeFileName(fileNameBase);
 
           const tempPath = `${FileSystem.cacheDirectory}${fileNameBase}.jpg`;
-          await FileSystem.downloadAsync(payload.imageUrl, tempPath, {
+          const downloaded = await FileSystem.downloadAsync(payload.imageUrl, tempPath, {
             headers: currentUrlRef.current ? { Referer: currentUrlRef.current } : undefined,
           });
+          if (downloaded.status < 200 || downloaded.status >= 300 || !(await isImageFile(tempPath))) {
+            await FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+            throw new Error("The image address didn't return a picture");
+          }
           const folder = galleryFolderFor(config.label);
           try {
             await saveFileToGallery(tempPath, folder);
@@ -1876,7 +1704,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         injectedJavaScriptBeforeContentLoaded={
           URL_WATCHER_JS +
           buildAutoConfirmJs(getDomainButtonMap(config)) +
-          (config.doubleTapSeekSeconds ? buildDoubleTapSeekJs(config.doubleTapSeekSeconds) : '') +
+          VIDEO_GESTURES_JS +
           getBeforeLoadJs(config) +
           TAB_BAR_WATCH_JS +
           (holdToSave ? IMAGE_HOLD_JS : '') +
@@ -1898,12 +1726,12 @@ const styles = themed(StyleSheet.create({
   manualBar: {
     flexDirection: 'row',
     padding: 8,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     gap: 8,
   },
   manualButton: {
-    backgroundColor: '#e94560',
-    borderRadius: 6,
+    backgroundColor: '#d62f4b',
+    borderRadius: 8,
     paddingHorizontal: 14,
     minHeight: 34,
     justifyContent: 'center',
@@ -1912,14 +1740,14 @@ const styles = themed(StyleSheet.create({
   manualInput: {
     flex: 1,
     minHeight: 34,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#121212',
     color: '#fff',
-    borderRadius: 6,
+    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
     fontSize: 14,
   },
-  siteButton: { backgroundColor: '#1f4068', paddingHorizontal: 10, maxWidth: 140 },
+  siteButton: { backgroundColor: '#444444', paddingHorizontal: 10, maxWidth: 140 },
   // Title search: which site's results are showing, and Next.
   titleSearchBar: {
     flexDirection: 'row',
@@ -1927,16 +1755,16 @@ const styles = themed(StyleSheet.create({
     gap: 8,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
   },
-  titleSearchText: { flex: 1, color: '#ddd', fontSize: 13 },
-  titleSearchClose: { color: '#aaa', fontSize: 18, paddingHorizontal: 4 },
+  titleSearchText: { flex: 1, color: '#ddd', fontSize: 14 },
+  titleSearchClose: { color: '#aaa', fontSize: 22, paddingHorizontal: 4 },
   // The site list drops down from the top left, under its button.
   siteMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', paddingTop: 96, paddingHorizontal: 8 },
-  siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4 },
+  siteMenu: { alignSelf: 'flex-start', minWidth: 220, backgroundColor: '#1d1f20', borderRadius: 8, paddingVertical: 4 },
   siteMenuRow: { paddingVertical: 10, paddingHorizontal: 14 },
   siteMenuRowGap: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a3a5e' },
-  siteMenuText: { color: '#fff', fontSize: 15 },
+  siteMenuText: { color: '#fff', fontSize: 16 },
   siteMenuTextCurrent: { color: '#e94560', fontWeight: '700' },
   siteMenuDomain: { color: '#8892b0', fontSize: 12, marginTop: 2 },
   viewInLibraryButton: {
@@ -1945,7 +1773,7 @@ const styles = themed(StyleSheet.create({
     alignItems: 'center',
   },
   saveImageButton: {
-    backgroundColor: '#0f3460',
+    backgroundColor: '#1d1f20',
     paddingVertical: 8,
     alignItems: 'center',
   },
@@ -1954,7 +1782,7 @@ const styles = themed(StyleSheet.create({
   // draws, so a shrink-wrapped one-line label wrapped its last word
   // ("Library") onto a hidden second line. With the full width there's
   // always room, so nothing wraps.
-  saveImageButtonText: { color: '#fff', fontWeight: '600', fontSize: 13, alignSelf: 'stretch', textAlign: 'center' },
+  saveImageButtonText: { color: '#fff', fontWeight: '600', fontSize: 14, alignSelf: 'stretch', textAlign: 'center' },
   captureHtmlButton: {
     backgroundColor: '#5a3d8a',
     paddingVertical: 8,
@@ -1984,7 +1812,7 @@ const styles = themed(StyleSheet.create({
     backgroundColor: '#fff3cd',
   },
   debugText: { fontSize: 11, color: '#664d03' },
-  logModal: { flex: 1, backgroundColor: '#1a1a2e', paddingTop: 50 },
+  logModal: { flex: 1, backgroundColor: '#121212', paddingTop: 50 },
   logHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2003,7 +1831,7 @@ const styles = themed(StyleSheet.create({
   },
   logClearButton: {
     margin: 16,
-    backgroundColor: '#0f3460',
+    backgroundColor: '#1d1f20',
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',

@@ -8,11 +8,12 @@ import {
   Keyboard,
   Alert,
   Platform,
-  ToastAndroid,
   Modal,
   ScrollView,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { showToast } from './toast';
+import { VIDEO_GESTURES_JS } from './videoGestures';
 import { galleryFolderFor } from './gallery';
 import { PAUSE_MEDIA_JS, getTabSites } from './MediaWebView';
 import { MEDIA_TYPE_LIST } from './mediaTypes';
@@ -255,7 +256,7 @@ const BrowserTab = forwardRef(function BrowserTab(
       // Held a finger on a picture (src/imageHold.js): saved to
       // AniManga Tracker/Browser, named "<site>_<time>".
       const toast = (text, long = false) =>
-        Platform.OS === 'android' && ToastAndroid.show(text, long ? ToastAndroid.LONG : ToastAndroid.SHORT);
+        Platform.OS === 'android' && showToast(text, long);
       if (message.error) {
         toast("This picture can't be saved.");
         return;
@@ -285,7 +286,7 @@ const BrowserTab = forwardRef(function BrowserTab(
     }
   };
 
-  const pageJs = TAP_TRACKER_JS + (holdToSave ? IMAGE_HOLD_JS : '') + TAB_BAR_WATCH_JS + (blockAds ? AD_BLOCK_JS : '');
+  const pageJs = TAP_TRACKER_JS + VIDEO_GESTURES_JS + (holdToSave ? IMAGE_HOLD_JS : '') + TAB_BAR_WATCH_JS + (blockAds ? AD_BLOCK_JS : '');
 
   return (
     <View style={styles.container}>
@@ -602,24 +603,24 @@ const BrowserTab = forwardRef(function BrowserTab(
 export default BrowserTab;
 
 const styles = themed(StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: '#121212' },
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 8,
     gap: 6,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
   },
   navButton: { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 26, lineHeight: 28, color: '#fff' },
-  navTextSmall: { fontSize: 18, color: '#fff' },
+  navTextSmall: { fontSize: 22, color: '#fff' },
   navDisabled: { color: '#4a5578' },
   address: {
     flex: 1,
     height: 38,
     paddingHorizontal: 12,
-    borderRadius: 19,
+    borderRadius: 24,
     backgroundColor: '#0f1a33',
     borderWidth: 1,
     borderColor: '#2a3a5e',
@@ -638,25 +639,25 @@ const styles = themed(StyleSheet.create({
   blockedText: { flex: 1, fontSize: 12, color: '#f5d9a8' },
   blockedAction: { fontSize: 14, fontWeight: '700', color: '#fff' },
   hiddenPage: { display: 'none' },
-  home: { flex: 1, backgroundColor: '#1a1a2e' },
+  home: { flex: 1, backgroundColor: '#121212' },
   homeContent: { padding: 20, paddingBottom: 40 },
-  homeHeading: { fontSize: 17, fontWeight: '700', color: '#ffffff', marginTop: 20, marginBottom: 8 },
+  homeHeading: { fontSize: 22, fontWeight: '700', color: '#ffffff', marginTop: 20, marginBottom: 8 },
   homeHint: { fontSize: 14, color: '#b8c0dc' },
   homeTab: { marginBottom: 10 },
-  homeTabLabel: { fontSize: 13, fontWeight: '700', color: '#b8c0dc', marginBottom: 6 },
+  homeTabLabel: { fontSize: 14, fontWeight: '700', color: '#b8c0dc', marginBottom: 6 },
   homeSites: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   siteChip: {
     minHeight: 48,
     paddingHorizontal: 16,
     borderRadius: 24,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderWidth: 1,
-    borderColor: '#4a6fa5',
+    borderColor: '#666',
     justifyContent: 'center',
   },
-  siteChipText: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
+  siteChipText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
   returnRow: { minHeight: 48, justifyContent: 'center', marginTop: 12 },
-  returnText: { fontSize: 15, fontWeight: '700', color: '#8fb3ff' },
+  returnText: { fontSize: 16, fontWeight: '700', color: '#8fb3ff' },
   bookmarkRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -665,16 +666,16 @@ const styles = themed(StyleSheet.create({
     borderBottomColor: '#4a5578',
   },
   bookmarkText: { flex: 1, paddingVertical: 6 },
-  bookmarkTitle: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
-  bookmarkUrl: { fontSize: 13, color: '#b8c0dc' },
+  bookmarkTitle: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  bookmarkUrl: { fontSize: 14, color: '#b8c0dc' },
   menuBackdrop: { flex: 1, alignItems: 'flex-end', paddingTop: 100, paddingRight: 8 },
-  menu: { backgroundColor: '#16213e', borderRadius: 8, paddingVertical: 4, minWidth: 200, elevation: 8 },
+  menu: { backgroundColor: '#1d1f20', borderRadius: 8, paddingVertical: 4, minWidth: 200, elevation: 8 },
   menuItem: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
-  menuText: { fontSize: 15, color: '#ffffff' },
+  menuText: { fontSize: 16, color: '#ffffff' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  sheet: { backgroundColor: '#16213e', borderRadius: 12, padding: 20, maxHeight: '90%' },
-  sheetTitle: { fontSize: 19, fontWeight: '700', color: '#ffffff', marginBottom: 6 },
-  sheetHint: { fontSize: 13, color: '#b8c0dc', marginVertical: 6 },
+  sheet: { backgroundColor: '#1d1f20', borderRadius: 12, padding: 20, maxHeight: '90%' },
+  sheetTitle: { fontSize: 22, fontWeight: '700', color: '#ffffff', marginBottom: 6 },
+  sheetHint: { fontSize: 14, color: '#b8c0dc', marginVertical: 6 },
   bookmarkHere: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   bookmarkList: { maxHeight: 360, marginTop: 8 },
   bookmarkInput: {
@@ -683,8 +684,8 @@ const styles = themed(StyleSheet.create({
     minHeight: 48,
     color: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#4a6fa5',
-    fontSize: 15,
+    borderBottomColor: '#666',
+    fontSize: 16,
   },
   addBookmarkButton: {
     alignSelf: 'flex-start',
@@ -692,14 +693,14 @@ const styles = themed(StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#e94560',
+    backgroundColor: '#d62f4b',
   },
-  addBookmarkText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+  addBookmarkText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   textButton: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  removeText: { color: '#ff7468', fontSize: 15, fontWeight: '700' },
+  removeText: { color: '#ff7468', fontSize: 16, fontWeight: '700' },
   closeButton: { alignSelf: 'flex-end', minHeight: 48, minWidth: 64, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
-  closeText: { color: '#b8c0dc', fontSize: 15, fontWeight: '700' },
+  closeText: { color: '#b8c0dc', fontSize: 16, fontWeight: '700' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 10 },
-  emptyText: { fontSize: 15, lineHeight: 23, color: '#8892b0', textAlign: 'center' },
+  emptyTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 10 },
+  emptyText: { fontSize: 16, lineHeight: 23, color: '#8892b0', textAlign: 'center' },
 }));

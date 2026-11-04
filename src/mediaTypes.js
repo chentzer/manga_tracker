@@ -978,14 +978,6 @@ export const MEDIA_TYPES = {
       dropped: 'Dropped',
       want: 'Want to Watch',
     },
-    // Double-tap left half of the video to rewind, right half to
-    // fast-forward (YouTube-style) — set to however many seconds each
-    // tap should skip, or omit/0 to disable. Harmless to leave on
-    // types with no <video> element (it just finds nothing to attach
-    // to). Some players bind their own double-click handler (commonly
-    // for fullscreen) which can fire alongside this — see
-    // buildDoubleTapSeekJs in MediaWebView.js for details.
-    doubleTapSeekSeconds: 5,
     // Set ANIME_SITE_URL in .env to the site you browse.
     startUrl: ANIME_SITE_URL,
     // Pages can't leave the site (or a site added in Settings → Sites):

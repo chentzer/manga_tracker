@@ -13,7 +13,7 @@ import {
   getNoteItemTombstones,
   clearNoteItemTombstones,
 } from './db';
-import { uploadTextFileToDrive, fetchBackupCsvContent, isDriveConnected } from './GoogleDriveService';
+import { uploadTextFileToDrive, isDriveConnected, fetchBackupFile, backupFileChangedSince } from './GoogleDriveService';
 import { driveSyncAllowed, markDriveSyncDeferred } from './dataSaver';
 
 // Drive layout (both files live in the MangaTracker folder, next to the
@@ -214,7 +214,8 @@ let syncChain = Promise.resolve();
 // force: true for the Backup Now / Connect buttons, which run even when
 // Settings → Data saver holds automatic sync for Wi-Fi.
 export function syncNotepadToDrive({ force = false } = {}) {
-  const run = async () => {
+  let changedHere = false;
+  const run = async (attempt) => {
     if (!isDriveConnected()) return { attempted: false, success: false, error: null };
     if (!force && !driveSyncAllowed()) {
       markDriveSyncDeferred();
@@ -222,7 +223,8 @@ export function syncNotepadToDrive({ force = false } = {}) {
     }
     try {
       const deviceId = getOrCreateDeviceId();
-      const remote = parseDoc(await fetchBackupCsvContent(NOTEPAD_JSON));
+      const remoteFile = await fetchBackupFile(NOTEPAD_JSON);
+      const remote = parseDoc(remoteFile && remoteFile.text);
 
       // 1. Agree on note names with the other devices.
       const tombstones = getNotebookTombstones();
@@ -252,19 +254,25 @@ export function syncNotepadToDrive({ force = false } = {}) {
       const deletedItemIds = getNoteItemTombstones();
       const section = mergeSection(remote.devices[deviceId], buildLocalSection(deviceId), deletedItemIds);
       const doc = { ...remote, version: 2, notebooks: registry, devices: { ...remote.devices, [deviceId]: section } };
+      changedHere = changedHere || plan.toCreate.length + plan.toDelete.length > 0;
+      // Changed in Drive since it was read: start over from the new file.
+      if (await backupFileChangedSince(NOTEPAD_JSON, remoteFile && remoteFile.modifiedTime)) {
+        if (attempt >= 2) throw new Error('notepad.json kept changing in Drive.');
+        return run(attempt + 1);
+      }
       await uploadTextFileToDrive(JSON.stringify(doc, null, 2), NOTEPAD_JSON, 'application/json');
       await uploadTextFileToDrive(renderNotepadText(doc), NOTEPAD_TXT, 'text/plain');
       clearNotebookTombstones(tombstones);
       clearNoteItemTombstones(deletedItemIds);
 
-      const localChanged = plan.toCreate.length + plan.toDelete.length > 0;
-      if (localChanged) listeners.forEach((l) => l());
-      return { attempted: true, success: true, error: null, localChanged };
+      if (changedHere) listeners.forEach((l) => l());
+      return { attempted: true, success: true, error: null, localChanged: changedHere };
     } catch (err) {
       console.warn('Notepad Drive sync failed:', err.message);
       return { attempted: true, success: false, error: err.message };
     }
   };
-  syncChain = syncChain.then(run, run);
+  const start = () => run(0);
+  syncChain = syncChain.then(start, start);
   return syncChain;
 }

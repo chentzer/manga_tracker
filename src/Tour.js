@@ -1,7 +1,7 @@
 // The first-launch tour: steps through the app on its real screens, each
 // step dimming everything but one control (a spotlight) with a short card
 // under or over it — "3 of 18", Back, Skip and Next. It runs once (the
-// `tourDone` setting) and Settings → App → Show the tour plays it again.
+// `tourDone` setting) and Settings → Help → Show the tour plays it again.
 //
 // Controls take part by key: `ref={tourTarget('library.random')}` on the
 // control wherever it's drawn (App.js, MediaWebView.js, EntryList.js,
@@ -83,7 +83,7 @@ export function tourSteps({ siteTab, siteTabs }) {
           {
             tab: siteTab,
             target: `siteTab.${anime.key}`,
-            text: 'On Anime, double-tap the left or right side of a video to skip back or forward. The screen stays on while it plays.',
+            text: 'On any video: double-tap the left or right side, or swipe sideways, to skip back or forward. Keep tapping to go further. The screen stays on while it plays.',
           },
         ]
       : []),
@@ -97,13 +97,13 @@ export function tourSteps({ siteTab, siteTabs }) {
       tab: 'library',
       target: 'library.filters',
       optional: true,
-      text: 'Filters: sort (last updated first), status, score, favourites, tags and artist. Hold a tag to make it a favourite.',
+      text: 'Search by title here. Filters: sort (last updated first), status, score, favourites, no cover, tags and artist. Hold a tag to make it a favourite.',
     },
-    { tab: 'library', target: 'library.random', text: 'Random picks something to read or watch next.' },
+    { tab: 'library', target: 'library.random', text: 'The dice picks something to read or watch next.' },
     {
       tab: 'library',
       target: 'library.list',
-      text: 'Tap a title for its details and Continue (double-tap Want to there for Super Want). Hold one to select several, and pull down to sync.',
+      text: 'Tap a title for its details and Continue (double-tap Want to there for Super Want; tap its cover, then pinch to zoom). Hold one to select several, and pull down to sync.',
     },
     { tab: 'browser', target: 'bottom.browser', text: 'Browser opens any website. Nothing here is saved to the Library.' },
     { tab: 'browser', target: 'browser.home', optional: true, text: "Home lists every tab's sites (each opens in its tab) and your bookmarks." },
@@ -314,14 +314,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 3,
     borderColor: '#ffd166',
-    borderRadius: 10,
+    borderRadius: 12,
   },
   card: {
     position: 'absolute',
     left: 16,
     right: 16,
-    backgroundColor: '#16213e',
-    borderRadius: 14,
+    backgroundColor: '#1d1f20',
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: '#2c3a66',
@@ -336,19 +336,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 16,
     height: 16,
-    backgroundColor: '#16213e',
+    backgroundColor: '#1d1f20',
     borderColor: '#2c3a66',
     borderLeftWidth: 1,
     borderTopWidth: 1,
     transform: [{ rotate: '45deg' }],
   },
-  progress: { color: '#c8c8d8', fontSize: 13, marginBottom: 6 },
+  progress: { color: '#c8c8d8', fontSize: 14, marginBottom: 6 },
   text: { color: '#ffffff', fontSize: 16, lineHeight: 22 },
   buttons: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 14, gap: 8 },
   spacer: { flex: 1 },
   button: { minHeight: 48, minWidth: 64, paddingHorizontal: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   primary: { backgroundColor: '#c62f4c' },
-  primaryText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+  primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   quiet: { backgroundColor: 'transparent' },
-  quietText: { color: '#e0e0ee', fontSize: 15, fontWeight: '600' },
+  quietText: { color: '#e0e0ee', fontSize: 16, fontWeight: '600' },
 });

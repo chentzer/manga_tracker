@@ -289,7 +289,7 @@ export default forwardRef(function Notepad({ visible, refreshKey, onSearch }, re
           <TextInput
             style={styles.input}
             placeholder={`Add to ${selectedTitle}… (text or a link)`}
-            placeholderTextColor={themeColor('#767676')}
+            placeholderTextColor={themeColor('#666')}
             value={input}
             onChangeText={setInput}
             multiline
@@ -356,7 +356,7 @@ export default forwardRef(function Notepad({ visible, refreshKey, onSearch }, re
               <TextInput
                 style={styles.sheetInput}
                 placeholder="e.g. Grocery list"
-                placeholderTextColor={themeColor('#767676')}
+                placeholderTextColor={themeColor('#666')}
                 value={newNoteTitle}
                 onChangeText={setNewNoteTitle}
                 onSubmitEditing={handleCreateNote}
@@ -419,14 +419,14 @@ const styles = themed(StyleSheet.create({
   tab: {
     paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 18,
+    borderRadius: 24,
     backgroundColor: '#eef0f5',
   },
-  tabActive: { backgroundColor: '#16213e' },
+  tabActive: { backgroundColor: '#1d1f20' },
   tabText: { color: '#333', fontSize: 14 },
   tabTextActive: { color: '#fff', fontWeight: '600' },
-  tabNew: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16213e' },
-  tabNewText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
+  tabNew: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#1d1f20' },
+  tabNewText: { color: '#1d1f20', fontSize: 14, fontWeight: '600' },
   noteHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -435,7 +435,7 @@ const styles = themed(StyleSheet.create({
     paddingTop: 4,
     gap: 12,
   },
-  noteTitle: { flex: 1, fontSize: 19, fontWeight: '700', color: '#222' },
+  noteTitle: { flex: 1, fontSize: 22, fontWeight: '700', color: '#222' },
   deleteNoteText: { color: '#c0392b', fontSize: 14 },
   inputRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 14, gap: 10, alignItems: 'flex-end' },
   input: {
@@ -447,16 +447,16 @@ const styles = themed(StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    fontSize: 15,
+    fontSize: 16,
     color: '#222',
     textAlignVertical: 'top',
   },
-  addButton: { backgroundColor: '#16213e', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  addButton: { backgroundColor: '#1d1f20', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12 },
   addButtonText: { color: '#fff', fontWeight: '600' },
   // Items are separate soft cards with generous padding and line
   // height, rather than tight rows divided by hairlines.
   list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 32 },
-  empty: { color: '#666', textAlign: 'center', marginTop: 40, paddingHorizontal: 24, fontSize: 15, lineHeight: 23 },
+  empty: { color: '#666', textAlign: 'center', marginTop: 40, paddingHorizontal: 24, fontSize: 16, lineHeight: 23 },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -473,10 +473,10 @@ const styles = themed(StyleSheet.create({
   link: { color: '#1a73e8', textDecorationLine: 'underline' },
   itemDate: { fontSize: 12, color: '#666', marginTop: 10 },
   itemAction: { paddingHorizontal: 10, minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  moveText: { color: '#16213e', fontSize: 14, fontWeight: '600' },
-  deleteText: { color: '#c0392b', fontSize: 17, fontWeight: '600' },
-  searchText: { fontSize: 18, color: '#1a73e8' },
-  categoryHint: { color: '#666', fontSize: 13 },
+  moveText: { color: '#1d1f20', fontSize: 14, fontWeight: '600' },
+  deleteText: { color: '#c0392b', fontSize: 22, fontWeight: '600' },
+  searchText: { fontSize: 22, color: '#1a73e8' },
+  categoryHint: { color: '#666', fontSize: 14 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -484,23 +484,23 @@ const styles = themed(StyleSheet.create({
     padding: 24,
   },
   sheet: { backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: '80%' },
-  sheetTitle: { fontSize: 18, fontWeight: '700', color: '#222', marginBottom: 12 },
-  sheetPreview: { fontSize: 13, color: '#666', marginBottom: 12 },
+  sheetTitle: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 12 },
+  sheetPreview: { fontSize: 14, color: '#666', marginBottom: 12 },
   sheetInput: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 16,
     color: '#222',
   },
   sheetButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 16 },
   sheetButton: { paddingHorizontal: 12, paddingVertical: 10, alignSelf: 'flex-end' },
-  sheetCancel: { color: '#666', fontSize: 15 },
-  sheetConfirm: { color: '#16213e', fontSize: 15, fontWeight: '700' },
+  sheetCancel: { color: '#666', fontSize: 16 },
+  sheetConfirm: { color: '#1d1f20', fontSize: 16, fontWeight: '700' },
   moveList: { flexGrow: 0 },
   moveRow: { paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
   moveRowText: { fontSize: 16, color: '#222' },
-  moveHint: { color: '#666', fontSize: 13, paddingVertical: 12 },
+  moveHint: { color: '#666', fontSize: 14, paddingVertical: 12 },
 }));

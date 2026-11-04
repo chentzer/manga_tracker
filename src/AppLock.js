@@ -199,27 +199,27 @@ export default function AppLock({ children }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#121212',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   icon: { marginBottom: 16 },
-  title: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  title: { color: '#fff', fontSize: 22, fontWeight: '700', marginBottom: 12 },
   status: {
     color: '#f5a623',
-    fontSize: 13,
+    fontSize: 14,
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 18,
   },
   button: {
-    backgroundColor: '#e94560',
+    backgroundColor: '#d62f4b',
     paddingHorizontal: 32,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 12,
   },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   skipButton: { marginTop: 20, padding: 8 },
-  skipButtonText: { color: '#888', fontSize: 13, textDecorationLine: 'underline' },
+  skipButtonText: { color: '#888', fontSize: 14, textDecorationLine: 'underline' },
 });
