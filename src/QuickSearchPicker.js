@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 8,
   },
-  buttonFirst: { backgroundColor: '#d62f4b' },
+  buttonFirst: { backgroundColor: '#006f8a' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   count: { color: '#fff', opacity: 0.8, fontSize: 12 },
   cancel: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },

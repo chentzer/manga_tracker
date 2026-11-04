@@ -301,7 +301,7 @@ const BrowserTab = forwardRef(function BrowserTab(
           accessibilityLabel="Home"
           accessibilityState={{ disabled: home }}
         >
-          <Icon name="home-outline" size={24} color={home ? '#ff7a90' : '#ffffff'} />
+          <Icon name="home-outline" size={24} color={home ? '#00b4db' : '#ffffff'} />
         </TouchableOpacity>
         <TextInput
           ref={tourTarget('browser.address')}
@@ -693,9 +693,9 @@ const styles = themed(StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#d62f4b',
+    backgroundColor: '#00b4db',
   },
-  addBookmarkText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  addBookmarkText: { color: '#0b1f2a', fontSize: 16, fontWeight: '700' },
   textButton: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   removeText: { color: '#ff7468', fontSize: 16, fontWeight: '700' },
   closeButton: { alignSelf: 'flex-end', minHeight: 48, minWidth: 64, justifyContent: 'center', alignItems: 'center', marginTop: 12 },

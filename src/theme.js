@@ -1,5 +1,5 @@
-// Settings → Dark mode: every screen and bar turns dark. Coral and the other
-// status colours stay; a filled button or chosen chip turns a mid grey.
+// Settings → Dark mode: every screen and bar turns dark. The theme's bright
+// colours and the status colours stay; a filled button or chosen chip turns a mid grey.
 //
 // Each file keeps its light styles as written, wrapped in themed(): while
 // Dark mode is on, a style's background, text and border colours are
@@ -41,7 +41,7 @@ export function useDarkMode() {
 }
 
 // Light colour → dark colour, by what it colours. True neutrals, one tone
-// step apart, so the covers and the coral are the only colour on screen.
+// step apart, so the covers and the theme's colours are the only colour on screen.
 const SURFACE = '#121212'; // pages, cards, sheets
 const RAISED = '#1e1e1e'; // bars, inputs, chips
 const LINE = '#333333';
@@ -59,7 +59,7 @@ const BACKGROUNDS = {
   '#eef1f8': RAISED,
   '#eef0f5': RAISED,
   '#e8edf5': RAISED,
-  '#e3ecfa': RAISED, // light blue
+  '#e0f6fb': RAISED, // light blue
   '#eee': '#2a2a2a',
   '#eeeeee': '#2a2a2a',
   '#ececec': '#2c2c2c', // a selected card
@@ -89,10 +89,11 @@ const TEXTS = {
   '#999': '#9e9e9e',
   '#aaa': '#a8a8a8',
   '#1d1f20': '#ececec', // ink text
-  '#1a73e8': '#6ea8ff',
-  '#c0392b': '#ff7468', // red text (Delete, errors)
-  '#b26a00': '#f5a623', // scores and favourite stars
-  '#c2184b': '#ff7a93', // the active tab, the Favourite label
+  '#006f8a': '#00b4db', // primary's deep tone: active tab, links
+  '#c0392b': '#ff6b6b', // red text (Delete, errors)
+  '#7a5c00': '#f9ca24', // accent's deep tones: scores, favourite stars
+  '#b8860b': '#f9ca24',
+  '#c92a2a': '#ff6b6b', // secondary's deep tone: the Favourite label
   '#b3261e': '#ff8a80', // the Super Want label
   '#7a4b00': '#ffd479', // text on the yellow banners
   '#664d03': '#ffd479',

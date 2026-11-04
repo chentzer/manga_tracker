@@ -1696,7 +1696,7 @@ function RandomModal({ visible, choice, onChange, onPick, onClose }) {
               <Text style={styles.detailCloseButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.detailCloseButtonFlex, styles.randomPickButton]} onPress={onPick}>
-              <Text style={styles.detailCloseButtonText}>
+              <Text style={[styles.detailCloseButtonText, styles.randomPickButtonText]}>
                 <Icon name="random" size={16} /> Pick
               </Text>
             </TouchableOpacity>
@@ -3310,9 +3310,9 @@ const styles = themed(StyleSheet.create({
   // and right, with both labels. The padding keeps the content in place.
   rowOutlined: { borderWidth: 2, padding: 12 },
   rowLabels: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 10, marginBottom: 3 },
-  rowLabelFavorite: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, color: '#c2184b' },
+  rowLabelFavorite: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, color: '#c92a2a' },
   rowLabelSuper: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, color: '#b3261e' },
-  rowFavorite: { borderColor: '#e94560' },
+  rowFavorite: { borderColor: '#ff6b6b' },
   rowSuperWant: { borderColor: '#b3261e' },
   rowBoth: { borderBottomColor: '#b3261e', borderRightColor: '#b3261e' },
   thumb: { width: 80, height: 80, borderRadius: 8, backgroundColor: '#eee' },
@@ -3366,7 +3366,7 @@ const styles = themed(StyleSheet.create({
   name: { fontSize: 16, fontWeight: '600' },
   author: { fontSize: 14, color: '#666', marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
-  scoreBadge: { fontSize: 14, color: '#b26a00', fontWeight: '700' },
+  scoreBadge: { fontSize: 14, color: '#7a5c00', fontWeight: '700' },
   conflictBadge: { fontSize: 12, color: '#b9770e' },
   reviewChip: { backgroundColor: '#fdf2d8' },
   reviewChipText: { color: '#b9770e', fontSize: 14, fontWeight: '600' },
@@ -3393,7 +3393,7 @@ const styles = themed(StyleSheet.create({
   conflictValue: { fontSize: 14, color: '#333', marginTop: 2 },
   detailNextButton: {
     flex: 1,
-    backgroundColor: '#e3ecfa',
+    backgroundColor: '#e0f6fb',
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
@@ -3409,7 +3409,8 @@ const styles = themed(StyleSheet.create({
     flexShrink: 1,
   },
   randomHint: { fontSize: 12, color: '#666', marginTop: 4 },
-  randomPickButton: { backgroundColor: '#d62f4b' },
+  randomPickButton: { backgroundColor: '#ff6b6b' },
+  randomPickButtonText: { color: '#0b1f2a' },
   topButtons: { flexDirection: 'row', gap: 8, marginHorizontal: 10, marginTop: 8 },
   topButton: { flex: 1, marginHorizontal: 0, marginTop: 0 },
   toRateButton: { paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#1d1f20' },
@@ -3455,7 +3456,7 @@ const styles = themed(StyleSheet.create({
   },
   artistListImage: { width: 180, height: 120, borderRadius: 8, backgroundColor: '#eee' },
   artistListName: { fontSize: 22, fontWeight: '700', color: '#222' },
-  favoriteStar: { fontSize: 22, color: '#b26a00', marginLeft: 8 },
+  favoriteStar: { fontSize: 22, color: '#b8860b', marginLeft: 8 },
   artistDetailCount: { fontSize: 14, color: '#666', marginTop: 4 },
   favoriteButton: {
     marginTop: 14,
@@ -3463,11 +3464,11 @@ const styles = themed(StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#f5a623',
+    borderColor: '#f9ca24',
   },
-  favoriteButtonActive: { backgroundColor: '#f5a623' },
-  favoriteButtonText: { color: '#c47f00', fontWeight: '700', fontSize: 16 },
-  favoriteButtonTextActive: { color: '#fff' },
+  favoriteButtonActive: { backgroundColor: '#f9ca24' },
+  favoriteButtonText: { color: '#7a5c00', fontWeight: '700', fontSize: 16 },
+  favoriteButtonTextActive: { color: '#0b1f2a' },
   focusEditor: { width: '100%', aspectRatio: 1.5, borderRadius: 12, backgroundColor: '#eee', marginBottom: 6 },
   zoomRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   zoomChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#eee' },
@@ -3480,7 +3481,7 @@ const styles = themed(StyleSheet.create({
   focusButtonText: { color: '#333', fontWeight: '600' },
   focusSave: { backgroundColor: '#1d1f20' },
   focusSaveText: { color: '#fff', fontWeight: '700' },
-  moveText: { color: '#1a73e8', fontSize: 14, fontWeight: '600', marginTop: 8 },
+  moveText: { color: '#006f8a', fontSize: 14, fontWeight: '600', marginTop: 8 },
   peopleSearchRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 8 },
   heartButton: {
     marginTop: 12,
@@ -3488,11 +3489,11 @@ const styles = themed(StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e94560',
+    borderColor: '#ff6b6b',
   },
-  heartButtonActive: { backgroundColor: '#d62f4b' },
-  heartButtonText: { color: '#e94560', fontWeight: '700', fontSize: 16 },
-  heartButtonTextActive: { color: '#fff' },
+  heartButtonActive: { backgroundColor: '#ff6b6b' },
+  heartButtonText: { color: '#c92a2a', fontWeight: '700', fontSize: 16 },
+  heartButtonTextActive: { color: '#0b1f2a' },
   progressBadge: { fontSize: 12, color: '#555' },
   scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   scoreChip: {
@@ -3502,9 +3503,9 @@ const styles = themed(StyleSheet.create({
     backgroundColor: '#f0f0f0',
     alignItems: 'center',
   },
-  scoreChipActive: { backgroundColor: '#f5a623' },
+  scoreChipActive: { backgroundColor: '#f9ca24' },
   scoreText: { color: '#333', fontSize: 14 },
-  scoreTextActive: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  scoreTextActive: { color: '#0b1f2a', fontSize: 14, fontWeight: '700' },
   scoreLabel: { fontSize: 14, color: '#555', marginTop: 6 },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   stepButton: {
@@ -3536,7 +3537,7 @@ const styles = themed(StyleSheet.create({
   },
   dateValue: { fontSize: 14, color: '#222' },
   datePlaceholder: { fontSize: 14, color: '#666' },
-  dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e3ecfa' },
+  dateButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#e0f6fb' },
   dateButtonText: { color: '#1d1f20', fontSize: 14, fontWeight: '600' },
   switchRow: {
     flexDirection: 'row',
@@ -3660,11 +3661,11 @@ const styles = themed(StyleSheet.create({
   // Genres can be a long list: they wrap under their label.
   detailGenres: { flex: 1, marginLeft: 16, textAlign: 'right' },
   tagFilterBarContent: { paddingHorizontal: 10, gap: 8 },
-  groupLink: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },
+  groupLink: { fontSize: 14, fontWeight: '600', color: '#006f8a' },
   groupLeave: { color: '#c0392b' },
   groupName: { fontSize: 16, fontWeight: '700', color: '#1d1f20' },
   groupNameBox: { flex: 1 },
-  groupOpen: { fontSize: 16, fontWeight: '700', color: '#1a73e8' },
+  groupOpen: { fontSize: 16, fontWeight: '700', color: '#006f8a' },
   groupRowName: { fontSize: 16, fontWeight: '700', color: '#222' },
   groupRowNameBox: { alignSelf: 'stretch' },
   groupPageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4, borderRadius: 8 },

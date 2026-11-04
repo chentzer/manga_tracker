@@ -187,7 +187,7 @@ const detailStyles = themed(
     title: { fontSize: 22, fontWeight: '700', color: '#222', marginBottom: 8 },
     percent: { fontSize: 36, fontWeight: '700', color: '#1d1f20', marginBottom: 8 },
     bar: { height: 8, borderRadius: 4, backgroundColor: '#e0e0e0', overflow: 'hidden', marginBottom: 16 },
-    barFill: { height: 8, backgroundColor: '#3d5f99' },
+    barFill: { height: 8, backgroundColor: '#00b4db' },
     part: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
     partLabel: { fontSize: 16, color: '#333' },
     partCount: { fontSize: 16, fontWeight: '700', color: '#222' },
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   // The part done, behind the word.
-  fill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#3d5f99' },
+  fill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#00b4db' },
   pillDone: { borderColor: '#2e7d4f', backgroundColor: '#1e5c3a' },
   pillFailed: { borderColor: '#c0392b', backgroundColor: '#7a1f1f' },
   text: { color: '#fff', fontSize: 12, fontWeight: '700' },

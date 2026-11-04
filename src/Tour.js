@@ -313,7 +313,7 @@ const styles = StyleSheet.create({
   ring: {
     position: 'absolute',
     borderWidth: 3,
-    borderColor: '#ffd166',
+    borderColor: '#f9ca24',
     borderRadius: 12,
   },
   card: {
@@ -347,8 +347,8 @@ const styles = StyleSheet.create({
   buttons: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 14, gap: 8 },
   spacer: { flex: 1 },
   button: { minHeight: 48, minWidth: 64, paddingHorizontal: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  primary: { backgroundColor: '#c62f4c' },
-  primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  primary: { backgroundColor: '#00b4db' },
+  primaryText: { color: '#0b1f2a', fontSize: 16, fontWeight: '700' },
   quiet: { backgroundColor: 'transparent' },
   quietText: { color: '#e0e0ee', fontSize: 16, fontWeight: '600' },
 });

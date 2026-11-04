@@ -1138,7 +1138,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 <Icon
                   name={(active && section.iconOn) || section.icon}
                   size={24}
-                  color={themeColor(active ? '#c2184b' : '#666')}
+                  color={themeColor(active ? '#006f8a' : '#666')}
                 />
               </View>
               <Text style={active ? styles.bottomLabelActive : styles.bottomLabel}>{section.label}</Text>
@@ -1514,7 +1514,7 @@ const styles = themed(StyleSheet.create({
   tabBar: { flexDirection: 'row', backgroundColor: '#f5f5f5' },
   tabBarHidden: { height: 0, overflow: 'hidden' },
   tabItem: { flex: 1, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
-  tabActive: { color: '#c2184b', fontWeight: '700' },
+  tabActive: { color: '#006f8a', fontWeight: '700' },
   tabInactive: { color: '#666' },
   body: { flex: 1, backgroundColor: '#fff' },
   tabPane: { flex: 1 },
@@ -1525,7 +1525,7 @@ const styles = themed(StyleSheet.create({
   bottomIconPill: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 16 },
   bottomIconPillActive: { backgroundColor: '#fde2e2' },
   bottomLabel: { color: '#666', fontSize: 12, marginTop: 2 },
-  bottomLabelActive: { color: '#c2184b', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  bottomLabelActive: { color: '#006f8a', fontSize: 12, fontWeight: '700', marginTop: 2 },
   settingsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

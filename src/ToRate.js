@@ -147,7 +147,7 @@ const styles = themed(
     rowText: { flex: 1 },
     rowTitle: { fontSize: 14, fontWeight: '600', color: '#222' },
     rowMeta: { fontSize: 12, color: '#666', marginTop: 2 },
-    rateText: { color: '#e94560', fontWeight: '700', fontSize: 14 },
+    rateText: { color: '#006f8a', fontWeight: '700', fontSize: 14 },
     skip: { paddingHorizontal: 4 },
     skipText: { color: '#666', fontSize: 14 },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },

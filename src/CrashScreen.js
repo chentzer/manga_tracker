@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
   box: { flex: 1, backgroundColor: '#0f0f1e', borderRadius: 8, padding: 12 },
   error: { color: '#ffb4bf', fontSize: 12, fontFamily: 'monospace' },
   row: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  button: { flex: 1, minHeight: 48, borderRadius: 24, backgroundColor: '#d62f4b', alignItems: 'center', justifyContent: 'center' },
+  button: { flex: 1, minHeight: 48, borderRadius: 24, backgroundColor: '#006f8a', alignItems: 'center', justifyContent: 'center' },
   secondary: { backgroundColor: '#1d1f20' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

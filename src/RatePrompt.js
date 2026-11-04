@@ -73,7 +73,7 @@ const styles = themed(
     scoreNumber: { fontSize: 16, fontWeight: '700', color: '#1d1f20', minWidth: 22 },
     scoreLabel: { flex: 1, fontSize: 14, color: '#555' },
     scoreTextCurrent: { color: '#fff' },
-    action: { alignItems: 'center', paddingVertical: 12, marginTop: 10, borderRadius: 8, backgroundColor: '#e3ecfa' },
+    action: { alignItems: 'center', paddingVertical: 12, marginTop: 10, borderRadius: 8, backgroundColor: '#e0f6fb' },
     actionText: { color: '#1d1f20', fontSize: 16, fontWeight: '600' },
     close: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
     closeText: { color: '#666', fontSize: 16 },

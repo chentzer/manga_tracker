@@ -1730,13 +1730,13 @@ const styles = themed(StyleSheet.create({
     gap: 8,
   },
   manualButton: {
-    backgroundColor: '#d62f4b',
+    backgroundColor: '#00b4db',
     borderRadius: 8,
     paddingHorizontal: 14,
     minHeight: 34,
     justifyContent: 'center',
   },
-  manualButtonText: { color: '#fff', fontWeight: '600' },
+  manualButtonText: { color: '#0b1f2a', fontWeight: '600' },
   manualInput: {
     flex: 1,
     minHeight: 34,
@@ -1765,7 +1765,7 @@ const styles = themed(StyleSheet.create({
   siteMenuRow: { paddingVertical: 10, paddingHorizontal: 14 },
   siteMenuRowGap: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a3a5e' },
   siteMenuText: { color: '#fff', fontSize: 16 },
-  siteMenuTextCurrent: { color: '#e94560', fontWeight: '700' },
+  siteMenuTextCurrent: { color: '#f9ca24', fontWeight: '700' },
   siteMenuDomain: { color: '#8892b0', fontSize: 12, marginTop: 2 },
   viewInLibraryButton: {
     backgroundColor: '#1a7a4c',
@@ -1821,7 +1821,7 @@ const styles = themed(StyleSheet.create({
     paddingBottom: 12,
   },
   logTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  logClose: { color: '#e94560', fontSize: 14, fontWeight: '600' },
+  logClose: { color: '#00b4db', fontSize: 14, fontWeight: '600' },
   logScroll: { flex: 1, paddingHorizontal: 16 },
   logLine: {
     color: '#ddd',

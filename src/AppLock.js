@@ -167,7 +167,7 @@ export default function AppLock({ children }) {
   if (locked) {
     return (
       <SafeAreaView style={styles.container}>
-        <Icon name="lock" size={56} color="#e94560" style={styles.icon} />
+        <Icon name="lock" size={56} color="#00b4db" style={styles.icon} />
         <Text style={styles.title}>AniManga Tracker Locked</Text>
         {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
         <TouchableOpacity
@@ -207,19 +207,19 @@ const styles = StyleSheet.create({
   icon: { marginBottom: 16 },
   title: { color: '#fff', fontSize: 22, fontWeight: '700', marginBottom: 12 },
   status: {
-    color: '#f5a623',
+    color: '#f9ca24',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 18,
   },
   button: {
-    backgroundColor: '#d62f4b',
+    backgroundColor: '#00b4db',
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 12,
   },
-  buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  buttonText: { color: '#0b1f2a', fontWeight: '700', fontSize: 16 },
   skipButton: { marginTop: 20, padding: 8 },
   skipButtonText: { color: '#888', fontSize: 14, textDecorationLine: 'underline' },
 });
