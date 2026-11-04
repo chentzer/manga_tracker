@@ -12,19 +12,20 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-google-signin/google-signin": "^16.1.5",
-    "expo": "~57.0.25",
+    "expo": "~57.0.31",
     "expo-constants": "~57.0.20",
     "expo-crypto": "~57.0.3",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
     "expo-keep-awake": "~57.0.2",
     "expo-linking": "~57.0.11",
     "expo-local-authentication": "~57.0.3",
     "expo-media-library": "~57.0.5",
-    "expo-network": "~57.0.2",
+    "expo-network": "~57.0.3",
     "expo-screen-capture": "~57.0.3",
     "expo-share-intent": "^8.0.0",
-    "expo-sharing": "~57.0.23",
+    "expo-sharing": "~57.0.24",
     "expo-sqlite": "~57.0.3",
     "pako": "^2.1.0",
     "react": "19.2.3",
@@ -37,8 +38,5 @@
     "@babel/core": "^7.24.0",
     "babel-preset-expo": "~57.0.0"
   },
-  "private": true,
-  "overrides": {
-    "expo-font": "~57.0.4"
-  }
+  "private": true
 }
