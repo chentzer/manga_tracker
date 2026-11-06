@@ -813,6 +813,16 @@ export function deleteEntry(sourceId, mediaType) {
   db.runSync('DELETE FROM entries WHERE source_id = ? AND media_type = ?', [sourceId, mediaType]);
 }
 
+// Moves an entry to its right type, under its id there. The entries_sync_rekey
+// trigger records the old one's removal for Drive; the cover goes up again
+// into the new type's folder.
+export function moveEntry(sourceId, fromType, toId, toType) {
+  db.runSync(
+    "UPDATE entries SET source_id = ?, media_type = ?, sync_status = 'pending' WHERE source_id = ? AND media_type = ?",
+    [toId, toType, sourceId, fromType]
+  );
+}
+
 // Wipes every recorded entry. Used by the "Clear All" action in the
 // library — callers are responsible for confirming with the user first
 // and for cleaning up local image files, since this only touches the DB.

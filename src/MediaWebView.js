@@ -27,6 +27,7 @@ import {
   markSynced,
   markSyncFailed,
   fillMissingEntryFields,
+  moveEntry,
 } from './db';
 import { BOOK_TYPES, otherTabId, siteId } from './mediaTypes';
 import { showToast } from './toast';
@@ -325,6 +326,8 @@ export function getTabSites(config) {
 // 18+ titles you chose not to add (`type:code`), so they aren't asked
 // about again on every page until the app restarts.
 const declinedAdult = new Set();
+// Titles whose page was read this run to see if they're in the right type.
+const typeChecked = new Set();
 
 // Index into `sites` of the site `url` is on, or -1.
 function siteIndexFor(sites, url) {
@@ -341,15 +344,19 @@ function siteIndexFor(sites, url) {
 // component doesn't need to care which kind of type it's dealing with:
 // resolves which source (if any) a given URL belongs to, returning
 // { source, match } or null.
-// Where a page's title is saved: under the type the page says it is, unless
-// it's already saved under this tab.
+// Where a page's title belongs: under the type the page says it is. One
+// already saved under this tab moves there, unless that type has it too.
 function entryPlace(config, sourceId, pageUrl, bookType) {
   const type = String(bookType || '').toLowerCase();
-  const moves =
-    BOOK_TYPES.includes(type) && BOOK_TYPES.includes(config.key) && type !== config.key && !getEntry(sourceId, config.key);
-  return moves
-    ? { entryType: type, entryId: otherTabId(sourceId, pageUrl) }
-    : { entryType: config.key, entryId: sourceId };
+  const stay = { entryType: config.key, entryId: sourceId };
+  if (!BOOK_TYPES.includes(type) || !BOOK_TYPES.includes(config.key) || type === config.key) return stay;
+  const entryId = otherTabId(sourceId, pageUrl);
+  if (getEntry(sourceId, config.key)) {
+    if (getEntry(entryId, type)) return stay;
+    moveEntry(sourceId, config.key, entryId, type);
+    maybeBackupLibraryToDrive();
+  }
+  return { entryType: type, entryId };
 }
 
 function resolveSource(config, url) {
@@ -850,9 +857,11 @@ const MediaWebView = forwardRef(function MediaWebView({
       if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
         setCurrentEntryKey(`${existing.media_type}:${existing.source_id}`);
+        const checkType = !!otherType && existing.media_type === config.key && !typeChecked.has(sourceId);
+        if (checkType) typeChecked.add(sourceId);
         missingDetails(existing).then((missing) => {
-          if (!missing.length || pendingSourceId.current || inFlightSourceIds.current.has(sourceId)) return;
-          logDebug(`${sourceId} is missing its ${missing.join(', ')} — reading the page for it.`);
+          if ((!missing.length && !checkType) || pendingSourceId.current || inFlightSourceIds.current.has(sourceId)) return;
+          logDebug(`${sourceId}: reading the page for its ${[...missing, ...(checkType ? ['type'] : [])].join(', ')}.`);
           inFlightSourceIds.current.add(sourceId);
           pendingSourceId.current = sourceId;
           pendingPageUrl.current = url;

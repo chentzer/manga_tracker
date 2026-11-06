@@ -1106,9 +1106,9 @@ saved yet goes under Manga.
 
 Where a page says what the title is, a new one is saved as that: a manhwa
 found on a Manga site goes in the Manhwa library, and a manga on a Manhwa
-site in the Manga library. Manhua stays under the tab you found it in, and
-a title already saved stays where it is. Opening it from the Library goes
-back to the tab that has its site.
+site in the Manga library. A title already saved in the wrong one moves
+the next time you open its page. Manhua stays under the tab you found it
+in. Opening it from the Library goes back to the tab that has its site.
 
 Cards (bottom right of the page): **Added "…"**, **Chapter 12 recorded:
 …**, or on a page that's already saved a short **Already in AniManga
