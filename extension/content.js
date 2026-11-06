@@ -209,6 +209,7 @@
       };
       const result = await send(details);
       console.debug(`[AniManga Tracker] saved at ${ms()}`);
+      if (result && result.placed) Object.assign(context, result.placed);
       show(result, context, () => send({ ...details, allowAdult: true }));
     } finally {
       reading.delete(url);

@@ -1104,6 +1104,12 @@ A site that's in two tabs (the Manga tab's second site, also in Manhwa's
 list) records under the tab the title is already saved in; a title not
 saved yet goes under Manga.
 
+Where a page says what the title is, a new one is saved as that: a manhwa
+found on a Manga site goes in the Manhwa library, and a manga on a Manhwa
+site in the Manga library. Manhua stays under the tab you found it in, and
+a title already saved stays where it is. Opening it from the Library goes
+back to the tab that has its site.
+
 Cards (bottom right of the page): **Added "…"**, **Chapter 12 recorded:
 …**, or on a page that's already saved a short **Already in AniManga
 Tracker: …**, so you can tell the extension saw it. If writing to Drive

@@ -28,6 +28,7 @@ import {
   markSyncFailed,
   fillMissingEntryFields,
 } from './db';
+import { BOOK_TYPES, otherTabId, siteId } from './mediaTypes';
 import { showToast } from './toast';
 import { isImportedSourceId, refreshFromAniList, findImportedByTitle, isAdultTitle } from './malList';
 import { todayString } from './malFormat';
@@ -340,6 +341,17 @@ function siteIndexFor(sites, url) {
 // component doesn't need to care which kind of type it's dealing with:
 // resolves which source (if any) a given URL belongs to, returning
 // { source, match } or null.
+// Where a page's title is saved: under the type the page says it is, unless
+// it's already saved under this tab.
+function entryPlace(config, sourceId, pageUrl, bookType) {
+  const type = String(bookType || '').toLowerCase();
+  const moves =
+    BOOK_TYPES.includes(type) && BOOK_TYPES.includes(config.key) && type !== config.key && !getEntry(sourceId, config.key);
+  return moves
+    ? { entryType: type, entryId: otherTabId(sourceId, pageUrl) }
+    : { entryType: config.key, entryId: sourceId };
+}
+
 function resolveSource(config, url) {
   if (config.sources) {
     for (const source of config.sources) {
@@ -758,7 +770,7 @@ const MediaWebView = forwardRef(function MediaWebView({
                 const target = repeating
                   ? { ...entry, progress: current, last_progress_url: entry.last_progress_url }
                   : entry;
-                openInThisTab(config.openNext(target, nextOne), entry.source_id);
+                openInThisTab(config.openNext(target, nextOne), siteId(entry.source_id));
               },
             },
             { text: `Record ${number}`, onPress: () => recordProgress(entry, number, url) },
@@ -828,14 +840,16 @@ const MediaWebView = forwardRef(function MediaWebView({
       // Already recorded entries are skipped, except ones still missing
       // their MyAnimeList id (recorded before it was read), cover, title or
       // author: the page is read again just to fill those in.
-      const existing = getEntry(sourceId, config.key);
+      const otherType = BOOK_TYPES.includes(config.key) && BOOK_TYPES.find((t) => t !== config.key);
+      const existing =
+        getEntry(sourceId, config.key) || (otherType ? getEntry(otherTabId(sourceId, url), otherType) : null);
       const extractProgress = source.extractProgress || config.extractProgress;
       const chapter = existing && extractProgress ? extractProgress(match, url) : null;
       if (existing && extractProgress) applyProgress(existing, chapter, url);
       if (existing) learnTotal(existing, chapter);
       if (existing && existing.mal_id) {
         logDebug(`Matched ${sourceId} — already recorded, skipping.`);
-        setCurrentEntryKey(`${config.key}:${sourceId}`);
+        setCurrentEntryKey(`${existing.media_type}:${existing.source_id}`);
         missingDetails(existing).then((missing) => {
           if (!missing.length || pendingSourceId.current || inFlightSourceIds.current.has(sourceId)) return;
           logDebug(`${sourceId} is missing its ${missing.join(', ')} — reading the page for it.`);
@@ -848,7 +862,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         });
         return;
       }
-      setCurrentEntryKey(existing ? `${config.key}:${sourceId}` : null);
+      setCurrentEntryKey(existing ? `${existing.media_type}:${existing.source_id}` : null);
       if (inFlightSourceIds.current.has(sourceId)) {
         // The page loaded again before its reader answered — a bot check
         // reloads the same address once you're through, which ends the
@@ -1247,8 +1261,9 @@ const MediaWebView = forwardRef(function MediaWebView({
           return;
         }
         sourceId = String(payload.sourceId);
-        const known = getEntry(sourceId, config.key);
-        if (ownsPending) setCurrentEntryKey(known ? `${config.key}:${sourceId}` : null);
+        const place = entryPlace(config, sourceId, pageUrl, payload.bookType);
+        const known = getEntry(place.entryId, place.entryType);
+        if (ownsPending) setCurrentEntryKey(known ? `${place.entryType}:${place.entryId}` : null);
         if (known && payload.progress != null) applyProgress(known, payload.progress, pageUrl);
         // A series page's own answer was already marked in flight by
         // checkUrlAndExtract; anything else for that series is a duplicate.
@@ -1266,16 +1281,18 @@ const MediaWebView = forwardRef(function MediaWebView({
         return;
       }
       if (!sourceId) return;
+      const { entryType, entryId } = entryPlace(config, sourceId, pageUrl, payload.bookType);
 
       // Re-check right before writing, closing the gap between the
       // nav-state check and this async step. An existing entry only gets
       // what it was missing filled in: its MyAnimeList id, cover, title or
       // author (fillMissingEntryFields — nothing already there changes).
-      const existing = getEntry(sourceId, config.key);
+      const existing = getEntry(entryId, entryType);
       if (existing) {
+        if (ownsPending) setCurrentEntryKey(`${entryType}:${entryId}`);
         if (!existing.mal_id && payload.malId) {
-          setMalId(sourceId, config.key, payload.malId);
-          refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
+          setMalId(entryId, entryType, payload.malId);
+          refreshFromAniList([getEntry(entryId, entryType)]).catch(() => {});
           logDebug(`Matched ${sourceId} — already recorded, added its MyAnimeList id ${payload.malId}.`);
           maybeBackupLibraryToDrive();
         } else {
@@ -1285,12 +1302,12 @@ const MediaWebView = forwardRef(function MediaWebView({
           let coverPath = null;
           if (payload.imageUrl && !(await hasCoverFile(existing))) {
             try {
-              coverPath = await downloadImageLocally(payload.imageUrl, config.key, sourceId, pageUrl);
+              coverPath = await downloadImageLocally(payload.imageUrl, entryType, entryId, pageUrl);
             } catch (err) {
               logDebug(`Cover download FAILED for ${sourceId}: ${err.message}`);
             }
           }
-          const filled = fillMissingEntryFields(sourceId, config.key, {
+          const filled = fillMissingEntryFields(entryId, entryType, {
             title: payload.title,
             altTitle: payload.altTitle,
             author: payload.author,
@@ -1305,15 +1322,15 @@ const MediaWebView = forwardRef(function MediaWebView({
             markDriveSyncDeferred();
           } else if (coverPath && isSignedInToGoogle) {
             try {
-              const updated = getEntry(sourceId, config.key);
+              const updated = getEntry(entryId, entryType);
               const driveFileId = await uploadImageToDrive(
-                config.key,
-                buildDriveDisplayName(sourceId, updated && updated.title),
+                entryType,
+                buildDriveDisplayName(entryId, updated && updated.title),
                 coverPath
               );
-              markSynced(sourceId, config.key, driveFileId);
+              markSynced(entryId, entryType, driveFileId);
             } catch (err) {
-              markSyncFailed(sourceId, config.key);
+              markSyncFailed(entryId, entryType);
             }
           }
         }
@@ -1340,10 +1357,10 @@ const MediaWebView = forwardRef(function MediaWebView({
       // if you say so; a "Don't add" isn't asked again until the app
       // restarts.
       if (
-        !(payload.malId && getEntryByMalId(payload.malId, config.key)) &&
-        (await isAdultTitle({ malId: payload.malId, mediaType: config.key, genres: payload.genre }))
+        !(payload.malId && getEntryByMalId(payload.malId, entryType)) &&
+        (await isAdultTitle({ malId: payload.malId, mediaType: entryType, genres: payload.genre }))
       ) {
-        const adultKey = `${config.key}:${sourceId}`;
+        const adultKey = `${entryType}:${entryId}`;
         const add =
           !declinedAdult.has(adultKey) &&
           (await new Promise((resolve) =>
@@ -1375,9 +1392,9 @@ const MediaWebView = forwardRef(function MediaWebView({
       let localPath = null;
       if (payload.imageUrl) {
         try {
-          localPath = await downloadImageLocally(payload.imageUrl, config.key, sourceId, pageUrl);
+          localPath = await downloadImageLocally(payload.imageUrl, entryType, entryId, pageUrl);
         } catch (err) {
-          console.warn(`Thumbnail download failed for ${config.key} ${sourceId}:`, err.message);
+          console.warn(`Thumbnail download failed for ${entryType} ${sourceId}:`, err.message);
           logDebug(`Thumbnail download FAILED for ${sourceId}: ${err.message}`);
         }
       }
@@ -1388,13 +1405,13 @@ const MediaWebView = forwardRef(function MediaWebView({
         // tags, rather than being recorded a second time.
         // Found by MAL id, or — on sites without MAL links — by title
         // (imported titles carry AniList's English title too).
-        const byMalId = payload.malId ? getEntryByMalId(payload.malId, config.key) : null;
+        const byMalId = payload.malId ? getEntryByMalId(payload.malId, entryType) : null;
         const imported =
           byMalId && isImportedSourceId(byMalId.source_id)
             ? byMalId
-            : findImportedByTitle(config.key, [payload.title, payload.altTitle]);
+            : findImportedByTitle(entryType, [payload.title, payload.altTitle]);
         const details = {
-          sourceId,
+          sourceId: entryId,
           title: payload.title,
           altTitle: payload.altTitle,
           author: payload.author,
@@ -1403,17 +1420,17 @@ const MediaWebView = forwardRef(function MediaWebView({
         };
         const adopted = !!(imported && isImportedSourceId(imported.source_id));
         if (adopted) {
-          adoptImportedEntry(imported.source_id, config.key, details);
+          adoptImportedEntry(imported.source_id, entryType, details);
           // The cover downloaded at import is replaced by the site's.
           if (localPath && imported.local_image_path && imported.local_image_path !== localPath) {
             FileSystem.deleteAsync(imported.local_image_path, { idempotent: true }).catch(() => {});
           }
           logDebug(`Linked ${sourceId} to "${imported.title}" from your imported MyAnimeList list.`);
         } else {
-          insertEntry({ ...details, mediaType: config.key, malId: payload.malId });
+          insertEntry({ ...details, mediaType: entryType, malId: payload.malId });
         }
         // Its total episodes/chapters (and genres) from AniList, if known.
-        if (payload.malId) refreshFromAniList([getEntry(sourceId, config.key)]).catch(() => {});
+        if (payload.malId) refreshFromAniList([getEntry(entryId, entryType)]).catch(() => {});
         // Recorded from an episode page: that's progress too.
         const resolvedPage = resolveSource(config, pageUrl);
         const extractProgress = resolvedPage && (resolvedPage.source.extractProgress || config.extractProgress);
@@ -1421,12 +1438,12 @@ const MediaWebView = forwardRef(function MediaWebView({
         if (pageProgress != null) {
           // A series new to the library has no record to be ahead of; one
           // imported from MAL does.
-          applyProgress(getEntry(sourceId, config.key), pageProgress, pageUrl, { fresh: !adopted });
+          applyProgress(getEntry(entryId, entryType), pageProgress, pageUrl, { fresh: !adopted });
         }
         logDebug(
           `Saved ${sourceId}${localPath ? ' with thumbnail' : ' (no thumbnail)'} — title: ${payload.title || '(none)'}${payload.altTitle ? ` — alt title: ${payload.altTitle}` : ''} — author: ${payload.author || '(none)'}`
         );
-        if (ownsPending) setCurrentEntryKey(`${config.key}:${sourceId}`);
+        if (ownsPending) setCurrentEntryKey(`${entryType}:${entryId}`);
         maybeBackupLibraryToDrive().then((result) => {
           if (!result.attempted) return; // Drive not connected — nothing to report
           logDebug(
@@ -1444,18 +1461,18 @@ const MediaWebView = forwardRef(function MediaWebView({
         } else if (isSignedInToGoogle && localPath) {
           try {
             const driveFileId = await uploadImageToDrive(
-              config.key,
-              buildDriveDisplayName(sourceId, payload.title),
+              entryType,
+              buildDriveDisplayName(entryId, payload.title),
               localPath
             );
-            markSynced(sourceId, config.key, driveFileId);
+            markSynced(entryId, entryType, driveFileId);
           } catch (err) {
             // Local save already succeeded; cloud sync can be retried later.
-            markSyncFailed(sourceId, config.key);
+            markSyncFailed(entryId, entryType);
           }
         }
       } catch (err) {
-        console.warn(`Failed to save ${config.key} entry:`, err);
+        console.warn(`Failed to save ${entryType} entry:`, err);
         logDebug(`FAILED to save ${sourceId}: ${err.message}`);
       } finally {
         clearPending();

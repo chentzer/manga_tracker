@@ -67,8 +67,13 @@ self.MT_TYPES = [
           }
           var malLink = doc.querySelector('a[href*="myanimelist.net/manga/"]');
           var malMatch = malLink && malLink.getAttribute('href').match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+          // Its type is one of the small labels above the title.
+          var bookType = [].slice.call(doc.querySelectorAll('span.font-mono')).map(function(el) {
+            return el.textContent.trim();
+          }).filter(function(label) { return /^(manga|manhwa)$/i.test(label); })[0] || null;
           send({
             sourceId: seriesId,
+            bookType: bookType,
             sourceUrl: seriesUrl,
             pageUrl: pageUrl,
             progress: progress,
@@ -145,8 +150,10 @@ self.MT_TYPES = [
 
         var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
         var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+        var typeBadge = document.querySelector('[class*="badge--type"]');
 
         window.ReactNativeWebView.postMessage(JSON.stringify({
+          bookType: typeBadge ? typeBadge.textContent.trim() : null,
           imageUrl: imageUrl,
           title: title,
           altTitle: altTitle,
@@ -199,6 +206,7 @@ self.MT_TYPES = [
           var mal = a.links && a.links.mal;
           send({
             sourceId: id,
+            bookType: { ja: 'manga', ko: 'manhwa' }[a.originalLanguage] || null,
             sourceUrl: seriesUrl,
             pageUrl: pageUrl,
             progress: progress,
@@ -262,6 +270,7 @@ self.MT_TYPES = [
       if (!series) return send({ title: document.title || null });
       var og = doc.querySelector('meta[property="og:image"]');
       send({
+        bookType: series.type || null,
         imageUrl: og ? og.content : null,
         title: series.title || null,
         altTitle: list(series.altTitles),
@@ -390,6 +399,7 @@ self.MT_TYPES = [
       }
       var genres = [].slice.call(doc.querySelectorAll('a[href*="genres="]')).map(text).filter(Boolean);
       send({
+        bookType: row(doc, 'type'),
         imageUrl: image,
         title: text(h1) || document.title || null,
         altTitle: alt,
@@ -452,8 +462,10 @@ self.MT_TYPES = [
 
         var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
         var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+        var typeBadge = document.querySelector('[class*="badge--type"]');
 
         window.ReactNativeWebView.postMessage(JSON.stringify({
+          bookType: typeBadge ? typeBadge.textContent.trim() : null,
           imageUrl: imageUrl,
           title: title,
           altTitle: altTitle,

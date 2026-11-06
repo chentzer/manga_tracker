@@ -460,9 +460,20 @@ const outcome = (result) => (result.question ? 'asked' : 'answered');
 async function handleDetails({ mediaType, sourceId, url, progress, payload, image, fromPage, allowAdult }, tabId) {
   if (!(await isConnected())) return { notConnected: true };
   const t = timer(`details ${mediaType} ${sourceId}`);
-  const rows = await view(mediaType);
+  let rows = await view(mediaType);
   t.mark('library');
-  const existing = findRow(rows, sourceId);
+  let existing = findRow(rows, sourceId);
+  // The page says it's the other kind of book (a manhwa on a Manga site):
+  // saved under that type, as the app does (otherTabId in mediaTypes.js).
+  const bookType = String(payload.bookType || '').toLowerCase();
+  const BOOK_TYPES = ['manga', 'manhwa'];
+  const moved = !existing && BOOK_TYPES.includes(bookType) && BOOK_TYPES.includes(mediaType) && bookType !== mediaType;
+  if (moved) {
+    mediaType = bookType;
+    if (/^\d+$/.test(sourceId)) sourceId = `${new URL(url).hostname.replace(/^www\./, '')}-${sourceId}`;
+    rows = await view(mediaType);
+    existing = findRow(rows, sourceId);
+  }
   if (existing) {
     await rememberTab(tabId, mediaType, sourceId);
     const title = existing.title || sourceId;
@@ -483,7 +494,7 @@ async function handleDetails({ mediaType, sourceId, url, progress, payload, imag
     // they're told here.
     if (fromPage && !result.question) result = seenToast(mediaType, title, progress, recorded);
     t.end(outcome(result));
-    return result;
+    return moved ? { ...result, placed: { mediaType, sourceId } } : result;
   }
   if (payload.skip) {
     t.end('skipped');

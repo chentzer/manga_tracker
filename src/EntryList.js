@@ -31,7 +31,7 @@ import {
   setSetting,
 } from './db';
 import { showToast } from './toast';
-import { MEDIA_TYPES, MEDIA_TYPE_LIST } from './mediaTypes';
+import { MEDIA_TYPES, MEDIA_TYPE_LIST, siteId, siteTab } from './mediaTypes';
 import { maybeBackupLibraryToDrive } from './backup';
 import { isImportedSourceId, refreshFromAniList } from './malList';
 import ToRateModal, { findToRate, skipRating } from './ToRate';
@@ -2095,7 +2095,8 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
   // doesn't exist yet).
   const handleOpenNext = useCallback(
     (item) => {
-      const config = MEDIA_TYPES[item.media_type];
+      const tab = siteTab(item);
+      const config = MEDIA_TYPES[tab];
       const title = item.title || item.alt_title || item.source_id;
       // Sites mostly list English titles, which imported titles keep as
       // their alternate title.
@@ -2127,14 +2128,14 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
       // From the beginning (Start reading, or a reread that hasn't started):
       // the site's first chapter, whatever it's numbered (openFirst).
       if (n === 1 && config.openFirst) {
-        onOpenInTab?.(item.media_type, { ...config.openFirst(item), expect: item.source_id });
+        onOpenInTab?.(tab, { ...config.openFirst(item), expect: siteId(item.source_id) });
         return;
       }
       // A reread that hasn't started (types without openFirst) opens the
       // first one from the series page, not via the last one's Next button.
       const target =
         repeating && !item.repeat_progress ? { ...item, progress: 0, last_progress_url: null } : item;
-      onOpenInTab?.(item.media_type, { ...config.openNext(target, n), expect: item.source_id });
+      onOpenInTab?.(tab, { ...config.openNext(target, n), expect: siteId(item.source_id) });
     },
     [onOpenInTab, handleUpdate]
   );
@@ -3045,7 +3046,7 @@ export default function EntryList({ active = true, reloadKey = 0, focusKey = nul
         onOpenNext={handleOpenNext}
         onOpenUrl={(item) => {
           setSelectedKey(null);
-          onOpenInTab?.(item.media_type, { url: item.source_url });
+          onOpenInTab?.(siteTab(item), { url: item.source_url });
         }}
         onSetRepeating={handleSetRepeating}
         onPickAgain={randomOpened === 'entry' ? pickRandomNow : null}

@@ -64,7 +64,7 @@ import {
   startNetworkWatch,
   takeDriveSyncDeferred,
 } from './src/dataSaver';
-import { MEDIA_TYPE_LIST } from './src/mediaTypes';
+import { MEDIA_TYPE_LIST, siteTab } from './src/mediaTypes';
 import { getHoldToSave, setHoldToSave } from './src/imageHold';
 import { loadCustomSites, saveCustomSites, domainOf, withCustomSites } from './src/customSites';
 import AppLock, { useAppLockSetting } from './src/AppLock';
@@ -651,7 +651,7 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
       if (isImportedSourceId(entry.source_id) || !entry.source_url) {
         searchInTab(entry.media_type, entry.alt_title || entry.title);
       } else {
-        handleOpenInTab(entry.media_type, { url: entry.source_url });
+        handleOpenInTab(siteTab(entry), { url: entry.source_url });
         if (Platform.OS === 'android') {
           showToast(`In your Library: ${entry.title || entry.alt_title}`);
         }

@@ -40,6 +40,33 @@ function hostPattern(url) {
   return hostOf(url).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// A page can say its title is the other kind of book (bookType in
+// extractMetadataJs's payload, e.g. a manhwa on a Manga site): it's saved
+// under that type, and keeps opening on the tab that has its site (siteTab).
+export const BOOK_TYPES = ['manga', 'manhwa'];
+
+// One site's plain number could be another's title under that type, so a
+// number saved under the other type carries its site's name.
+export function otherTabId(id, pageUrl) {
+  return /^\d+$/.test(id) ? `${hostOf(pageUrl)}-${id}` : id;
+}
+
+// The site's own id back from otherTabId, for building its addresses.
+export function siteId(id) {
+  const match = /^[a-z0-9.-]+\.[a-z]+-(\d+)$/i.exec(id);
+  return match ? match[1] : id;
+}
+
+// The tab to open an entry in: its own, unless only another tab has its site.
+export function siteTab(entry) {
+  const host = hostOf(entry.source_url || '');
+  const hasSite = (type) =>
+    [hostOf(type.startUrl || ''), ...(type.extraSources || []).map((s) => s.domain)].includes(host);
+  if (hasSite(MEDIA_TYPES[entry.media_type])) return entry.media_type;
+  const other = MEDIA_TYPE_LIST.find(hasSite);
+  return other ? other.key : entry.media_type;
+}
+
 const MANGA_HOST = hostOf(MANGA_SITE_URL);
 const MANGA_HOST_2 = hostOf(MANGA_SITE_2_URL);
 const MANGA_HOST_3 = hostOf(MANGA_SITE_3_URL);
@@ -310,8 +337,13 @@ const SERIES_BY_PAGE_READER_JS = `
           }
           var malLink = doc.querySelector('a[href*="myanimelist.net/manga/"]');
           var malMatch = malLink && malLink.getAttribute('href').match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+          // Its type is one of the small labels above the title.
+          var bookType = [].slice.call(doc.querySelectorAll('span.font-mono')).map(function(el) {
+            return el.textContent.trim();
+          }).filter(function(label) { return /^(manga|manhwa)$/i.test(label); })[0] || null;
           send({
             sourceId: seriesId,
+            bookType: bookType,
             sourceUrl: seriesUrl,
             pageUrl: pageUrl,
             progress: progress,
@@ -381,6 +413,7 @@ const UUID_API_READER_JS = `
           var mal = a.links && a.links.mal;
           send({
             sourceId: id,
+            bookType: { ja: 'manga', ko: 'manhwa' }[a.originalLanguage] || null,
             sourceUrl: seriesUrl,
             pageUrl: pageUrl,
             progress: progress,
@@ -436,6 +469,7 @@ const NEXT_SERIES_READER_JS = `
       if (!series) return send({ title: document.title || null });
       var og = doc.querySelector('meta[property="og:image"]');
       send({
+        bookType: series.type || null,
         imageUrl: og ? og.content : null,
         title: series.title || null,
         altTitle: list(series.altTitles),
@@ -553,6 +587,7 @@ const SLUG_SERIES_READER_JS = `
       }
       var genres = [].slice.call(doc.querySelectorAll('a[href*="genres="]')).map(text).filter(Boolean);
       send({
+        bookType: row(doc, 'type'),
         imageUrl: image,
         title: text(h1) || document.title || null,
         altTitle: alt,
@@ -736,8 +771,10 @@ const MANGA_SITE_2_SOURCE = {
 
         var malLink = document.querySelector('a[href*="myanimelist.net/manga/"]');
         var malMatch = malLink && malLink.href.match(/myanimelist[.]net[/]manga[/]([0-9]+)/);
+        var typeBadge = document.querySelector('[class*="badge--type"]');
 
         window.ReactNativeWebView.postMessage(JSON.stringify({
+          bookType: typeBadge ? typeBadge.textContent.trim() : null,
           imageUrl: imageUrl,
           title: title,
           altTitle: altTitle,
@@ -802,7 +839,7 @@ export const MEDIA_TYPES = {
       }
       // Third site: its series page, to pick the chapter there.
       if (hostOf(entry.source_url || '') === MANGA_HOST_3) return { url: `${MANGA_SITE_3_URL}/title/${entry.source_id}` };
-      return { url: `${MANGA_SITE_URL}/manga/${entry.source_id}`, checkJs: openChapterFromRowsJs(n) };
+      return { url: `${MANGA_SITE_URL}/manga/${siteId(entry.source_id)}`, checkJs: openChapterFromRowsJs(n) };
     },
     // For titles not opened on a site yet (imported from MAL).
     // "Start reading" / "Reread" (Library): the series page's first chapter.
@@ -810,7 +847,7 @@ export const MEDIA_TYPES = {
       const host = hostOf(entry.source_url || '');
       if (host === MANGA_HOST_3) return { url: `${MANGA_SITE_3_URL}/title/${entry.source_id}` };
       return {
-        url: host === MANGA_HOST_2 ? `${MANGA_SITE_2_URL}/title/${entry.source_id}` : `${MANGA_SITE_URL}/manga/${entry.source_id}`,
+        url: host === MANGA_HOST_2 ? `${MANGA_SITE_2_URL}/title/${entry.source_id}` : `${MANGA_SITE_URL}/manga/${siteId(entry.source_id)}`,
         checkJs: OPEN_FIRST_CHAPTER_JS,
       };
     },
@@ -919,7 +956,7 @@ export const MEDIA_TYPES = {
     // "Start reading" / "Reread" (Library): the series page's first chapter.
     openFirst: (entry) => {
       const host = hostOf(entry.source_url || '');
-      let url = `${MANHWA_SITE_URL}/series/${entry.source_id}`;
+      let url = `${MANHWA_SITE_URL}/series/${siteId(entry.source_id)}`;
       if (host === MANHWA_HOST_2) url = `${MANHWA_SITE_2_URL}/serie/${entry.source_id}/`;
       if (host === MANHWA_HOST_3) url = `${MANHWA_SITE_3_URL}/series/${encodeURIComponent(entry.source_id)}`;
       if (host === MANGA_HOST_2) url = `${MANGA_SITE_2_URL}/title/${entry.source_id}`;
