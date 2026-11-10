@@ -584,6 +584,19 @@ const MediaWebView = forwardRef(function MediaWebView({
   // The score question shown when a title is finished (RatePrompt.js):
   // { entry, heading, message, score, complete, closeLabel } or null.
   const [ratePrompt, setRatePrompt] = useState(null);
+  // Opening the last chapter isn't reading it: its question waits until you
+  // leave that page ({ prompt, url }).
+  const rateOnLeave = useRef(null);
+  const askOnLeave = useCallback((prompt, url) => {
+    if (url) rateOnLeave.current = { prompt, url };
+    else setRatePrompt(prompt);
+  }, []);
+  const askIfLeft = useCallback((url) => {
+    const pending = rateOnLeave.current;
+    if (!pending || url === pending.url) return;
+    rateOnLeave.current = null;
+    setRatePrompt(pending.prompt);
+  }, []);
 
   // Records `number` as how far you are: the rewatch/reread position while
   // repeating a completed series, otherwise its progress (setting it to
@@ -623,28 +636,28 @@ const MediaWebView = forwardRef(function MediaWebView({
       const reachesEnd = !repeating && entry.total > 0 && number >= entry.total && entry.read_status !== 'read';
       if (finishesRepeat) {
         const verb = config.key === 'anime' ? 'rewatching' : 'rereading';
-        setRatePrompt({
+        askOnLeave({
           entry,
           heading: `Finished ${verb}`,
           message: `"${title}": ${verb} counted. Times ${config.key === 'anime' ? 'rewatched' : 'reread'}: ${
             fields.times_repeated
           }. Still the same score?`,
           score: entry.score,
-        });
+        }, url);
       } else if (reachesEnd) {
-        setRatePrompt({
+        askOnLeave({
           entry,
           complete: true,
           heading: `Finished "${title}"?`,
           message: `That's the last ${unit} (${number} of ${entry.total}). Rate it to mark it Completed:`,
           score: entry.score,
           closeLabel: 'Not yet',
-        });
+        }, url);
       } else if (!repeating && config.promptForVolumes && fields.progress) {
         promptVolumes(entry, number);
       }
     },
-    [config, logDebug, promptVolumes]
+    [config, logDebug, promptVolumes, askOnLeave]
   );
 
   // A series still coming out has no total, so the app can't tell when it
@@ -668,18 +681,18 @@ const MediaWebView = forwardRef(function MediaWebView({
           maybeBackupLibraryToDrive();
           if (chapter === null || chapter === undefined || now.read_status === 'read' || chapter < now.total) return;
           const unit = config.key === 'anime' ? 'episode' : 'chapter';
-          setRatePrompt({
+          askOnLeave({
             entry: now,
             complete: true,
             heading: `Finished "${now.title || now.source_id}"?`,
             message: `It has ended — ${unit} ${now.total} is the last. Rate it to mark it Completed:`,
             score: now.score,
             closeLabel: 'Not yet',
-          });
+          }, currentUrlRef.current);
         })
         .catch(() => {});
     },
-    [config, logDebug]
+    [config, logDebug, askOnLeave]
   );
 
   // A score from RatePrompt; with `complete`, the title is also marked
@@ -904,6 +917,7 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   const handleNavigationStateChange = useCallback(
     (navState) => {
+      askIfLeft(navState.url);
       currentUrlRef.current = navState.url;
       setPageUrl(navState.url);
       // Kept by App.js, so Data saver can reopen this page after unloading.
@@ -922,7 +936,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         setTimeout(() => webviewRef.current?.injectJavaScript(pending.js), 500);
       }
     },
-    [checkUrlAndExtract]
+    [checkUrlAndExtract, askIfLeft]
   );
 
   // A new "Watch next" / "Read next" request while this tab is open (one
@@ -1143,6 +1157,7 @@ const MediaWebView = forwardRef(function MediaWebView({
       }
 
       if (payload.type === 'urlchange') {
+        askIfLeft(payload.url);
         checkUrlAndExtract(payload.url);
         return;
       }
