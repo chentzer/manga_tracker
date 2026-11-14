@@ -1119,6 +1119,7 @@ function DetailModal({
   const tags = parseTags(entry.tags);
   const words = progressWords(entry.media_type);
   const update = (fields) => onUpdate(entry, fields);
+  const setSuper = (on) => update(on ? { read_status: 'want_to_read', priority: 'high' } : { priority: 'low' });
   return (
     <Modal visible={!!entry} animationType="slide" onRequestClose={onClose} transparent>
       <KeyboardPad style={styles.detailOverlay}>
@@ -1136,18 +1137,36 @@ function DetailModal({
             {entry.alt_title ? <Text style={styles.detailAltTitle}>{entry.alt_title}</Text> : null}
             {entry.author ? <Text style={styles.detailAuthor}>{entry.author}</Text> : null}
 
-            <TouchableOpacity
-              style={[styles.heartButton, entry.favorite ? styles.heartButtonActive : null]}
-              onPress={() => onToggleFavorite(entry)}
-            >
-              <Text style={[styles.heartButtonText, entry.favorite ? styles.heartButtonTextActive : null]}>
-                {entry.favorite ? (
-                  <><Icon name="heart" size={16} /> Favourite</>
-                ) : (
-                  <><Icon name="heartOutline" size={16} /> Add to Favourites</>
-                )}
-              </Text>
-            </TouchableOpacity>
+            {/* One mark at the top: Super Want while it's still wanted,
+                Favourite after (or when it's already a favourite, so that
+                can be undone). */}
+            {entry.read_status === 'want_to_read' && !entry.favorite ? (
+              <TouchableOpacity
+                style={[styles.heartButton, styles.superButton, isSuperWant(entry) ? styles.superButtonActive : null]}
+                onPress={() => setSuper(!isSuperWant(entry))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSuperWant(entry) }}
+              >
+                <Text style={[styles.superButtonText, isSuperWant(entry) ? styles.superButtonTextActive : null]}>
+                  <Icon name="super_want" size={16} /> Super {getReadStatusLabels(entry.media_type).want}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.heartButton, entry.favorite ? styles.heartButtonActive : null]}
+                onPress={() => onToggleFavorite(entry)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !!entry.favorite }}
+              >
+                <Text style={[styles.heartButtonText, entry.favorite ? styles.heartButtonTextActive : null]}>
+                  {entry.favorite ? (
+                    <><Icon name="heart" size={16} /> Favourite</>
+                  ) : (
+                    <><Icon name="heartOutline" size={16} /> Add to Favourites</>
+                  )}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Type</Text>
@@ -1213,7 +1232,7 @@ function DetailModal({
               superWant={isSuperWant(entry)}
               mediaType={entry.media_type}
               onChange={(status) => onSetReadStatus(entry, status)}
-              onSuper={(on) => update(on ? { read_status: 'want_to_read', priority: 'high' } : { priority: 'low' })}
+              onSuper={setSuper}
             />
 
             <Text style={styles.detailLabel}>Score</Text>
@@ -3486,6 +3505,8 @@ const styles = themed(StyleSheet.create({
   peopleSearchRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 8 },
   heartButton: {
     marginTop: 12,
+    minHeight: 48,
+    justifyContent: 'center',
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
@@ -3495,6 +3516,10 @@ const styles = themed(StyleSheet.create({
   heartButtonActive: { backgroundColor: '#ff6b6b' },
   heartButtonText: { color: '#c92a2a', fontWeight: '700', fontSize: 16 },
   heartButtonTextActive: { color: '#0b1f2a' },
+  superButton: { borderColor: '#b3261e' },
+  superButtonActive: { backgroundColor: '#b3261e' },
+  superButtonText: { color: '#b3261e', fontWeight: '700', fontSize: 16 },
+  superButtonTextActive: { color: '#fff' },
   progressBadge: { fontSize: 12, color: '#555' },
   scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   scoreChip: {

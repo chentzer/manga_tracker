@@ -103,7 +103,7 @@ export function tourSteps({ siteTab, siteTabs }) {
     {
       tab: 'library',
       target: 'library.list',
-      text: 'Tap a title for its details and Continue (double-tap Want to there for Super Want; tap its cover, then pinch to zoom). Hold one to select several, and pull down to sync.',
+      text: 'Tap a title for its details and Continue (Super Want at the top while it's Want to, Favourite once read; tap its cover, then pinch to zoom). Hold one to select several, and pull down to sync.',
     },
     { tab: 'browser', target: 'bottom.browser', text: 'Browser opens any website. Nothing here is saved to the Library.' },
     { tab: 'browser', target: 'browser.home', optional: true, text: "Home lists every tab's sites (each opens in its tab) and your bookmarks." },

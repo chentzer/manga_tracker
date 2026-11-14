@@ -900,7 +900,10 @@ so nothing renders blank.
   `readStatusLabels` in `mediaTypes.js`; tap the same one again to
   unset; double-tap **Want to** for **Super Want to Read / Watch**, a red
   🔥 chip and row badge for the ones you want most — stored as Want to
-  with priority High, and one tap takes it back to plain Want to; in
+  with priority High, and one tap takes it back to plain Want to. The
+  top of the details has one mark: a **Super Want** button while the
+  entry is Want to, and **Favourite** once it's read (or already a
+  favourite); in
   the list a ♥ favourite has a thin pink outline and a Super Want a red
   one, pink top and left with red bottom and right when it's both), a tag
   editor (add/remove free-text tags), and a **Delete** button that removes just that one entry and
