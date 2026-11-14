@@ -435,6 +435,7 @@ const MediaWebView = forwardRef(function MediaWebView({
   onPageChange,
   openRequest = null,
   onOpenHandled,
+  barsHidden = false,
   blockAds = true,
   holdToSave = true,
 }, ref) {
@@ -1545,8 +1546,10 @@ const MediaWebView = forwardRef(function MediaWebView({
 
   return (
     <View style={styles.container}>
+      {/* The site and search bars hide with the app's tab bars
+          (barsHidden, from App.js) while the page sits still. */}
       {siteButton || showSearchBox ? (
-        <View style={styles.manualBar}>
+        <View style={[styles.manualBar, barsHidden && styles.barsHidden]}>
           {siteButton}
           {showSearchBox ? (
             <>
@@ -1569,7 +1572,7 @@ const MediaWebView = forwardRef(function MediaWebView({
         </View>
       ) : null}
       {titleSearch ? (
-        <View style={styles.titleSearchBar}>
+        <View style={[styles.titleSearchBar, barsHidden && styles.barsHidden]}>
           <Text style={styles.titleSearchText} numberOfLines={1}>
             “{titleSearch.query}” on {searchSites[titleSearch.index].name}
             {searchSites.length > 1 ? ` (${titleSearch.index + 1}/${searchSites.length})` : ''}
@@ -1808,6 +1811,7 @@ const styles = themed(StyleSheet.create({
   siteMenuText: { color: '#fff', fontSize: 16 },
   siteMenuTextCurrent: { color: '#f9ca24', fontWeight: '700' },
   siteMenuDomain: { color: '#8892b0', fontSize: 12, marginTop: 2 },
+  barsHidden: { height: 0, paddingTop: 0, paddingBottom: 0, borderWidth: 0, overflow: 'hidden' },
   viewInLibraryButton: {
     backgroundColor: '#1a7a4c',
     paddingVertical: 8,

@@ -921,7 +921,9 @@ so nothing renders blank.
   Browse returns to the last one), **Library**, **Browser** and
   **Notepad**. On browsing tabs both bars hide once the page hasn't
   scrolled for 3 seconds (`TAB_BAR_HIDE_MS`; taps on the page don't
-  count), and come back when you pull down at the very top of the page. Pulling
+  count), and come back when you pull down at the very top of the page.
+  The tab's own site list / search bar and the Next › bar hide with them,
+  but stay up while the keyboard is open. Pulling
   further (about 160px) and letting go reloads the page, with a small
   "Pull to refresh" / "Release to refresh" pill at the top meanwhile
   (Android's web view has no pull-to-refresh of its own). At the very

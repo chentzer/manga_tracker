@@ -76,7 +76,7 @@ export function tourSteps({ siteTab, siteTabs }) {
     {
       tab: siteTab,
       target: 'header.title',
-      text: 'The bars hide while you read. Tap the app name, or pull down at the top of the page, to bring them back.',
+      text: 'The bars, including the site and search bar, hide while you read. Tap the app name, or pull down at the top of the page, to bring them back.',
     },
     ...(anime
       ? [

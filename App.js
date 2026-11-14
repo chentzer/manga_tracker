@@ -1076,6 +1076,8 @@ function AppContent({ notepadRefreshKey, shareSearch, onShareSearchDone }) {
                 }}
                 openRequest={openRequests[mediaConfig.key] || null}
                 onOpenHandled={() => clearOpenRequest(mediaConfig.key)}
+                // Not while typing in its search box.
+                barsHidden={tabBarHidden && !keyboardOpen}
               />
             ) : null}
           </View>
